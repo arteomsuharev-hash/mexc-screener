@@ -1152,7 +1152,7 @@ body {
 .ochart-pill.active { background: rgba(30,128,255,.16); border-color: rgba(30,128,255,.5); color: #fff; box-shadow: 0 0 12px -4px rgba(30,128,255,.55); }
 .ochart-indicators-wrap { position: relative; flex-shrink: 0; }
 .ochart-indicators-panel {
-  display: none; position: absolute; top: calc(100% + 6px); left: 0; z-index: 20; min-width: 168px;
+  display: none; position: fixed; z-index: 200; min-width: 168px;
   padding: 6px; border-radius: 9px; background: #1a1f2e; border: 1px solid var(--border-color);
   box-shadow: 0 12px 28px -8px rgba(0,0,0,.55);
 }
