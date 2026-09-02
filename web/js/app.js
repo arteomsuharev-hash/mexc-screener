@@ -4535,16 +4535,6 @@ function renderFinresTradesTab(el, animate) {
         '</div>' +
         '<div class="finres-coin-search-results" id="finresCoinSearchResults"></div>' +
       '</div>' +
-      // Массовое добавление списком — для тех, кто торгует активно и не помнит все тикеры по одному
-      // (см. её комментарий у обработчика ниже): MEXC не отдаёт список всех когда-либо торговавшихся
-      // монет ни через один эндпоинт (проверено — /api/v3/account не возвращает нулевые остатки),
-      // поэтому единственный источник полной картины — сам пользователь (например, страница "История
-      // ордеров" на сайте/в приложении MEXC, где сделки видны сразу по всем парам).
-      '<button type="button" class="finres-bulk-add-toggle" id="finresBulkAddToggle"><i class="ri-list-check-2"></i> Добавить список монет разом</button>' +
-      '<div class="finres-bulk-add-box" id="finresBulkAddBox" hidden>' +
-        '<textarea id="finresBulkAddInput" placeholder="Вставьте тикеры через запятую, пробел или с новой строки: BONER, MX, PEPE..."></textarea>' +
-        '<div class="finres-bulk-add-row"><button type="button" class="finres-bulk-add-submit" id="finresBulkAddSubmit">Добавить</button><span id="finresBulkAddResult"></span></div>' +
-      '</div>' +
       '<div class="balance-journal-subtitle">Из текущего баланса</div>' +
       '<div class="balance-journal-chips">' + (journalChipsHtml || '<span class="balance-journal-empty">Сейчас в балансе нет монет с известной USDT-парой — найдите нужную через поиск выше.</span>') + '</div>' +
     '</div>' +
@@ -4552,7 +4542,6 @@ function renderFinresTradesTab(el, animate) {
     '</div>';
 
   wireFinresCoinSearch();
-  wireFinresBulkAdd();
 
   finresTradesLimit = 25;
   const wasLoaded = finresRealized && !finresRealized.loading;
@@ -4635,56 +4624,6 @@ function wireFinresCoinSearch() {
     // Новый символ мог добавиться впервые — форсируем перезагрузку кэша реализованных сделок, чтобы
     // он тут же попал в таблицу/статистику, а не ждал следующего естественного обновления.
     finresLoadRealized(true).then(function (data) {
-      if (finresTab === 'trades') renderFinresTradesTable(data);
-    });
-  });
-}
-
-// Массовое добавление тикеров списком — см. комментарий у самой кнопки в разметке выше: MEXC не
-// отдаёт список всех когда-либо торговавшихся монет ни одним эндпоинтом, единственный способ узнать
-// полную картину — сам пользователь (например, скопировать список пар со страницы "История ордеров"
-// на сайте/в приложении MEXC, где сделки видны сразу по всем монетам, а не по одной, как через API).
-// Принимает произвольный текст: "BTC", "BTC/USDT", "BTCUSDT" — всё сводится к одному активу.
-function parseBulkTickerList(raw) {
-  const tokens = raw.split(/[\s,;]+/).map(function (s) { return s.trim().toUpperCase(); }).filter(Boolean);
-  const assets = [];
-  const seen = {};
-  tokens.forEach(function (t) {
-    let asset = t.replace(/\/?USDT$/, '').replace(/\//g, '');
-    if (!asset || STABLECOINS.hasOwnProperty(asset) || seen[asset]) return;
-    seen[asset] = true;
-    assets.push(asset);
-  });
-  return assets;
-}
-function wireFinresBulkAdd() {
-  const toggleBtn = document.getElementById('finresBulkAddToggle');
-  const box = document.getElementById('finresBulkAddBox');
-  const input = document.getElementById('finresBulkAddInput');
-  const submitBtn = document.getElementById('finresBulkAddSubmit');
-  const resultEl = document.getElementById('finresBulkAddResult');
-  if (!toggleBtn || !box || !input || !submitBtn) return;
-  toggleBtn.addEventListener('click', function () {
-    box.hidden = !box.hidden;
-    if (!box.hidden) input.focus();
-  });
-  submitBtn.addEventListener('click', function () {
-    const assets = parseBulkTickerList(input.value);
-    if (!assets.length) { resultEl.textContent = 'Ничего не распознано.'; return; }
-    let added = 0;
-    assets.forEach(function (asset) {
-      const c = coinMap.get(asset + '/USDT');
-      rememberSymbol(asset, (c && c.raw) || assetToRawSymbol(asset));
-      added++;
-    });
-    resultEl.textContent = 'Добавлено ' + added + ' — обновляю статистику...';
-    input.value = '';
-    // Как и при добавлении по одной через поиск — форсируем перезагрузку кэша, чтобы новые монеты
-    // (часть из которых наверняка окажется "Invalid symbol", если тикер введён с ошибкой — это
-    // безопасно пропускается тем же путём, что и всегда, см. finresLoadRealizedCore) сразу попали
-    // в таблицу/статистику, а не ждали следующего естественного обновления.
-    finresLoadRealized(true).then(function (data) {
-      resultEl.textContent = 'Готово: ' + added + ' монет добавлено, всего сделок найдено ' + data.trades.length + '.';
       if (finresTab === 'trades') renderFinresTradesTable(data);
     });
   });
