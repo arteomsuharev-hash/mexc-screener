@@ -1,5 +1,9 @@
 @echo off
-chcp 65001 >nul
+if not "%~1"=="/RELAUNCHED" (
+  chcp 65001 >nul
+  "%~f0" /RELAUNCHED
+  exit /b
+)
 setlocal
 cd /d "%~dp0"
 
