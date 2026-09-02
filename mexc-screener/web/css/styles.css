@@ -311,8 +311,20 @@ body {
 .finres-card {
   border: 1px solid var(--border-color); border-radius: 11px; padding: 16px 18px; background: var(--bg-secondary);
   display: flex; flex-direction: column; transition: border-color .18s ease, box-shadow .18s ease;
+  animation: statTileIn .4s cubic-bezier(.16,1,.3,1) both;
 }
+.finres-chart-row.no-anim .finres-card { animation: none; }
+.finres-chart-row .finres-card:nth-child(1) { animation-delay: 60ms; }
+.finres-chart-row .finres-card:nth-child(2) { animation-delay: 130ms; }
 .finres-card:hover { border-color: rgba(255,255,255,.14); box-shadow: 0 8px 24px -16px rgba(0,0,0,.55); }
+/* Графики внутри карточки "дорисовываются" отдельно от появления самой карточки — сначала карточка
+   проявляется (анимация выше), потом содержимое "выезжает" слева направо (clip-path), как будто
+   линия/донат рисуется сама. Класс вешается в JS сразу после отрисовки canvas (drawPnlChart/
+   drawDonutChart), см. renderFinresOverviewContent и соседние renderFinres*Tab. */
+@keyframes chartWipeIn { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+.chart-draw-in { animation: chartWipeIn .55s cubic-bezier(.4,0,.2,1) both; animation-delay: .2s; }
+@keyframes donutRevealIn { from { opacity: 0; transform: scale(.75) rotate(-50deg); } to { opacity: 1; transform: scale(1) rotate(0); } }
+.donut-reveal-in { animation: donutRevealIn .6s cubic-bezier(.34,1.4,.64,1) both; animation-delay: .18s; }
 .finres-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 8px; }
 .finres-card-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
 .finres-card-select {
@@ -329,7 +341,12 @@ body {
 .finres-donut-center-value.small { font-size: 15px; }
 .finres-donut-center-label { font-size: 10.5px; color: var(--text-muted); margin-top: 2px; }
 .finres-donut-legend { display: flex; flex-direction: column; gap: 8px; }
-.finres-donut-legend-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.finres-donut-legend-row {
+  display: flex; align-items: center; gap: 8px; font-size: 12px;
+  animation: statTileIn .35s cubic-bezier(.16,1,.3,1) both; animation-delay: .5s;
+}
+.finres-donut-legend-row:nth-child(2) { animation-delay: .58s; }
+.finres-chart-row.no-anim .finres-donut-legend-row { animation: none; }
 .finres-donut-legend-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 .finres-donut-legend-label { color: var(--text-secondary); }
 .finres-donut-legend-value { margin-left: auto; font-family: var(--font-mono); font-weight: 700; color: var(--text-primary); }

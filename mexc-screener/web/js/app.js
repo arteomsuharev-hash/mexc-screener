@@ -4980,7 +4980,7 @@ function renderFinresOverviewContent(el, data, animate) {
     '</div>' +
     finresStaleErrorBannerHtml(data) +
     '<div class="finres-stats-grid' + (animate ? '' : ' no-anim') + '">' + statsHtml + '</div>' +
-    '<div class="finres-chart-row">' +
+    '<div class="finres-chart-row' + (animate ? '' : ' no-anim') + '">' +
       '<div class="finres-card">' +
         '<div class="finres-card-head"><span class="finres-card-title">Динамика PnL</span>' +
         '<select class="finres-card-select" disabled><option>Кумулятивный</option></select></div>' +
@@ -5009,11 +5009,15 @@ function renderFinresOverviewContent(el, data, animate) {
     pnlWrap.innerHTML = '<canvas id="finresPnlChart"></canvas><div class="chart-tip" id="finresPnlTip"></div>';
     drawPnlChart(document.getElementById('finresPnlChart'), cumPoints);
     wirePnlChartCrosshair(document.getElementById('finresPnlChart'), document.getElementById('finresPnlTip'));
+    if (animate) pnlWrap.classList.add('chart-draw-in');
   } else {
     pnlWrap.innerHTML = '<div class="balance-chart-empty">Недостаточно закрытых сделок за этот период для графика</div>';
   }
   const donutCanvas = document.getElementById('finresDonut');
-  if (donutCanvas) drawDonutChart(donutCanvas, donutSegments);
+  if (donutCanvas) {
+    drawDonutChart(donutCanvas, donutSegments);
+    if (animate) document.querySelector('.finres-donut-wrap').classList.add('donut-reveal-in');
+  }
 
   document.querySelectorAll('.finres-period-pill[data-finres-period]').forEach(function (pill) {
     pill.addEventListener('click', function () {
