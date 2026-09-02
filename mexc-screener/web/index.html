@@ -205,6 +205,9 @@
             <button id="copyForVatagaBtn" type="button" class="filter-btn" title="Скопировать тикер для вставки в поиск Vataga.terminal" style="display:none;">
               <i class="ri-file-copy-line"></i>
             </button>
+            <button id="toggleOwnChartBtn" type="button" class="filter-btn" style="display:none;white-space:nowrap;" title="Переключить между TradingView и своим графиком (по своим данным MEXC)">
+              <i class="ri-exchange-line"></i> <span id="toggleOwnChartLabel">Свой график</span>
+            </button>
           </div>
           <div class="coin-analysis-bar" id="coinAnalysisBar">
             <i class="ri-radar-line"></i>
@@ -585,6 +588,11 @@
 <!-- protobufjs: MEXC's public v3 WebSocket market streams are Protobuf-only (spot@public.miniTickers.v3.api.pb),
      the plain JSON channel names from the old wss://wbs.mexc.com/ws endpoint were retired 2025-08-04. -->
 <script src="https://cdn.jsdelivr.net/npm/protobufjs@8.8.0/dist/protobuf.min.js"></script>
+<!-- Официальный embeddable-виджет TradingView (не имеет отношения к попытке встроить саму
+     страницу mexc.com — та была заблокирована биржей, см. docs/14-round14.md; сам виджет TradingView
+     всегда был штатно встраиваемым и предназначен именно для этого). Если s3.tradingview.com
+     недоступен (нет сети/заблокирован), loadTradingView() в app.js тихо откатывается на свой график. -->
+<script src="https://s3.tradingview.com/tv.js"></script>
 <script src="js/core-utils.js"></script>
 <script src="js/app.js"></script>
 </body>

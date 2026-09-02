@@ -122,10 +122,12 @@ let activeStrategy = null; // null = обычные профили (Balanced/Agg
 // список остаётся отфильтрованным по правилам стратегии (match()), но порядок теперь по этому столбцу,
 // а не по score. Сбрасывается обратно в false при выборе новой стратегии в applyProfile().
 let strategyManualSort = false;
-// "Свой график" — канделстик-график по собственным данным MEXC (REST /api/v3/klines). См.
-// loadOwnChart()/drawCandleChart() ниже.
+// "Свой график" — резервный канделстик-график по собственным данным MEXC (REST /api/v3/klines),
+// используется когда TradingView не индексирует пару или недоступен. См. loadOwnChart()/
+// drawCandleChart() ниже; основной график — TradingView-виджет, см. loadTradingView() выше.
 // ПОПЫТКА встроить настоящую страницу mexc.com/exchange/... в iframe (round 14) была отклонена по
-// факту: MEXC технически ПОЗВОЛЯЕТ странице загрузиться в iframe (кросс-доменная навигация проходит
+// факту (и это НЕ то же самое, что TradingView-виджет ниже — тот всегда штатно встраиваемый):
+// MEXC технически ПОЗВОЛЯЕТ странице загрузиться в iframe (кросс-доменная навигация проходит
 // успешно, contentWindow.location.href исправно бросает SecurityError — то есть формальный признак
 // "встраивание не заблокировано" срабатывает), но сама страница определяет факт встраивания на
 // стороне JS (типовая защита от clickjacking — проверка window.top !== window.self) и показывает
@@ -133,10 +135,8 @@ let strategyManualSort = false;
 // пользователя из реального desktop-приложения. Прочитать ВИЗУАЛЬНОЕ содержимое кросс-доменного
 // iframe нельзя ни при каких обстоятельствах (в этом весь смысл iframe-изоляции в браузере) — то есть
 // отличить программно "загрузился настоящий график" от "загрузилась заглушка-отказ" невозможно
-// принципиально, не только в песочнице разработки. Поэтому график ВСЕГДА показываем через собственные
-// данные MEXC (см. loadExchangeChart ниже) — это те же реальные рыночные данные биржи, просто без её
-// фирменной вёрстки, — а ссылка "Открыть на бирже" ведёт на настоящую страницу mexc.com в обычной
-// вкладке браузера (НЕ в iframe), где эта защита не срабатывает и график открывается нормально.
+// принципиально, не только в песочнице разработки. Ссылка "Открыть на бирже" по-прежнему ведёт на
+// настоящую страницу mexc.com в обычной вкладке браузера (НЕ в iframe), где эта защита не срабатывает.
 let ownChartCandles = null;
 let ownChartRefreshTimer = null;
 // Инструменты рисования на "своём" графике: курсор/панорама, уровень, трендлиния, линейка.
@@ -789,13 +789,27 @@ function selectCoin(symbol, forceChart) {
   }
 }
 
-// Основной график — канделстик по собственным данным MEXC (REST /api/v3/klines, см. loadOwnChart
-// ниже). Раньше здесь была попытка встроить настоящую страницу mexc.com/exchange/... в iframe, но
-// она подтверждённо не работает (см. комментарий у объявления ownChartCandles выше): страница MEXC
-// технически загружается в iframe, но сама показывает заглушку вместо графика, обнаружив факт
-// встраивания — и это в принципе невозможно отличить программно от настоящего графика (кросс-доменный
-// iframe не даёт прочитать свой визуальный контент). Поэтому график всегда — свои данные MEXC, а
-// ссылка "Открыть на бирже" рядом ведёт на настоящую страницу mexc.com в обычной вкладке.
+// Основной график — TradingView-виджет по умолчанию (не встраивание САМОЙ страницы mexc.com — та
+// попытка была заблокирована биржей, см. docs/14-round14.md, — а официальный embeddable-виджет
+// TradingView, штатно предназначенный именно для встраивания). Не все пары MEXC индексируются
+// TradingView — для них (и вручную, кнопкой) доступен резервный canvas-график по собственным
+// данным MEXC (REST /api/v3/klines, см. loadOwnChart ниже). Выбор запоминается per-symbol
+// (ownChartModeMemory) — если для конкретной пары один раз переключились на свой график, при
+// следующем открытии этой же пары снова не будет попытки грузить заведомо неработающий TradingView.
+const CHART_MODE_KEY = 'mexc_chart_mode';
+let ownChartModeMemory = (function loadChartModeMemory() {
+  try {
+    const raw = localStorage.getItem(CHART_MODE_KEY);
+    const obj = raw ? JSON.parse(raw) : {};
+    return (obj && typeof obj === 'object' && !Array.isArray(obj)) ? obj : {};
+  } catch (e) { return {}; }
+})();
+function rememberChartMode(symbol, mode) {
+  if (mode === 'own') ownChartModeMemory[symbol] = 'own';
+  else delete ownChartModeMemory[symbol];
+  try { localStorage.setItem(CHART_MODE_KEY, JSON.stringify(ownChartModeMemory)); } catch (e) { /* переживём без сохранения между сессиями */ }
+}
+
 function loadExchangeChart(symbol, tf) {
   const container = document.getElementById('tv_chart_container');
   if (!container || !symbol) return;
@@ -809,10 +823,33 @@ function loadExchangeChart(symbol, tf) {
   }
   const copyBtn = document.getElementById('copyForVatagaBtn');
   if (copyBtn) copyBtn.style.display = 'inline-flex';
+  const toggleBtn = document.getElementById('toggleOwnChartBtn');
+  if (toggleBtn) toggleBtn.style.display = 'inline-flex';
+  updateToggleChartBtnLabel();
 
-  switchToOwnChartUi();
-  loadOwnChart();
-  startOwnChartAutoRefresh();
+  if (ownChartModeMemory[symbol] === 'own') {
+    switchToOwnChartUi();
+    loadOwnChart();
+    startOwnChartAutoRefresh();
+  } else {
+    loadTradingView(symbol, tf);
+  }
+}
+
+function updateToggleChartBtnLabel() {
+  const label = document.getElementById('toggleOwnChartLabel');
+  if (!label || !chartSymbol) return;
+  label.textContent = ownChartModeMemory[chartSymbol] === 'own' ? 'TradingView' : 'Свой график';
+}
+
+function switchToTradingViewUi() {
+  const tvBox = document.getElementById('tv_chart_container');
+  const ownBox = document.getElementById('ownChartContainer');
+  const ph = document.getElementById('chartPlaceholder');
+  stopOwnChartAutoRefresh();
+  if (ownBox) ownBox.style.display = 'none';
+  if (ph) ph.style.display = 'none';
+  if (tvBox) tvBox.style.display = 'block';
 }
 
 function switchToOwnChartUi() {
@@ -822,6 +859,54 @@ function switchToOwnChartUi() {
   if (tvBox) tvBox.style.display = 'none';
   if (ph) ph.style.display = 'none';
   if (ownBox) ownBox.style.display = 'flex';
+}
+
+// Официальный embeddable-виджет TradingView (s3.tradingview.com/tv.js, подключён в index.html).
+// Если библиотека не загрузилась (нет сети до TradingView, заблокирована и т.п.) или сам виджет
+// бросил исключение при инициализации — тихий откат на свой график, тот же принцип, что и раньше
+// у ручного переключения (нельзя программно узнать, что TradingView "не смог" именно НЕ НАЙТИ пару —
+// не путать со сбоем загрузки библиотеки, который проверяем явно).
+const TV_INTERVAL_MAP = { '1': '1', '5': '5', '15': '15', '30': '30', '60': '60', '240': '240', 'D': 'D' };
+function loadTradingView(symbol, tf) {
+  const container = document.getElementById('tv_chart_container');
+  if (!container) return;
+  if (typeof TradingView === 'undefined' || !TradingView.widget) {
+    logW('Chart', 'библиотека TradingView не загрузилась (нет сети или заблокирована) — откат на свой график');
+    rememberChartMode(symbol, 'own');
+    switchToOwnChartUi();
+    loadOwnChart();
+    startOwnChartAutoRefresh();
+    updateToggleChartBtnLabel();
+    return;
+  }
+  switchToTradingViewUi();
+  container.innerHTML = '';
+  try {
+    new TradingView.widget({
+      container_id: 'tv_chart_container',
+      autosize: true,
+      symbol: tvSymbol(symbol),
+      interval: TV_INTERVAL_MAP[tf] || '5',
+      timezone: 'Etc/UTC',
+      theme: darkTheme ? 'dark' : 'light',
+      style: '1',
+      locale: 'ru',
+      toolbar_bg: darkTheme ? '#131722' : '#f1f3f6',
+      enable_publishing: false,
+      hide_side_toolbar: false,
+      allow_symbol_change: false,
+      details: false,
+      hotlist: false,
+      calendar: false
+    });
+  } catch (e) {
+    logW('Chart', 'TradingView widget не смог инициализироваться (' + e.message + ') — откат на свой график');
+    rememberChartMode(symbol, 'own');
+    switchToOwnChartUi();
+    loadOwnChart();
+    startOwnChartAutoRefresh();
+    updateToggleChartBtnLabel();
+  }
 }
 
 // ------------------------------------------------------------------
@@ -5501,6 +5586,14 @@ document.querySelectorAll('.tf-btn').forEach(function (btn) {
     currentTF = this.dataset.tf;
     if (currentCoin) loadExchangeChart(currentCoin.symbol, currentTF);
   });
+});
+
+document.getElementById('toggleOwnChartBtn').addEventListener('click', function () {
+  if (!currentCoin) return;
+  const symbol = currentCoin.symbol;
+  const nowOwn = ownChartModeMemory[symbol] === 'own';
+  rememberChartMode(symbol, nowOwn ? 'tv' : 'own');
+  loadExchangeChart(symbol, currentTF);
 });
 
 document.querySelectorAll('#coinTable th[data-sort]').forEach(function (th) {
