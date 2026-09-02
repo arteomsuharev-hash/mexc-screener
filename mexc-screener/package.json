@@ -1,0 +1,12 @@
+{
+  "name": "mexc-screener-tests",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Dev-only tooling for web/js/app.js verify scripts (tests/). The shipped app itself has no build step and no runtime dependency on anything here.",
+  "scripts": {
+    "test": "node tests/run_all.js"
+  },
+  "devDependencies": {
+    "protobufjs": "^7.4.0"
+  }
+}
