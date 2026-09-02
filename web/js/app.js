@@ -6886,6 +6886,7 @@ function wireJournalTradesListClick() {
     if (!pair) return;
     journalChartState.selectedPairIndex = idx;
     journalChartState.view = centerJournalViewOnPair(journalChartState.candles, pair);
+    journalLastAutoCenterExitTime = pair.exitTime; // ручной выбор тоже "легализует" эту сделку как текущий центр
     const canvas = document.getElementById('journalChartCanvas');
     if (canvas) drawJournalChart(canvas, journalChartState.candles);
     renderJournalTradesList(journalChartState.pairs);
@@ -6968,6 +6969,11 @@ function wireJournalTfPills() {
 // СТАРАЯ позиция (пользователь сам кликнул по ней в списке) — выбор остаётся на месте, чтобы не
 // вырывать её из-под курса, пока разбираешься именно в ней.
 let journalRefreshTimer = null;
+// exitTime закрытой позиции, на которую последний раз автоцентрировали вид — используется ниже,
+// чтобы отличить "появилась НОВАЯ сделка" (стоит центрировать) от "та же последняя сделка, просто
+// обновились свечи" (центрировать НЕ надо — иначе ручной зум/панорама/растяжение осей пользователя
+// откатывались бы на каждый тик обновления, даже если он просто отвёл мышь ничего не поменяв).
+let journalLastAutoCenterExitTime = null;
 function startJournalLiveRefresh(asset, raw) {
   stopJournalLiveRefresh();
   journalRefreshTimer = setInterval(async function () {
@@ -6987,9 +6993,21 @@ function startJournalLiveRefresh(asset, raw) {
       journalChartState.candles = candles;
       journalChartState.trades = trades;
       journalChartState.pairs = pairs;
-      if (wasOnLatest || journalChartState.selectedPairIndex >= pairs.length) {
+      const newLatestPair = pairs.length ? pairs[pairs.length - 1] : null;
+      const isGenuinelyNewTrade = newLatestPair && newLatestPair.exitTime !== journalLastAutoCenterExitTime;
+      if (journalChartState.selectedPairIndex >= pairs.length) {
+        // Прежний индекс больше не существует (список сузился) — единственный случай, когда
+        // приходится пересинхронизировать выбор безусловно.
         journalChartState.selectedPairIndex = pairs.length - 1;
-        journalChartState.view = pairs.length ? centerJournalViewOnPair(candles, pairs[pairs.length - 1]) : null;
+        journalChartState.view = newLatestPair ? centerJournalViewOnPair(candles, newLatestPair) : null;
+        journalLastAutoCenterExitTime = newLatestPair && newLatestPair.exitTime;
+      } else if (wasOnLatest && isGenuinelyNewTrade) {
+        // Появилась НОВАЯ закрытая сделка, пока смотрели на последнюю — переезжаем на неё (то самое
+        // "живое" ощущение). Если же сделка та же самая, что и на прошлом тике — НЕ трогаем view,
+        // иначе любой ручной зум/панорама/растяжение осей откатывались бы каждые 8с сами по себе.
+        journalChartState.selectedPairIndex = pairs.length - 1;
+        journalChartState.view = centerJournalViewOnPair(candles, newLatestPair);
+        journalLastAutoCenterExitTime = newLatestPair.exitTime;
       }
       const canvas = document.getElementById('journalChartCanvas');
       if (canvas) drawJournalChart(canvas, candles);
@@ -7050,6 +7068,7 @@ async function openJournalForAsset(asset, raw) {
       asset: asset, raw: raw, tf: tf, candles: candles, trades: trades, pairs: pairs,
       selectedPairIndex: selectedPairIndex, view: centerJournalViewOnPair(candles, pairs[selectedPairIndex])
     };
+    journalLastAutoCenterExitTime = pairs[selectedPairIndex].exitTime;
     wireJournalChartInteractions(canvas);
     wireJournalTradesListClick();
     wireJournalTfPills();
@@ -7075,6 +7094,7 @@ function closeJournalModal() {
   journalChartPendingTrend = null;
   journalChartRulerDrag = null;
   journalPriceScaleMult = 1;
+  journalLastAutoCenterExitTime = null;
 }
 document.getElementById('journalModalClose').addEventListener('click', closeJournalModal);
 document.getElementById('journalModal').addEventListener('click', function (e) {
