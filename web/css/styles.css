@@ -353,6 +353,15 @@ body {
 .finres-result-badge { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 4px; letter-spacing: .03em; }
 .finres-result-badge.win { background: rgba(0,208,132,.14); color: var(--green); }
 .finres-result-badge.loss { background: rgba(255,77,90,.14); color: var(--red); }
+/* Долларовый PnL в журнале сделок — по фидбеку "нужно акцентировать внимание на доходе в долларах":
+   тот же приём, что у finres-result-badge (цветной чип, не просто текст), но крупнее и с моно-шрифтом —
+   это главное число строки, должно считываться быстрее, чем соседние колонки. */
+.finres-pnl-chip {
+  display: inline-block; font-size: 12.5px; font-weight: 800; font-family: var(--font-mono);
+  padding: 3px 9px; border-radius: 6px; letter-spacing: -.01em;
+}
+.finres-pnl-chip.up { background: rgba(0,208,132,.16); color: var(--green); box-shadow: 0 0 0 1px rgba(0,208,132,.25); }
+.finres-pnl-chip.down { background: rgba(255,77,90,.16); color: var(--red); box-shadow: 0 0 0 1px rgba(255,77,90,.25); }
 .finres-load-more { display: block; margin: 14px auto 4px; padding: 8px 22px; border-radius: 7px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-secondary); font-size: 12px; font-weight: 600; cursor: pointer; transition: border-color .15s, color .15s; }
 .finres-load-more:hover { border-color: rgba(255,255,255,.25); color: #fff; }
 
@@ -791,48 +800,45 @@ body {
 /* --- Баланс: календарь P&L по дням (редизайн раунда 9 — крупнее, читаемее, каждая ячейка своя
    видимая карточка вместо еле заметных цифр по пустому фону) --- */
 .balance-calendar-card {
-  border: 1px solid var(--border-color); border-radius: 12px; padding: 14px 16px; margin-bottom: 16px;
-  background: var(--bg-secondary); max-width: 460px;
+  border: 1px solid var(--border-color); border-radius: 12px; padding: 18px 20px; margin-bottom: 16px;
+  background: var(--bg-secondary); max-width: 640px;
 }
-.balance-calendar-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-.balance-calendar-title { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
+.balance-calendar-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 13px; }
+.balance-calendar-title { display: flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
 .balance-calendar-title i { color: var(--blue); }
-.balance-calendar-nav { display: flex; align-items: center; gap: 6px; }
+.balance-calendar-nav { display: flex; align-items: center; gap: 8px; }
 .balance-calendar-navbtn {
-  width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-card);
-  color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px;
+  width: 25px; height: 25px; border-radius: 7px; border: 1px solid var(--border-color); background: var(--bg-card);
+  color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 13px;
   transition: background .15s ease, color .15s ease, border-color .15s ease, transform .15s ease;
 }
 .balance-calendar-navbtn:hover { background: rgba(30,128,255,.12); color: #fff; border-color: var(--blue); transform: translateY(-1px); }
 .balance-calendar-navbtn:active { transform: translateY(0); }
-.balance-calendar-month { font-size: 11.5px; font-weight: 700; color: var(--text-primary); min-width: 98px; text-align: center; font-family: var(--font-mono); }
+.balance-calendar-month { font-size: 12.5px; font-weight: 700; color: var(--text-primary); min-width: 108px; text-align: center; font-family: var(--font-mono); }
 .balance-calendar-weekdays {
-  display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; font-size: 9px; color: var(--text-muted);
-  text-transform: uppercase; letter-spacing: .05em; margin-bottom: 5px; text-align: center; font-weight: 600;
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; font-size: 10px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; text-align: center; font-weight: 600;
 }
-.balance-calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
-/* Компактнее прежнего (было max-width:none/padding 18px20/gap 6/aspect 1÷.78) — по фидбеку "календарь
-   должен быть меньше и стильнее": фиксированная ширина карточки вместо растягивания на всю панель,
-   более плоские ячейки (больше похоже на настоящий compact-виджет трейд-журнала, чем на плитку),
-   меньше отступов. Лёгкое белое свечение по контуру в покое, усиливающееся при наведении — поверх
-   существующей up/down/today подсветки (box-shadow здесь не конфликтует с background/border-color
-   тех модификаторов). */
-.balcal-cell { aspect-ratio: 1 / 0.62; }
+.balance-calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+/* Гармоничный размер между "было слишком крупно" (round 12: aspect 1/.78, без max-width, крупный шрифт)
+   и "стало слишком мелко, цифры нечитаемы" (aspect 1/.62, max-width 460px, шрифт 9px/7.5px) — не самый
+   маленький и не самый большой вариант, с полноразмерным читаемым текстом в каждой ячейке. */
+.balcal-cell { aspect-ratio: 1 / 0.74; }
 .balcal-cell.empty { visibility: hidden; }
 .balcal-cell-inner {
-  height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
-  border-radius: 6px; background: var(--bg-card); border: 1px solid var(--border-color);
+  height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  border-radius: 8px; background: var(--bg-card); border: 1px solid var(--border-color);
   box-shadow: 0 0 0 1px rgba(255,255,255,.045);
   transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease;
 }
 .balcal-cell:not(.empty):hover .balcal-cell-inner {
   transform: translateY(-1px) scale(1.04); border-color: rgba(255,255,255,.26);
-  box-shadow: 0 0 0 1px rgba(255,255,255,.2), 0 5px 14px -8px rgba(0,0,0,.55), 0 0 10px -3px rgba(255,255,255,.16);
+  box-shadow: 0 0 0 1px rgba(255,255,255,.2), 0 6px 16px -9px rgba(0,0,0,.55), 0 0 12px -3px rgba(255,255,255,.16);
   z-index: 1; position: relative;
 }
 .balcal-cell.weekend .balcal-cell-inner { background: rgba(255,255,255,.025); }
-.balcal-daynum { font-size: 9px; color: var(--text-secondary); font-family: var(--font-mono); font-weight: 600; line-height: 1; }
-.balcal-amount { font-size: 7.5px; font-weight: 700; font-family: var(--font-mono); line-height: 1; }
+.balcal-daynum { font-size: 12.5px; color: var(--text-secondary); font-family: var(--font-mono); font-weight: 600; line-height: 1; }
+.balcal-amount { font-size: 10.5px; font-weight: 700; font-family: var(--font-mono); line-height: 1; }
 .balcal-cell-inner.no-data .balcal-daynum { color: var(--text-muted); font-weight: 400; }
 .balcal-cell-inner.future { background: transparent; border-style: dashed; border-color: rgba(255,255,255,.08); }
 .balcal-cell-inner.future .balcal-daynum { color: rgba(94,102,115,.5); font-weight: 400; }
@@ -907,10 +913,18 @@ body {
    рендера содержимого). */
 @keyframes journalModalIn { from { opacity: 0; transform: scale(.97) translateY(6px); } to { opacity: 1; transform: none; } }
 .journal-modal { animation: journalModalIn .22s cubic-bezier(.16,1,.3,1) both; }
+/* Визуальный объём — по фидбогу "добавить объёма карточке": более глубокая многослойная тень
+   (близкая контактная + дальняя рассеянная + едва заметное холодное свечение по контуру), плюс
+   тонкий градиентный бордер вместо плоской однотонной линии — читается как приподнятая над фоном
+   панель, а не плоский прямоугольник. */
 .journal-modal {
-  background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px;
+  background: var(--bg-card); border: 1px solid rgba(255,255,255,.1); border-radius: 14px;
   width: 920px; max-width: 94vw; height: 78vh; max-height: 720px; display: flex; flex-direction: column; overflow: hidden;
-  box-shadow: 0 24px 60px -20px rgba(0,0,0,.6);
+  box-shadow:
+    0 2px 0 rgba(255,255,255,.03) inset,
+    0 30px 70px -24px rgba(0,0,0,.7),
+    0 10px 28px -12px rgba(0,0,0,.5),
+    0 0 40px -16px rgba(30,128,255,.18);
 }
 .journal-modal-header {
   display: flex; align-items: center; justify-content: space-between; padding: 14px 18px;
@@ -926,7 +940,10 @@ body {
 }
 .journal-modal-close:hover { background: rgba(248,73,96,.12); color: var(--red); border-color: rgba(248,73,96,.3); transform: rotate(90deg); }
 .journal-modal-body { flex: 1; display: flex; min-height: 0; }
-.journal-chart-wrap { flex: 1; position: relative; min-width: 0; background: #131722; border-right: 1px solid var(--border-color); }
+.journal-chart-wrap {
+  flex: 1; position: relative; min-width: 0; border-right: 1px solid var(--border-color);
+  background: radial-gradient(120% 100% at 15% 0%, #17202e 0%, #131722 55%, #0f131a 100%);
+}
 #journalChartCanvas { width: 100%; height: 100%; display: block; }
 .journal-chart-empty {
   position: absolute; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column;
