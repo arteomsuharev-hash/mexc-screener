@@ -4354,6 +4354,34 @@ function finresStatPlaceholder(n) {
   return html;
 }
 
+// Собственно HTML 6 карточек — вынесено отдельно от renderFinresPnlStats ниже, чтобы её можно было
+// вызвать И синхронно (renderFinresPnlTab, если finresRealized уже есть в кэше — без "···"-заглушки
+// на каждое открытие вкладки, см. её же комментарий), И из настоящего async-обновления.
+function buildFinresPnlStatsHtml(data) {
+  function statCard(label, valueHtml, cls, subHtml) {
+    return '<div class="finres-stat-card' + (cls ? ' ' + cls : '') + '"><div class="finres-stat-label">' + label + '</div>' +
+      '<div class="finres-stat-value' + (cls ? ' ' + cls : '') + '">' + valueHtml + '</div>' +
+      (subHtml ? '<div class="finres-stat-sub ' + (cls || 'muted') + '">' + subHtml + '</div>' : '') + '</div>';
+  }
+  if (!data || !data.trades.length) {
+    return '<div class="finres-empty" style="grid-column:1/-1;padding:20px"><i class="ri-bar-chart-line"></i>' +
+      (data && data.error ? 'Не удалось загрузить часть истории сделок: ' + data.error : 'Реализованных сделок пока нет — статистика появится после первой закрытой позиции.') +
+      '</div>';
+  }
+  const filtered = finresFilterByPeriod(data.trades, FINRES_PNL_PERIOD_MAP[finresPnlPeriod] || 'all');
+  const agg = finresAggregate(filtered);
+  const stats = computeFinresTradeStats(filtered);
+  const pnlCls = agg.pnl >= 0 ? 'up' : 'down';
+  const avgPnl = agg.count ? agg.pnl / agg.count : 0;
+  const pf = !stats ? '—' : (stats.profitFactor === Infinity ? '∞' : stats.profitFactor.toFixed(2));
+  return statCard('Общий PnL', (agg.pnl >= 0 ? '+' : '-') + fmtUsd(Math.abs(agg.pnl)).slice(1), pnlCls, agg.count + ' сделок') +
+    statCard('Средний PnL', (avgPnl >= 0 ? '+' : '-') + fmtUsd(Math.abs(avgPnl)).slice(1), avgPnl >= 0 ? 'up' : 'down', 'на сделку') +
+    statCard('Лучший день', stats ? (stats.bestDay >= 0 ? '+' : '-') + fmtUsd(Math.abs(stats.bestDay)).slice(1) : '—', stats && stats.bestDay >= 0 ? 'up' : null, null) +
+    statCard('Худший день', stats ? (stats.worstDay >= 0 ? '+' : '-') + fmtUsd(Math.abs(stats.worstDay)).slice(1) : '—', stats && stats.worstDay < 0 ? 'down' : null, null) +
+    statCard('Profit Factor', pf, stats && stats.profitFactor >= 1.5 ? 'up' : (stats && stats.profitFactor < 1 ? 'down' : null), null) +
+    statCard('Винрейт', agg.winRate.toFixed(2) + '%', agg.winRate >= 50 ? 'up' : 'down', agg.winCount + '/' + agg.count);
+}
+
 // Компактная строка из 6 показателей по РЕАЛИЗОВАННЫМ сделкам (Общий/Средний PnL, Лучший/Худший
 // день, Profit Factor, Винрейт) над календарём вкладки "P&L" — использует тот же кэш
 // finresLoadRealized(), что и "Обзор", без дублирующих запросов к MEXC.
@@ -4364,30 +4392,7 @@ function renderFinresPnlStats(animate) {
     const grid = document.getElementById('finresPnlStatsGrid');
     if (!grid) return;
     grid.classList.toggle('no-anim', !animate);
-    function statCard(label, valueHtml, cls, subHtml) {
-      return '<div class="finres-stat-card' + (cls ? ' ' + cls : '') + '"><div class="finres-stat-label">' + label + '</div>' +
-        '<div class="finres-stat-value' + (cls ? ' ' + cls : '') + '">' + valueHtml + '</div>' +
-        (subHtml ? '<div class="finres-stat-sub ' + (cls || 'muted') + '">' + subHtml + '</div>' : '') + '</div>';
-    }
-    if (!data.trades.length) {
-      grid.innerHTML = '<div class="finres-empty" style="grid-column:1/-1;padding:20px"><i class="ri-bar-chart-line"></i>' +
-        (data.error ? 'Не удалось загрузить часть истории сделок: ' + data.error : 'Реализованных сделок пока нет — статистика появится после первой закрытой позиции.') +
-        '</div>';
-      return;
-    }
-    const filtered = finresFilterByPeriod(data.trades, FINRES_PNL_PERIOD_MAP[finresPnlPeriod] || 'all');
-    const agg = finresAggregate(filtered);
-    const stats = computeFinresTradeStats(filtered);
-    const pnlCls = agg.pnl >= 0 ? 'up' : 'down';
-    const avgPnl = agg.count ? agg.pnl / agg.count : 0;
-    const pf = !stats ? '—' : (stats.profitFactor === Infinity ? '∞' : stats.profitFactor.toFixed(2));
-    grid.innerHTML =
-      statCard('Общий PnL', (agg.pnl >= 0 ? '+' : '-') + fmtUsd(Math.abs(agg.pnl)).slice(1), pnlCls, agg.count + ' сделок') +
-      statCard('Средний PnL', (avgPnl >= 0 ? '+' : '-') + fmtUsd(Math.abs(avgPnl)).slice(1), avgPnl >= 0 ? 'up' : 'down', 'на сделку') +
-      statCard('Лучший день', stats ? (stats.bestDay >= 0 ? '+' : '-') + fmtUsd(Math.abs(stats.bestDay)).slice(1) : '—', stats && stats.bestDay >= 0 ? 'up' : null, null) +
-      statCard('Худший день', stats ? (stats.worstDay >= 0 ? '+' : '-') + fmtUsd(Math.abs(stats.worstDay)).slice(1) : '—', stats && stats.worstDay < 0 ? 'down' : null, null) +
-      statCard('Profit Factor', pf, stats && stats.profitFactor >= 1.5 ? 'up' : (stats && stats.profitFactor < 1 ? 'down' : null), null) +
-      statCard('Винрейт', agg.winRate.toFixed(2) + '%', agg.winRate >= 50 ? 'up' : 'down', agg.winCount + '/' + agg.count);
+    grid.innerHTML = buildFinresPnlStatsHtml(data);
   });
 }
 
@@ -4408,10 +4413,14 @@ function renderFinresPnlTab(el) {
     return '<span class="balance-period-pill' + (key === finresPnlPeriod ? ' active' : '') + '" data-period="' + key + '">' + BALANCE_PERIODS[key].label + '</span>';
   }).join('');
 
+  // Если сделки уже загружены в этой сессии (переключились на другую вкладку и обратно) — рисуем
+  // их сразу, без "···"-заглушки: та секунду-другую и так почти всегда пустая трата времени (кэш
+  // finresLoadRealized свежий), но ощущалась как "P&L снова грузится с нуля" при каждом заходе.
+  const cachedStatsHtml = (finresRealized && !finresRealized.loading) ? buildFinresPnlStatsHtml(finresRealized) : finresStatPlaceholder(6);
   el.innerHTML =
     '<div class="finres-tab-body finres-anim-in">' +
     '<div class="finres-head"><h2>P&amp;L</h2></div>' +
-    '<div class="finres-stats-grid" id="finresPnlStatsGrid">' + finresStatPlaceholder(6) + '</div>' +
+    '<div class="finres-stats-grid" id="finresPnlStatsGrid">' + cachedStatsHtml + '</div>' +
     '<div class="balance-calendar-card">' +
       '<div class="balance-calendar-header">' +
         '<div class="balance-calendar-title"><i class="ri-calendar-2-line"></i> Календарь P&amp;L</div>' +
