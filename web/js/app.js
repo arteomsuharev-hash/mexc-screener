@@ -3988,19 +3988,23 @@ function animateNumberText(el, from, to, duration, formatFn) {
   requestAnimationFrame(tick);
 }
 
-// Строит HTML сетки из 4 статистических плиток над списком активов: изменение стоимости портфеля
-// за 24ч/7д/30д (независимо от выбранного пилюльного периода ниже) + количество учитываемых активов.
-function buildBalanceStatsGridHtml(hist, total, assetCount, dustCount) {
-  const tiles = ['day', 'week', 'month'].map(function (key) {
-    const meta = BALANCE_PERIODS[key];
-    const d = computeBalanceDelta(hist, total, key);
-    const cls = !d ? 'flat' : (d.abs > 0.005 ? 'up' : (d.abs < -0.005 ? 'down' : 'flat'));
+// Строит HTML сетки из 4 статистических плиток над списком активов: 1Д/1Н/1М — реализованный PnL по
+// СДЕЛКАМ за период (не изменение стоимости портфеля, как было раньше, см. её же комментарий у
+// computeDailyRealizedPnlMap: та же причина смены подхода — у активного трейдера, который между
+// сделками возвращается в USDT, стоимость портфеля почти не меняется, и старые плитки почти всегда
+// показывали "+0.00%", даже при реальном плюсе/минусе по сделкам) + количество учитываемых активов.
+function buildBalanceStatsGridHtml(trades, assetCount, dustCount) {
+  const defs = [{ key: '1d', label: '1Д' }, { key: '7d', label: '1Н' }, { key: '30d', label: '1М' }];
+  const tiles = defs.map(function (d) {
+    const agg = trades && trades.length ? finresAggregate(finresFilterByPeriod(trades, d.key)) : null;
+    const hasTrades = !!(agg && agg.count);
+    const cls = !hasTrades ? 'flat' : (agg.pnl > 0.005 ? 'up' : (agg.pnl < -0.005 ? 'down' : 'flat'));
     const icon = cls === 'up' ? 'ri-arrow-up-line' : (cls === 'down' ? 'ri-arrow-down-line' : 'ri-subtract-line');
-    const valueHtml = d
-      ? '<span class="stat-tile-pct">' + (d.abs >= 0 ? '+' : '') + d.pct.toFixed(2) + '%</span>' +
-        '<span class="stat-tile-abs">' + (d.abs >= 0 ? '+' : '-') + fmtUsd(Math.abs(d.abs)).slice(1) + '</span>'
-      : '<span class="stat-tile-abs muted">копим историю</span>';
-    return '<div class="stat-tile ' + cls + '"><div class="stat-tile-label"><i class="' + icon + '"></i>' + meta.label + '</div>' +
+    const valueHtml = hasTrades
+      ? '<span class="stat-tile-pct">' + (agg.pnl >= 0 ? '+' : '-') + fmtUsd(Math.abs(agg.pnl)).slice(1) + '</span>' +
+        '<span class="stat-tile-abs">' + agg.count + ' сделок, винрейт ' + agg.winRate.toFixed(0) + '%</span>'
+      : '<span class="stat-tile-abs muted">нет сделок</span>';
+    return '<div class="stat-tile ' + cls + '"><div class="stat-tile-label"><i class="' + icon + '"></i>' + d.label + '</div>' +
       '<div class="stat-tile-value">' + valueHtml + '</div></div>';
   }).join('');
   const assetsTile = '<div class="stat-tile neutral"><div class="stat-tile-label"><i class="ri-coins-line"></i>Активы</div>' +
@@ -5152,7 +5156,11 @@ function renderFinresHero() {
   const periodPillsHtml = Object.keys(BALANCE_PERIODS).map(function (key) {
     return '<span class="balance-period-pill' + (key === balancePeriod ? ' active' : '') + '" data-period="' + key + '">' + BALANCE_PERIODS[key].label + '</span>';
   }).join('');
-  const statsGridHtml = buildBalanceStatsGridHtml(hist, total, priced.length, lastBalanceState.dust.length);
+  // 1Д/1Н/1М-плитки — по реализованным сделкам (finresRealized), не по снимкам портфеля (см. её же
+  // комментарий у buildBalanceStatsGridHtml). Если сделки ещё не грузились в этой сессии — рисуем из
+  // того, что уже закешировано (может быть null при самом первом заходе), и точечно обновляем плитки
+  // ниже, как только придёт ответ finresLoadRealized — без полного повторного рендера всей hero-панели.
+  const statsGridHtml = buildBalanceStatsGridHtml(finresRealized ? finresRealized.trades : null, priced.length, lastBalanceState.dust.length);
   const animCls = isRefresh ? ' no-anim' : '';
 
   el.innerHTML =
@@ -5204,6 +5212,14 @@ function renderFinresHero() {
   }
 
   updateFinresHeroPeriodView();
+
+  // Точечно обновляем ТОЛЬКО плитки 1Д/1Н/1М свежими сделками — без полного повторного рендера
+  // hero-панели (finresLoadRealized сам решит, нужен ли реальный сетевой запрос, см. её 60с-кэш).
+  finresLoadRealized(false).then(function (data) {
+    const gridEl = document.querySelector('#finresHeroBar .balance-stats-grid');
+    if (!gridEl || !accountConnected || !lastBalanceState) return;
+    gridEl.innerHTML = buildBalanceStatsGridHtml(data.trades, lastBalanceState.priced.length, lastBalanceState.dust.length);
+  });
 }
 
 // Отметка "Обновлено ЧЧ:ММ:СС" под суммой портфеля — ставится при каждом успешном рендере hero
