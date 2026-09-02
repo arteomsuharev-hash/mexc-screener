@@ -890,6 +890,28 @@ body {
 .finres-coin-search-item .balance-asset-avatar { width: 22px; height: 22px; font-size: 9px; flex-shrink: 0; }
 .finres-coin-search-known { margin-left: auto; font-size: 10.5px; color: var(--green); display: flex; align-items: center; gap: 3px; }
 .finres-coin-search-empty { padding: 10px; font-size: 12px; color: var(--text-muted); text-align: center; }
+
+.finres-bulk-add-toggle {
+  display: inline-flex; align-items: center; gap: 5px; margin-top: 8px; padding: 0; border: none; background: none;
+  color: var(--blue); font-size: 11.5px; font-weight: 600; cursor: pointer; transition: color .15s ease;
+}
+.finres-bulk-add-toggle:hover { color: #fff; }
+.finres-bulk-add-toggle i { font-size: 13px; }
+.finres-bulk-add-box { margin-top: 8px; animation: finresContentIn .2s ease both; }
+.finres-bulk-add-box textarea {
+  width: 100%; min-height: 60px; resize: vertical; background: var(--bg-primary); border: 1px solid var(--border-color);
+  border-radius: 8px; padding: 9px 12px; color: var(--text-primary); font-size: 12.5px; font-family: inherit;
+  transition: border-color .15s ease; box-sizing: border-box;
+}
+.finres-bulk-add-box textarea:focus { outline: none; border-color: var(--blue); }
+.finres-bulk-add-box textarea::placeholder { color: var(--text-muted); }
+.finres-bulk-add-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.finres-bulk-add-submit {
+  padding: 7px 16px; border-radius: 7px; border: 1px solid var(--blue); background: rgba(30,128,255,.12);
+  color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; transition: background .15s ease, transform .12s ease;
+}
+.finres-bulk-add-submit:hover { background: var(--blue); transform: translateY(-1px); }
+.finres-bulk-add-row span { font-size: 11.5px; color: var(--text-muted); }
 .journal-chip {
   display: flex; align-items: center; gap: 7px; padding: 7px 13px 7px 8px; border-radius: 20px;
   border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-secondary);
