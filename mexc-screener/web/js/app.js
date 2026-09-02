@@ -173,6 +173,11 @@ let ownChartPendingTrend = null; // { tool, p1: {t,v} } — первая точ�
 let ownChartRulerDrag = null;    // { x1,y1,t1,v1, x2,y2,t2,v2 } — активный замер линейкой
 let ownChartPanDrag = null;      // { startX, startOffset } — активная панорама
 let ownChartHover = null;        // { x, y } — последняя позиция курсора над канвасом (для crosshair)
+// Ручное растяжение/сжатие осей перетаскиванием — как в TradingView (тянуть за правую шкалу цены
+// вверх/вниз или за нижнюю шкалу времени влево/вправо), в дополнение к колесу мыши/панораме.
+let ownChartPriceScaleMult = 1;  // 1 = автоподбор диапазона цены по видимым свечам; >1 растянуто, <1 сжато
+let ownChartPriceScaleDrag = null; // { startY, startMult } — активное перетаскивание шкалы цены
+let ownChartTimeScaleDrag = null;  // { startX, startVisible, centerIdx } — активное перетаскивание шкалы времени
 let ownChartLoadedRaw = null;    // raw-символ, для которого сейчас загружены view/drawings
 let ownChartLoadedTF = null;     // ТФ, для которого подобран текущий ownChartView (сбрасываем зум при смене ТФ)
 let ownChartType = 'candles';    // 'candles' | 'line' | 'area'
@@ -1143,6 +1148,7 @@ async function loadOwnChart() {
   }
   if (symbolChanged || currentTF !== ownChartLoadedTF) {
     ownChartView = { offset: 0, visibleCount: 140 };
+    ownChartPriceScaleMult = 1;
     ownChartLoadedTF = currentTF;
   }
   if (emptyEl && !ownChartCandles) {
@@ -1244,6 +1250,10 @@ function drawCandleChart(canvas, candles) {
   if (min === max) { min -= 1; max += 1; }
   const pricePad = (max - min) * 0.08;
   min -= pricePad; max += pricePad;
+  if (ownChartPriceScaleMult !== 1) {
+    const priceCenter = (min + max) / 2, priceHalf = (max - min) / 2 * ownChartPriceScaleMult;
+    min = priceCenter - priceHalf; max = priceCenter + priceHalf;
+  }
 
   let maxVol = Math.max.apply(null, slice.map(function (k) { return k.v; }));
   if (!Number.isFinite(maxVol) || maxVol <= 0) maxVol = 1;
@@ -1598,6 +1608,18 @@ function wireOwnChartInteractions(canvas) {
     if (!chart) return;
     const rect = canvas.getBoundingClientRect();
     const x = ev.clientX - rect.left, y = ev.clientY - rect.top;
+    // Перетаскивание шкалы цены (справа от графика) / шкалы времени (снизу) — работает независимо
+    // от выбранного инструмента рисования, как в TradingView, а не только в режиме "курсор".
+    if (x > chart.plotW) {
+      ownChartPriceScaleDrag = { startY: y, startMult: ownChartPriceScaleMult };
+      return;
+    }
+    if (y > chart.volTop + chart.volumeH) {
+      const n = ownChartCandles.length;
+      const centerIdx = n - ownChartView.offset - ownChartView.visibleCount / 2;
+      ownChartTimeScaleDrag = { startX: x, startVisible: ownChartView.visibleCount, centerIdx: centerIdx };
+      return;
+    }
     if (ownChartTool === 'cursor') {
       ownChartPanDrag = { startX: x, startOffset: ownChartView.offset };
       canvas.classList.add('panning');
@@ -1631,6 +1653,29 @@ function wireOwnChartInteractions(canvas) {
     if (!chart) return;
     const rect = canvas.getBoundingClientRect();
     const x = ev.clientX - rect.left, y = ev.clientY - rect.top;
+    if (ownChartPriceScaleDrag) {
+      const dy = y - ownChartPriceScaleDrag.startY;
+      const factor = Math.exp(dy * 0.006); // тащим вниз — растягиваем (зум минус), вверх — сжимаем (зум плюс)
+      ownChartPriceScaleMult = Math.max(0.15, Math.min(8, ownChartPriceScaleDrag.startMult * factor));
+      redraw();
+      return;
+    }
+    if (ownChartTimeScaleDrag) {
+      const dx = x - ownChartTimeScaleDrag.startX;
+      const factor = Math.exp(-dx * 0.006); // тащим вправо — сжимаем временную ось (зум ближе)
+      const n = ownChartCandles.length;
+      let newVisible = Math.round(ownChartTimeScaleDrag.startVisible * factor);
+      newVisible = Math.max(20, Math.min(n, newVisible));
+      const maxOffset = Math.max(0, n - newVisible);
+      let newOffset = n - newVisible - (ownChartTimeScaleDrag.centerIdx - newVisible / 2);
+      ownChartView.visibleCount = newVisible;
+      ownChartView.offset = Math.max(0, Math.min(maxOffset, newOffset));
+      redraw();
+      return;
+    }
+    if (!ownChartPanDrag && !ownChartRulerDrag) {
+      canvas.style.cursor = x > chart.plotW ? 'ns-resize' : (y > chart.volTop + chart.volumeH ? 'ew-resize' : '');
+    }
     if (ownChartPanDrag) {
       const deltaCandles = (x - ownChartPanDrag.startX) / chart.slot;
       const n = ownChartCandles.length;
@@ -1656,6 +1701,8 @@ function wireOwnChartInteractions(canvas) {
   window.addEventListener('mouseup', function () {
     if (ownChartPanDrag) { ownChartPanDrag = null; canvas.classList.remove('panning'); }
     if (ownChartRulerDrag) { ownChartRulerDrag = null; redraw(); }
+    ownChartPriceScaleDrag = null;
+    ownChartTimeScaleDrag = null;
   });
 
   canvas.addEventListener('mouseleave', function () {
@@ -3364,21 +3411,41 @@ function persistRemove(key) {
   nlStorageSet(key, ''); // у Neutralino.storage нет отдельного "удалить" — пустая строка это и есть удаление
 }
 
-// Быстрая самопроверка: вообще способен ли native-мост запускать процессы на этой машине.
-// Если зависает даже тривиальная команда — дело не в curl/PowerShell и не в сети (которая
-// уже подтверждена рабочей), а в том, что что-то (чаще всего антивирус/EDR) блокирует или подвешивает
-// ЛЮБОЙ дочерний процесс, порождаемый этим .exe. Короткий таймаут (5с) — эхо должно быть мгновенным.
+// Кэш результата самопроверки на время жизни приложения: антивирус/EDR чаще всего задерживает
+// только ПЕРВЫЙ запуск дочернего процесса ("cold-start" поведенческая проверка), последующие
+// запуски того же бинарника обычно уже быстрые. Поэтому: (1) успех кэшируем НАВСЕГДА — не гоняем
+// одну и ту же 5-10с проверку перед КАЖДЫМ запросом klines/myTrades; (2) неудачу кэшируем лишь на
+// короткое окно (30с), чтобы серия быстрых подряд идущих запросов не каждый раз ждала полный
+// таймаут — но и не залипала в "сломано" навсегда, если пользователь тем временем добавил
+// исключение в антивирус, не перезапуская приложение.
+let nativeExecOk = null; // null = ещё не проверяли, true = подтверждено рабочим, false = недавно упало
+let nativeExecFailedAt = 0;
+let nativeExecFailReason = '';
+const NATIVE_EXEC_FAIL_COOLDOWN_MS = 30000;
+
 async function execCommandSelfTest() {
+  if (nativeExecOk === true) return; // уже подтверждено рабочим в этой сессии — не проверяем повторно
+  if (nativeExecOk === false && (Date.now() - nativeExecFailedAt) < NATIVE_EXEC_FAIL_COOLDOWN_MS) {
+    throw new Error(nativeExecFailReason); // недавно падало — не ждём ещё раз полный таймаут, отвечаем сразу
+  }
   try {
-    const ping = await nlCall('os.execCommand', { command: 'cmd.exe /C echo ping', background: false }, 5000);
+    // 10с, а не 5с: если антивирус делает поведенческую проверку самого первого дочернего процесса
+    // (обычное дело для Windows Defender "cloud-delivered protection"), она может занять несколько
+    // секунд сама по себе, даже когда процессы в итоге ЗАПУСКАЮТСЯ нормально — слишком короткий
+    // таймаут здесь давал ложный "сломано" именно в этом случае.
+    const ping = await nlCall('os.execCommand', { command: 'cmd.exe /C echo ping', background: false }, 10000);
     if (!ping || ping.exitCode !== 0) {
       throw new Error('запуск процессов вернул код ' + (ping && ping.exitCode));
     }
+    nativeExecOk = true;
   } catch (pingErr) {
-    throw new Error('Запуск процессов из приложения не работает на этой машине (' + pingErr.message + '). ' +
+    nativeExecOk = false;
+    nativeExecFailedAt = Date.now();
+    nativeExecFailReason = 'Запуск процессов из приложения не работает на этой машине (' + pingErr.message + '). ' +
       'Похоже, антивирус блокирует или задерживает дочерние процессы у MEXC-Screener.exe. Добавьте ' +
       'MEXC-Screener.exe в исключения антивируса (Защитник Windows: Параметры → Безопасность Windows → ' +
-      'Защита от вирусов и угроз → Управление настройками → Добавление или удаление исключений) и попробуйте снова.');
+      'Защита от вирусов и угроз → Управление настройками → Добавление или удаление исключений) и попробуйте снова.';
+    throw new Error(nativeExecFailReason);
   }
 }
 
@@ -6414,6 +6481,7 @@ const ochartResetViewBtnEl = document.getElementById('ochartResetView');
 if (ochartResetViewBtnEl) {
   ochartResetViewBtnEl.addEventListener('click', function () {
     ownChartView = { offset: 0, visibleCount: 140 };
+    ownChartPriceScaleMult = 1;
     if (ownChartCandles) drawCandleChart(document.getElementById('ownCandleChart'), ownChartCandles);
   });
 }
@@ -6429,15 +6497,32 @@ document.querySelectorAll('.ochart-tool[data-charttype]').forEach(function (btn)
 // Панель "Индикаторы" — переключаемые индикаторы с глазками (объём/MA), тот же принцип, что у
 // TradingView-легенды индикаторов, вместо одной жёстко зашитой кнопки-таблетки MA.
 const ochartIndicatorsBtnEl = document.getElementById('ochartIndicatorsBtn');
+const ochartSettingsBtnEl = document.getElementById('ochartSettingsBtn');
 const ochartIndicatorsPanelEl = document.getElementById('ochartIndicatorsPanel');
-if (ochartIndicatorsBtnEl && ochartIndicatorsPanelEl) {
-  ochartIndicatorsBtnEl.addEventListener('click', function (e) {
-    e.stopPropagation();
-    ochartIndicatorsPanelEl.classList.toggle('show');
-  });
+if (ochartIndicatorsPanelEl && (ochartIndicatorsBtnEl || ochartSettingsBtnEl)) {
+  // Открывается и от "Индикаторы" (слева), и от шестерёнки "Настройки" (справа) — один и тот же
+  // список глазков-переключателей, просто два разных входа, как у TradingView (там тоже indicators
+  // и settings часто ведут к пересекающимся панелям). Позиционируем под тем триггером, который
+  // реально кликнули (position:fixed), а не жёстко под одним из них.
+  function toggleIndicatorsPanel(anchorEl) {
+    const isOpenForThis = ochartIndicatorsPanelEl.classList.contains('show') && ochartIndicatorsPanelEl.__anchor === anchorEl;
+    if (isOpenForThis) { ochartIndicatorsPanelEl.classList.remove('show'); return; }
+    const r = anchorEl.getBoundingClientRect();
+    ochartIndicatorsPanelEl.style.top = (r.bottom + 6) + 'px';
+    const panelW = 168;
+    ochartIndicatorsPanelEl.style.left = Math.max(6, Math.min(window.innerWidth - panelW - 6, r.left)) + 'px';
+    ochartIndicatorsPanelEl.__anchor = anchorEl;
+    ochartIndicatorsPanelEl.classList.add('show');
+  }
+  if (ochartIndicatorsBtnEl) {
+    ochartIndicatorsBtnEl.addEventListener('click', function (e) { e.stopPropagation(); toggleIndicatorsPanel(ochartIndicatorsBtnEl); });
+  }
+  if (ochartSettingsBtnEl) {
+    ochartSettingsBtnEl.addEventListener('click', function (e) { e.stopPropagation(); toggleIndicatorsPanel(ochartSettingsBtnEl); });
+  }
   document.addEventListener('click', function (e) {
     if (!ochartIndicatorsPanelEl.classList.contains('show')) return;
-    if (ochartIndicatorsPanelEl.contains(e.target) || e.target === ochartIndicatorsBtnEl) return;
+    if (ochartIndicatorsPanelEl.contains(e.target) || e.target === ochartIndicatorsBtnEl || e.target === ochartSettingsBtnEl) return;
     ochartIndicatorsPanelEl.classList.remove('show');
   });
   function syncIndRow(row, on) {
@@ -7100,6 +7185,48 @@ window.__testJournalChart = function () {
   drawJournalChart(canvas, candles);
   renderJournalTradesList(pairs);
   renderJournalTfPills();
+};
+
+// Только для ручной проверки "своего графика" (панель инструментов, оси, зум) без реальной сети
+// MEXC — реальный REST klines недоступен в песочнице разработки (CORS), а UI-верстку и интеракции
+// (перетаскивание осей, глазки-индикаторы, скриншот/fullscreen) всё равно нужно проверять вживую.
+// НЕ вызывается production-кодом, ничего не сохраняет между сессиями. Тот же принцип, что и у
+// __testJournalChart выше.
+window.__testOwnChart = function () {
+  // Поля ниже — не только symbol/raw, а всё, что читает updateInfoPanel() (baseAsset/color/price/
+  // change24/vol24/vol5/high/low) — она вызывается из общего scheduleRender() на каждый WS-тик,
+  // пока currentCoin вообще установлен, независимо от того, какая страница/график сейчас открыты.
+  currentCoin = {
+    symbol: 'TEST/USDT', raw: 'TESTUSDT', baseAsset: 'TEST', color: '#1E80FF',
+    price: 100, change24: 1.23, vol24: 1000000, vol5: 500, high: 107, low: 95
+  };
+  switchToOwnChartUi();
+  rememberChartMode('TEST/USDT', 'own');
+  updateToggleChartBtnLabel();
+  let price = 100;
+  const candles = [];
+  const t0 = Date.now() - 300 * 5 * 60000;
+  for (let i = 0; i < 300; i++) {
+    const o = price;
+    price *= 1 + (Math.random() - 0.5) * 0.02;
+    const c = price;
+    const h = Math.max(o, c) * (1 + Math.random() * 0.008);
+    const l = Math.min(o, c) * (1 - Math.random() * 0.008);
+    candles.push({ t: t0 + i * 5 * 60000, o: o, h: h, l: l, c: c, v: 1000 + Math.random() * 9000 });
+  }
+  ownChartCandles = candles;
+  ownChartView = { offset: 0, visibleCount: 140 };
+  ownChartPriceScaleMult = 1;
+  ownChartLoadedRaw = 'TESTUSDT';
+  ownChartLoadedTF = currentTF;
+  ownChartDrawings = [];
+  const canvas = document.getElementById('ownCandleChart');
+  const emptyEl = document.getElementById('ownChartEmpty');
+  if (emptyEl) emptyEl.style.display = 'none';
+  const watermarkEl = document.getElementById('ochartWatermark');
+  if (watermarkEl) watermarkEl.textContent = 'TEST/USDT';
+  wireOwnChartInteractions(canvas);
+  drawCandleChart(canvas, candles);
 };
 
 console.log('MEXC Screener запущен (MEXC Spot WS v3, protobuf)');
