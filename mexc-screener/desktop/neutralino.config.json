@@ -9,7 +9,7 @@
   "enableNativeAPI": true,
   "tokenSecurity": "none",
   "logging": { "enabled": true, "writeToLogFile": false },
-  "nativeAllowList": ["app.*", "os.*", "window.*", "events.*", "filesystem.*"],
+  "nativeAllowList": ["app.*", "os.*", "window.*", "events.*", "filesystem.*", "storage.*"],
   "modes": {
     "window": {
       "title": "MEXC Screener",
