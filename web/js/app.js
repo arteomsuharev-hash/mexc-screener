@@ -880,7 +880,7 @@ let ownChartModeMemory = (function loadChartModeMemory() {
 function rememberChartMode(symbol, mode) {
   if (mode === 'own') ownChartModeMemory[symbol] = 'own';
   else delete ownChartModeMemory[symbol];
-  try { localStorage.setItem(CHART_MODE_KEY, JSON.stringify(ownChartModeMemory)); } catch (e) { /* переживём без сохранения между сессиями */ }
+  try { persistSet(CHART_MODE_KEY, JSON.stringify(ownChartModeMemory)); } catch (e) { /* переживём без сохранения между сессиями */ }
 }
 
 function loadExchangeChart(symbol, tf) {
@@ -1078,7 +1078,7 @@ function saveOwnChartDrawings(raw, drawings) {
   try {
     const all = JSON.parse(localStorage.getItem(OWN_CHART_DRAWINGS_KEY) || '{}');
     if (drawings.length) all[raw] = drawings; else delete all[raw];
-    localStorage.setItem(OWN_CHART_DRAWINGS_KEY, JSON.stringify(all));
+    persistSet(OWN_CHART_DRAWINGS_KEY, JSON.stringify(all));
   } catch (e) { /* localStorage недоступен — молча игнорируем */ }
 }
 
@@ -2578,7 +2578,7 @@ let patternHistory = (function loadPatternHistory() {
 })();
 
 function savePatternHistory() {
-  try { localStorage.setItem(PATTERN_HISTORY_KEY, JSON.stringify(patternHistory)); } catch (e) { /* переживём без сохранения между сессиями */ }
+  try { persistSet(PATTERN_HISTORY_KEY, JSON.stringify(patternHistory)); } catch (e) { /* переживём без сохранения между сессиями */ }
 }
 
 const patternActiveSessions = new Map(); // symbol+'|'+detectorKey -> {historyId, lastSeenAt}
@@ -2661,7 +2661,7 @@ let disabledDetectorKeys = (function loadDisabledDetectors() {
   } catch (e) { return new Set(); }
 })();
 function saveDisabledDetectors() {
-  try { localStorage.setItem(DETECTOR_ENABLED_KEY, JSON.stringify(Array.from(disabledDetectorKeys))); } catch (e) { /* переживём без сохранения между сессиями */ }
+  try { persistSet(DETECTOR_ENABLED_KEY, JSON.stringify(Array.from(disabledDetectorKeys))); } catch (e) { /* переживём без сохранения между сессиями */ }
 }
 function toggleDetectorEnabled(key) {
   if (disabledDetectorKeys.has(key)) disabledDetectorKeys.delete(key);
@@ -3299,6 +3299,49 @@ async function nlCall(method, data, timeoutMs) {
   });
 }
 
+// ============================================================================
+// ДОЛГОВЕЧНОЕ ХРАНИЛИЩЕ ПОВЕРХ localStorage (только desktop-обёртка).
+//
+// Баг "после обновления теряется история/API-ключи": localStorage в WebView2 привязан к
+// конкретному ФАЙЛУ .exe (см. docs про два разных .exe с изолированными профилями), а не к самому
+// приложению — новая сборка exe (даже с тем же именем, но, например, из новой папки, или после
+// смены имени файла) может получить пустой профиль WebView2. Neutralino.storage, наоборот,
+// привязан к applicationId из neutralino.config.json ("com.mexcscreener.app") и живёт в файле на
+// диске рядом с приложением — переживает пересборку/переименование exe. Через штатный
+// Neutralino.storage.* эти вызовы виснут (тот же уже задокументированный баг тайминга старта,
+// см. комментарий у nlCall выше) — используем тот же собственный WS-мост.
+//
+// localStorage остаётся основным, СИНХРОННЫМ источником на каждый день (ничего в существующем коде
+// не меняется) — Neutralino.storage только теневая резервная копия: пишется вдогонку при каждом
+// сохранении (persistSet/persistRemove ниже) и читается один раз при старте, только если локальный
+// профиль оказался пустым (см. hydrateFromNativeStorageIfNeeded).
+function nlStorageSet(key, value) {
+  if (!window.Neutralino) return;
+  nlCall('storage.setData', { key: key, data: value }, 8000).catch(function (e) {
+    logD('Storage', 'не удалось продублировать "' + key + '" в постоянное хранилище: ' + e.message);
+  });
+}
+async function nlStorageGet(key) {
+  if (!window.Neutralino) return null;
+  try {
+    const v = await nlCall('storage.getData', { key: key }, 8000);
+    return (typeof v === 'string' && v) ? v : null;
+  } catch (e) {
+    return null; // ключа там ещё нет (или сам мост недоступен) — не ошибка, просто нечего восстанавливать
+  }
+}
+// Единая точка сохранения для всего, что должно пережить пересборку desktop-приложения — localStorage
+// как и раньше синхронно, плюс (только в desktop-обёртке, best-effort, никогда не блокирует UI) теневая
+// копия в Neutralino.storage.
+function persistSet(key, value) {
+  try { localStorage.setItem(key, value); } catch (e) {}
+  nlStorageSet(key, value);
+}
+function persistRemove(key) {
+  try { localStorage.removeItem(key); } catch (e) {}
+  nlStorageSet(key, ''); // у Neutralino.storage нет отдельного "удалить" — пустая строка это и есть удаление
+}
+
 // Быстрая самопроверка: вообще способен ли native-мост запускать процессы на этой машине.
 // Если зависает даже тривиальная команда — дело не в curl/PowerShell и не в сети (которая
 // уже подтверждена рабочей), а в том, что что-то (чаще всего антивирус/EDR) блокирует или подвешивает
@@ -3483,7 +3526,7 @@ function pushBalanceHistory(total, assetValues) {
   const cutoff = now - BALANCE_HISTORY_MAX_AGE_MS;
   hist = hist.filter(function (p) { return p.t >= cutoff; });
   if (hist.length > BALANCE_HISTORY_MAX_POINTS) hist = hist.slice(hist.length - BALANCE_HISTORY_MAX_POINTS);
-  try { localStorage.setItem(BALANCE_HISTORY_KEY, JSON.stringify(hist)); } catch (e) {}
+  try { persistSet(BALANCE_HISTORY_KEY, JSON.stringify(hist)); } catch (e) {}
   return hist;
 }
 
@@ -4610,7 +4653,7 @@ function renderFinresAssetsTab(el, animate) {
   if (dustToggleEl) {
     dustToggleEl.addEventListener('click', function () {
       hideDustBalances = !hideDustBalances;
-      try { localStorage.setItem('mexc_hide_dust', hideDustBalances ? '1' : '0'); } catch (e) {}
+      try { persistSet('mexc_hide_dust', hideDustBalances ? '1' : '0'); } catch (e) {}
       // renderAccountBalances пересчитает снимок и сама вызовет lightRefreshFinresContent(), которая
       // (раз мы сейчас на вкладке "Активы") тут же перерисует донат/список с новым набором активов.
       renderAccountBalances(lastRawBalances);
@@ -4818,19 +4861,23 @@ let hideDustBalances = (function () {
 // списка с текущим балансом — так однажды проданная в ноль монета остаётся в статистике.
 const KNOWN_SYMBOLS_KEY = 'mexc_known_trade_symbols';
 let knownSymbols = {}; // { BTC: 'BTCUSDT', ... }
-(function loadKnownSymbols() {
+// Именованная (не анонимная IIFE), т.к. её нужно повторно вызвать из hydrateFromNativeStorageIfNeeded
+// ниже — если локальный localStorage-профиль оказался пустым (см. её комментарий), но резервная копия
+// нашлась в Neutralino.storage, нужно перечитать localStorage ещё раз уже ПОСЛЕ восстановления.
+function loadKnownSymbols() {
   try {
     const raw = localStorage.getItem(KNOWN_SYMBOLS_KEY);
     const arr = raw ? JSON.parse(raw) : [];
     if (Array.isArray(arr)) arr.forEach(function (e) { if (e && e.asset && e.raw) knownSymbols[e.asset] = e.raw; });
   } catch (e) { /* localStorage недоступен — просто не будет "памяти" между сессиями, не критично */ }
-})();
+}
+loadKnownSymbols();
 function rememberSymbol(asset, raw) {
   if (!asset || !raw || knownSymbols[asset] === raw) return;
   knownSymbols[asset] = raw;
   try {
     const arr = Object.keys(knownSymbols).map(function (a) { return { asset: a, raw: knownSymbols[a] }; });
-    localStorage.setItem(KNOWN_SYMBOLS_KEY, JSON.stringify(arr));
+    persistSet(KNOWN_SYMBOLS_KEY, JSON.stringify(arr));
   } catch (e) { /* переживём без сохранения между сессиями */ }
 }
 
@@ -5385,11 +5432,11 @@ function scopeAccountStorageToKey(apiKey) {
   try { prev = localStorage.getItem(ACCOUNT_KEY_FINGERPRINT_KEY); } catch (e) { return; }
   if (prev && prev !== fingerprint) {
     logI('Finrez', 'обнаружена смена API-ключа — сбрасываю историю портфеля и список известных символов предыдущего аккаунта');
-    try { localStorage.removeItem(BALANCE_HISTORY_KEY); } catch (e) {}
-    try { localStorage.removeItem(KNOWN_SYMBOLS_KEY); } catch (e) {}
+    try { persistRemove(BALANCE_HISTORY_KEY); } catch (e) {}
+    try { persistRemove(KNOWN_SYMBOLS_KEY); } catch (e) {}
     knownSymbols = {};
   }
-  try { localStorage.setItem(ACCOUNT_KEY_FINGERPRINT_KEY, fingerprint); } catch (e) {}
+  try { persistSet(ACCOUNT_KEY_FINGERPRINT_KEY, fingerprint); } catch (e) {}
 }
 
 async function connectMexcAccount(silent) {
@@ -5412,8 +5459,8 @@ async function connectMexcAccount(silent) {
     });
     accountConnected = true;
     scopeAccountStorageToKey(key);
-    localStorage.setItem('mexc_api_key', key);
-    localStorage.setItem('mexc_api_secret', secret);
+    persistSet('mexc_api_key', key);
+    persistSet('mexc_api_secret', secret);
     renderAccountBalances(data && data.balances);
     setAccountStatus('connected');
     startBalanceAutoRefresh();
@@ -5430,8 +5477,8 @@ function disconnectMexcAccount() {
   mexcApiSecret = '';
   accountConnected = false;
   stopBalanceAutoRefresh();
-  localStorage.removeItem('mexc_api_key');
-  localStorage.removeItem('mexc_api_secret');
+  persistRemove('mexc_api_key');
+  persistRemove('mexc_api_secret');
   document.getElementById('acctApiKey').value = '';
   document.getElementById('acctApiSecret').value = '';
   lastBalanceState = null;
@@ -6005,15 +6052,66 @@ document.getElementById('acctToggleEye').addEventListener('click', function () {
   input.type = showing ? 'password' : 'text';
   this.className = showing ? 'ri-eye-line acct-toggle-eye' : 'ri-eye-off-line acct-toggle-eye';
 });
-try {
-  const savedKey = localStorage.getItem('mexc_api_key');
-  const savedSecret = localStorage.getItem('mexc_api_secret');
-  if (savedKey && savedSecret) {
-    document.getElementById('acctApiKey').value = savedKey;
-    document.getElementById('acctApiSecret').value = savedSecret;
-    connectMexcAccount(true);
+// Именованная функция (не разовый try-блок) — её же повторно вызывает hydrateFromNativeStorageIfNeeded
+// ниже, если ключи не нашлись локально при первом старте, но нашлись в резервном Neutralino.storage.
+function restoreSavedApiKeyAndConnect() {
+  try {
+    const savedKey = localStorage.getItem('mexc_api_key');
+    const savedSecret = localStorage.getItem('mexc_api_secret');
+    if (savedKey && savedSecret && !accountConnected) {
+      document.getElementById('acctApiKey').value = savedKey;
+      document.getElementById('acctApiSecret').value = savedSecret;
+      connectMexcAccount(true);
+      return true;
+    }
+  } catch (e) { /* localStorage недоступен (например, приватный режим) — просто не автоподключаемся */ }
+  return false;
+}
+restoreSavedApiKeyAndConnect();
+
+// Восстановление из резервного Neutralino.storage (только desktop-обёртка) — см. комментарий у
+// persistSet/nlStorageGet выше. Срабатывает только если localStorage-профиль сейчас пуст по
+// конкретному ключу; если данные уже есть локально, вообще не трогает сеть/native-мост. Намеренно
+// НЕ блокирует старт приложения (fire-and-forget, вызывается уже после connectWs() ниже) — если
+// native-мост не готов/недоступен, приложение просто продолжает работать как обычно, без "теневой"
+// копии, точно как до этой функции.
+const NATIVE_STORAGE_HYDRATE_KEYS = [
+  'mexc_api_key', 'mexc_api_secret', ACCOUNT_KEY_FINGERPRINT_KEY,
+  BALANCE_HISTORY_KEY, KNOWN_SYMBOLS_KEY,
+  CHART_MODE_KEY, OWN_CHART_DRAWINGS_KEY, PATTERN_HISTORY_KEY, DETECTOR_ENABLED_KEY, 'mexc_hide_dust'
+];
+async function hydrateFromNativeStorageIfNeeded() {
+  if (!window.Neutralino) return; // веб-версия: один и тот же origin/профиль браузера, восстанавливать нечего
+  let hydratedApiKey = false;
+  let hydratedAccountState = false;
+  for (let i = 0; i < NATIVE_STORAGE_HYDRATE_KEYS.length; i++) {
+    const key = NATIVE_STORAGE_HYDRATE_KEYS[i];
+    let local;
+    try { local = localStorage.getItem(key); } catch (e) { local = null; }
+    if (local) continue; // уже есть локально — резервная копия не нужна
+    const remote = await nlStorageGet(key);
+    if (remote == null) continue; // и в резервном хранилище пусто — действительно восстанавливать нечего
+    try { localStorage.setItem(key, remote); } catch (e) { continue; }
+    if (key === 'mexc_api_key' || key === 'mexc_api_secret') hydratedApiKey = true;
+    if (key === BALANCE_HISTORY_KEY || key === KNOWN_SYMBOLS_KEY) hydratedAccountState = true;
+    if (key === KNOWN_SYMBOLS_KEY) loadKnownSymbols(); // перечитать в уже загруженный в память объект
   }
-} catch (e) { /* localStorage недоступен (например, приватный режим) — просто не автоподключаемся */ }
+  if (!hydratedApiKey && !hydratedAccountState) return;
+  logI('Storage', 'локальный профиль браузера был пуст — восстановлены данные из резервного хранилища Neutralino (переживает пересборку .exe)');
+  if (hydratedApiKey) {
+    restoreSavedApiKeyAndConnect();
+  } else if (hydratedAccountState && finresTab) {
+    renderFinresTab();
+    renderFinresHero();
+  }
+}
+// Небольшая задержка перед первой попыткой — тот же самый задокументированный у nlCall баг тайминга
+// старта (внутренний WS-сервер Neutralino может быть ещё не полностью поднят в первые секунды).
+setTimeout(function () {
+  hydrateFromNativeStorageIfNeeded().catch(function (e) {
+    logW('Storage', 'восстановление из резервного хранилища не удалось: ' + e.message);
+  });
+}, 3000);
 
 // Запуск
 applyProfile('balanced');
@@ -6057,6 +6155,26 @@ window.__injectFakePatternEvent = function (partial) {
 };
 
 window.__tableHoverFreeze = function () { return tableHoverFreezeSymbol; };
+
+// Ручная проверка резервного хранилища (см. persistSet/nlStorageGet/hydrateFromNativeStorageIfNeeded
+// выше) из консоли разработчика desktop-приложения, не дожидаясь реальной пересборки .exe:
+// await __nativeStorageSelfTest() — пишет тестовое значение через native-мост, тут же читает его
+// обратно и сравнивает. Возвращает {ok:true} либо {ok:false, error}. В веб-версии (нет window.Neutralino)
+// сразу возвращает {ok:false, error:'нет desktop-обёртки'} — это ожидаемо, не баг.
+window.__nativeStorageSelfTest = async function () {
+  if (!window.Neutralino) return { ok: false, error: 'нет desktop-обёртки (window.Neutralino отсутствует) — это ожидаемо в браузере' };
+  const probeKey = '__mexc_storage_selftest';
+  const probeVal = 'ok-' + Date.now();
+  try {
+    await nlCall('storage.setData', { key: probeKey, data: probeVal }, 8000);
+    const readBack = await nlCall('storage.getData', { key: probeKey }, 8000);
+    await nlCall('storage.setData', { key: probeKey, data: '' }, 8000); // подчищаем за собой
+    if (readBack !== probeVal) return { ok: false, error: 'записали "' + probeVal + '", прочитали обратно "' + readBack + '"' };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+};
 
 // Только для ручной проверки дизайна страницы «Финрез» без реального подключённого аккаунта (нет
 // смысла просить настоящий API-ключ ради вёрстки) — подставляет правдоподобные тестовые баланс и
