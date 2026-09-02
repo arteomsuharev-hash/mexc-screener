@@ -6165,12 +6165,22 @@ window.__tableHoverFreeze = function () { return tableHoverFreezeSymbol; };
 // сделок и была ли ошибка (например "Invalid symbol" — валюта на споте под таким тикером не торгуется).
 window.__finresDebug = async function () {
   const data = await finresLoadRealizedCore();
+  const raw = lastRawBalances || [];
+  const zeroBalanceAssets = raw.filter(function (b) { return !(parseFloat(b.free) > 0 || parseFloat(b.locked) > 0); }).map(function (b) { return b.asset; });
   return {
     priced: (lastBalanceState && lastBalanceState.priced || []).map(function (r) { return { asset: r.asset, usdtValue: r.usdtValue }; }),
     knownSymbols: knownSymbols,
     totalRealizedTrades: data.trades.length,
     tradesPerSymbol: Object.keys(data.bySymbol).reduce(function (acc, k) { acc[k] = data.bySymbol[k].length; return acc; }, {}),
-    error: data.error
+    error: data.error,
+    // Если MEXC вообще присылает в /api/v3/account строки с нулевым балансом (не только текущий
+    // ненулевой остаток) — это способ автоматически обнаружить ВСЕ когда-либо торговавшиеся монеты
+    // без ручного поиска. Пусто/мало строк здесь = MEXC не даёт такой список, придётся оставаться
+    // на текущей схеме (баланс + вручную найденное). Много строк (сотни-тысячи) = вероятно фиксированный
+    // список ВСЕХ активов биржи, а не только "тронутых" этим аккаунтом — тоже бесполезно напрямую.
+    rawBalancesTotal: raw.length,
+    zeroBalanceAssetsCount: zeroBalanceAssets.length,
+    zeroBalanceAssetsSample: zeroBalanceAssets.slice(0, 30)
   };
 };
 
