@@ -11,6 +11,22 @@
 const MEXC_WS = 'wss://wbs-api.mexc.com/ws';
 const LEV_RE = /(UP|DOWN|BULL|BEAR|3L|3S|5L|5S)USDT$/;
 
+// ============================================
+// Автообновление desktop-приложения (кнопка "Проверить обновления" на странице «Настройки»).
+// window.NL_APPVERSION — глобал, который сама Neutralino-подсистема инжектит в страницу ДО загрузки
+// этого скрипта (независимо от того, используется ли штатный Neutralino.init() — см. заметки про
+// собственный WS-мост ниже по файлу); в обычной веб-версии (без desktop-обёртки) его нет, тогда
+// берём запасную строку — держите её в СИНХРОНЕ с "version" в desktop/neutralino.config.json при
+// каждом релизе, иначе версия в интерфейсе разойдётся с реальной.
+const APP_VERSION = (typeof window.NL_APPVERSION === 'string' && window.NL_APPVERSION) || '1.0.0';
+// ЗАПОЛНИТЕ после создания GitHub-репозитория и первого релиза (см. docs/updates.md) — до этого
+// кнопка "Проверить обновления" будет честно показывать понятную ошибку, а не тихо молчать или
+// стучаться в несуществующий адрес.
+const UPDATE_REPO_OWNER = 'YOUR_GITHUB_USERNAME';
+const UPDATE_REPO_NAME = 'YOUR_REPO_NAME';
+const UPDATE_REPO_CONFIGURED = UPDATE_REPO_OWNER !== 'YOUR_GITHUB_USERNAME' && UPDATE_REPO_NAME !== 'YOUR_REPO_NAME';
+const UPDATE_API_URL = 'https://api.github.com/repos/' + UPDATE_REPO_OWNER + '/' + UPDATE_REPO_NAME + '/releases/latest';
+
 // --- Protobuf schema (inlined, subset of MEXC's official .proto files) ---
 const MEXC_PROTO_SRC = [
   'syntax = "proto3";',
@@ -499,6 +515,201 @@ function downloadDesktopApp() {
       '2) Запустите «Запустить.bat» — дальше можно открывать сам .exe напрямую.');
   } catch (e) {
     showModal('Ошибка', 'Не удалось подготовить файл для скачивания: ' + e.message);
+  }
+}
+
+// ============================================
+// Автообновление desktop-приложения — страница «Настройки» → «Обновления».
+// Источник правды о версиях — GitHub Releases конкретного репозитория (UPDATE_REPO_OWNER/NAME
+// выше по файлу): "Проверить обновления" читает /releases/latest (публичный GET, без токена и
+// авторизации), "Скачать и установить" тянет .zip-ассет релиза (тот же архив, что публикует
+// desktop/build.sh — отдельно паковать что-то специальное для автообновления не нужно), распаковывает
+// его штатным PowerShell (Expand-Archive — есть в любой Windows 10/11 из коробки, дополнительных
+// зависимостей не требует) и подменяет запущенный .exe классическим для Windows приёмом
+// "переименовать текущий exe (это разрешено, даже пока он выполняется) → поставить новый на его
+// место → перезапустить" через маленький bat-помощник, отвязанный от процесса приложения.
+//
+// ВАЖНО (честно, а не мелким шрифтом): сама подмена запущенного .exe — самая рискованная часть
+// этого механизма, и я не могу её протестировать из песочницы разработки (здесь нет реального
+// Windows-процесса, который можно было бы понаблюдать вживую). Приём стандартный и хорошо известный,
+// но перед тем как раздавать обновление другим людям — обязательно прогоните полный цикл
+// (проверка → скачивание → установка → перезапуск) сами на реальной машине хотя бы один раз.
+// Старый .exe при этом не удаляется, а переименовывается в MEXC-Screener.exe.bak — так что даже
+// при сбое у пользователя остаётся рабочая копия рядом.
+
+let pendingUpdateInfo = null; // { version, notes, zipUrl, htmlUrl } — результат последней успешной проверки
+
+function compareVersions(a, b) {
+  const pa = String(a || '0').replace(/^v/i, '').split('.').map(function (x) { return parseInt(x, 10) || 0; });
+  const pb = String(b || '0').replace(/^v/i, '').split('.').map(function (x) { return parseInt(x, 10) || 0; });
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d !== 0) return d > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+async function fetchGithubLatestRelease() {
+  let bodyText = null;
+  try {
+    const res = await fetchWithTimeout(UPDATE_API_URL, { method: 'GET', headers: { 'Accept': 'application/vnd.github+json' } }, 12000);
+    if (!res.ok) throw new Error('GitHub ответил ' + res.status + (res.status === 404 ? ' (репозиторий/релиз не найден)' : ''));
+    bodyText = await res.text();
+  } catch (browserErr) {
+    let native = null;
+    try {
+      native = await nativeCurlGet(UPDATE_API_URL, null);
+    } catch (nativeErr) {
+      throw new Error('Браузер не смог загрузить данные (' + browserErr.message + '), запасной путь через curl.exe тоже не сработал: ' + nativeErr.message);
+    }
+    if (!native) throw browserErr;
+    bodyText = native.body;
+  }
+  let data;
+  try { data = JSON.parse(bodyText); } catch (e) { throw new Error('GitHub вернул не-JSON ответ'); }
+  if (!data || !data.tag_name) throw new Error((data && data.message) || 'В ответе GitHub нет tag_name — возможно, у репозитория ещё нет ни одного релиза');
+  return data;
+}
+
+async function checkForAppUpdate() {
+  const statusEl = document.getElementById('updateStatusLabel');
+  const btnEl = document.getElementById('checkUpdateBtn');
+  const rowEl = document.getElementById('updateAvailableRow');
+  if (rowEl) rowEl.style.display = 'none';
+  pendingUpdateInfo = null;
+  if (!UPDATE_REPO_CONFIGURED) {
+    if (statusEl) statusEl.textContent = 'Адрес репозитория обновлений ещё не настроен (см. комментарий в app.js: UPDATE_REPO_OWNER/UPDATE_REPO_NAME)';
+    return;
+  }
+  if (statusEl) statusEl.textContent = 'Проверяю...';
+  if (btnEl) btnEl.disabled = true;
+  try {
+    const release = await fetchGithubLatestRelease();
+    const latestVersion = String(release.tag_name).replace(/^v/i, '');
+    const zipAsset = (release.assets || []).find(function (a) { return /\.zip$/i.test(a.name); });
+    if (compareVersions(latestVersion, APP_VERSION) > 0) {
+      if (!zipAsset) {
+        if (statusEl) statusEl.textContent = 'Найдена версия ' + latestVersion + ', но в релизе нет .zip-файла для автоустановки';
+      } else {
+        pendingUpdateInfo = { version: latestVersion, notes: release.body || '', zipUrl: zipAsset.browser_download_url, htmlUrl: release.html_url };
+        if (statusEl) statusEl.textContent = 'Текущая версия: ' + APP_VERSION;
+        const labelEl = document.getElementById('updateAvailableLabel');
+        if (labelEl) labelEl.textContent = 'Доступна версия ' + latestVersion + (release.body ? ' — ' + String(release.body).split('\n')[0].slice(0, 80) : '');
+        if (rowEl) rowEl.style.display = '';
+      }
+    } else {
+      if (statusEl) statusEl.textContent = 'У вас последняя версия (' + APP_VERSION + ')';
+    }
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Не удалось проверить: ' + e.message;
+    logW('Update', 'проверка обновлений не удалась: ' + e.message);
+  } finally {
+    if (btnEl) btnEl.disabled = false;
+  }
+}
+
+// Скачивает файл через curl.exe НАПРЯМУЮ на диск (-o), а не через stdout — бинарные данные (exe/zip)
+// через захват стандартного вывода (как это делает nativeCurlGet для текстовых ответов MEXC) были бы
+// повреждены при прохождении через WS-мост как JS-строка. -f — считать HTTP-ошибки (404 и т.п.)
+// падением, а не "успешно скачали страницу с текстом ошибки вместо файла".
+async function nativeCurlDownloadToFile(url, destPath) {
+  await execCommandSelfTest();
+  const cmd = 'curl.exe -f -L -s -S --max-time 180 -o "' + stripQuotes(destPath) + '" "' + stripQuotes(url) + '"';
+  const result = await nlCall('os.execCommand', { command: cmd, background: false }, 190000);
+  if (!result || result.exitCode !== 0) {
+    throw new Error('curl.exe: ' + ((result && (result.stdErr || result.stdOut)) || ('код завершения ' + (result && result.exitCode))));
+  }
+}
+
+// Выполняет короткую cmd-команду и возвращает её stdout как текст (для проверок вроде "существует
+// ли файл" — быстрее и надёжнее, чем гадать по побочным эффектам).
+async function nativeCmdOutput(cmd, timeoutMs) {
+  const result = await nlCall('os.execCommand', { command: cmd, background: false }, timeoutMs || 15000);
+  return (result && result.stdOut) || '';
+}
+
+async function downloadAndApplyUpdate() {
+  if (!pendingUpdateInfo) return;
+  if (!window.Neutralino) {
+    showModal('Скачивание вручную',
+      'Автоматическая установка работает только в desktop-приложении. Откройте страницу релиза и ' +
+      'скачайте архив вручную:\n\n' + (pendingUpdateInfo.htmlUrl || pendingUpdateInfo.zipUrl));
+    return;
+  }
+  const statusEl = document.getElementById('updateStatusLabel');
+  const btnEl = document.getElementById('downloadUpdateBtn');
+  if (btnEl) btnEl.disabled = true;
+  function setStatus(text) { if (statusEl) statusEl.textContent = text; }
+  try {
+    const nlPath = window.NL_PATH;
+    if (!nlPath) throw new Error('Не удалось определить папку приложения (NL_PATH не задан native-подсистемой)');
+    const exeName = 'MEXC-Screener.exe';
+    const zipPath = nlPath + '\\_update.zip';
+    const extractedDir = nlPath + '\\_update_extracted';
+    const applyBatPath = nlPath + '\\_apply_update.bat';
+
+    setStatus('Скачиваю обновление...');
+    await nativeCurlDownloadToFile(pendingUpdateInfo.zipUrl, zipPath);
+
+    setStatus('Распаковываю...');
+    await nlCall('os.execCommand', {
+      command: 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath \'' +
+        zipPath.replace(/'/g, "''") + '\' -DestinationPath \'' + extractedDir.replace(/'/g, "''") + '\' -Force"',
+      background: false
+    }, 60000);
+
+    const foundOut = await nativeCmdOutput('if exist "' + extractedDir + '\\' + exeName + '" (echo FOUND) else (echo MISSING)');
+    if (foundOut.indexOf('FOUND') === -1) {
+      throw new Error('В скачанном архиве не нашёлся ' + exeName + ' — установка отменена, текущая версия не тронута');
+    }
+
+    // Bat-помощник переживёт закрытие приложения (запускается отдельным отвязанным процессом):
+    // ждёт, пока файл exe освободится (переименование запущенного .exe — стандартно разрешённая на
+    // Windows операция, но занимает какое-то время после закрытия процесса), делает бэкап .bak,
+    // ставит новую версию на место, перезапускает и подчищает за собой временные файлы.
+    const batContent = [
+      '@echo off',
+      'setlocal',
+      'cd /d "' + nlPath + '"',
+      'set /a N=0',
+      ':waitloop',
+      'set /a N+=1',
+      'ren "' + exeName + '" "' + exeName + '.lockcheck" >nul 2>&1',
+      'if exist "' + exeName + '" (',
+      '  if %N% GEQ 20 goto fail',
+      '  timeout /t 1 /nobreak >nul',
+      '  goto waitloop',
+      ')',
+      'del /f /q "' + exeName + '.bak" >nul 2>&1',
+      'ren "' + exeName + '.lockcheck" "' + exeName + '.bak" >nul 2>&1',
+      'copy /y "_update_extracted\\' + exeName + '" "' + exeName + '" >nul',
+      'if not exist "' + exeName + '" goto fail',
+      'rmdir /s /q "_update_extracted" >nul 2>&1',
+      'del /f /q "_update.zip" >nul 2>&1',
+      'start "" "' + exeName + '"',
+      'goto cleanup',
+      ':fail',
+      '  if exist "' + exeName + '.lockcheck" ren "' + exeName + '.lockcheck" "' + exeName + '" >nul 2>&1',
+      '  echo Автообновление не удалось — запущена прежняя версия, ничего не потеряно. > "_update_error.txt"',
+      '  start "" "' + exeName + '"',
+      ':cleanup',
+      'del /f /q "%~f0"'
+    ].join('\r\n');
+    await nlCall('filesystem.writeFile', { path: applyBatPath, data: batContent }, 10000);
+
+    setStatus('Устанавливаю и перезапускаю...');
+    // /MIN + detached cmd-обёртка: помощник должен пережить закрытие текущего приложения ниже.
+    nlCall('os.execCommand', { command: 'cmd.exe /C start "" /MIN "' + applyBatPath + '"', background: true }, 5000).catch(function () {});
+    setTimeout(function () {
+      nlCall('app.exit', {}, 5000).catch(function () {
+        showModal('Обновление готово', 'Закройте приложение вручную — новая версия запустится автоматически.');
+      });
+    }, 800);
+  } catch (e) {
+    logW('Update', 'установка обновления не удалась: ' + e.message);
+    setStatus('Ошибка установки: ' + e.message);
+    if (btnEl) btnEl.disabled = false;
   }
 }
 
@@ -6613,6 +6824,11 @@ document.getElementById('clearData').addEventListener('click', function () {
   updateFavoritesPage();
   renderTable();
 });
+
+const appVersionLabelEl = document.getElementById('appVersionLabel');
+if (appVersionLabelEl) appVersionLabelEl.textContent = APP_VERSION;
+document.getElementById('checkUpdateBtn').addEventListener('click', checkForAppUpdate);
+document.getElementById('downloadUpdateBtn').addEventListener('click', downloadAndApplyUpdate);
 
 document.getElementById('viewList').addEventListener('click', function () {
   viewMode = 'list';
