@@ -6540,6 +6540,52 @@ function centerJournalViewOnPair(candles, pair) {
   return { visibleCount: visibleCount, offset: offset };
 }
 
+// Кнопки таймфрейма в шапке модалки журнала — по фидбегу "сделай таймфрейм": до этого график сам
+// подбирал ОДИН таймфрейм под диапазон истории (pickJournalTf) без возможности переключить руками.
+// '1' здесь и далее — те же короткие коды, что уже использует основной график приложения (см.
+// mexcKlineInterval/currentTF) — 1м/5м/15м/1ч/4ч/1д. "1s" в списке нет: у MEXC REST klines нет
+// секундного таймфрейма вообще, показывать кнопку, которая ничего не может отдать, было бы нечестно.
+const JOURNAL_TF_OPTIONS = [
+  { key: '1', label: '1м' }, { key: '5', label: '5м' }, { key: '15', label: '15м' },
+  { key: '60', label: '1ч' }, { key: '240', label: '4ч' }, { key: 'D', label: '1д' }
+];
+function renderJournalTfPills() {
+  const el = document.getElementById('journalTfPills');
+  if (!el || !journalChartState) return;
+  el.innerHTML = JOURNAL_TF_OPTIONS.map(function (o) {
+    return '<button type="button" class="journal-tf-pill' + (o.key === journalChartState.tf ? ' active' : '') + '" data-tf="' + o.key + '">' + o.label + '</button>';
+  }).join('');
+}
+let journalTfPillsWired = false;
+function wireJournalTfPills() {
+  if (journalTfPillsWired) return;
+  journalTfPillsWired = true;
+  const el = document.getElementById('journalTfPills');
+  if (!el) return;
+  el.addEventListener('click', async function (e) {
+    const btn = e.target.closest('.journal-tf-pill[data-tf]');
+    if (!btn || !journalChartState) return;
+    const tf = btn.dataset.tf;
+    if (tf === journalChartState.tf) return;
+    const prevTf = journalChartState.tf;
+    journalChartState.tf = tf; // выставляем сразу — кнопка не должна "залипать" на старом ТФ, пока грузится
+    renderJournalTfPills();
+    try {
+      const candles = await fetchKlines(journalChartState.raw, tf, 1000);
+      if (!candles.length || !journalChartState) return;
+      journalChartState.candles = candles;
+      const selPair = journalChartState.pairs[journalChartState.selectedPairIndex];
+      journalChartState.view = selPair ? centerJournalViewOnPair(candles, selPair) : null;
+      const canvas = document.getElementById('journalChartCanvas');
+      if (canvas) drawJournalChart(canvas, candles);
+    } catch (err) {
+      journalChartState.tf = prevTf; // откатываем выбор — новый ТФ реально не загрузился
+      renderJournalTfPills();
+      logW('Journal', 'не удалось переключить таймфрейм на ' + tf + ': ' + err.message);
+    }
+  });
+}
+
 // "График должен быть живой и двигаться" — периодически (не через WS, REST klines/myTrades того же
 // пути, что и первая загрузка) подтягивает свежие свечи и сделки, пока модалка открыта, и
 // перерисовывает график/список. Если пользователь смотрел на ПОСЛЕДНЮЮ позицию (обычный случай —
@@ -6556,8 +6602,10 @@ function startJournalLiveRefresh(asset, raw) {
     try {
       const trades = await fetchMyTrades(raw, 500);
       if (!trades.length) return;
+      // Если пользователь сам выбрал таймфрейм кнопкой в шапке (journalTfPills) — уважаем его выбор
+      // и на "живых" тиках тоже, а не тихо подменяем автоподобранным на каждое обновление.
       const backMs = Date.now() - trades[0].time;
-      const tf = pickJournalTf(backMs);
+      const tf = journalChartState.tf || pickJournalTf(backMs);
       const candles = await fetchKlines(raw, tf, 1000);
       if (!candles.length || !journalChartState) return;
       const pairs = computeTradePairsForChart(trades);
@@ -6589,6 +6637,7 @@ async function openJournalForAsset(asset, raw) {
   const emptyEl = document.getElementById('journalChartEmpty');
   const listEl = document.getElementById('journalTradesList');
   const canvas = document.getElementById('journalChartCanvas');
+  const tfPillsEl = document.getElementById('journalTfPills');
   if (!overlay || !canvas) return;
 
   journalChartState = null;
@@ -6596,6 +6645,7 @@ async function openJournalForAsset(asset, raw) {
   overlay.classList.add('active');
   titleEl.innerHTML = '<i class="ri-file-list-3-line"></i> ' + asset + '/USDT — журнал сделок';
   listEl.innerHTML = '';
+  if (tfPillsEl) tfPillsEl.innerHTML = '';
   const ctx2d = canvas.getContext('2d');
   ctx2d.clearRect(0, 0, canvas.width, canvas.height);
   emptyEl.style.display = 'flex';
@@ -6622,11 +6672,16 @@ async function openJournalForAsset(asset, raw) {
     }
     emptyEl.style.display = 'none';
     const selectedPairIndex = pairs.length - 1; // по умолчанию — самая свежая закрытая сделка
-    journalChartState = { candles: candles, trades: trades, pairs: pairs, selectedPairIndex: selectedPairIndex, view: centerJournalViewOnPair(candles, pairs[selectedPairIndex]) };
+    journalChartState = {
+      asset: asset, raw: raw, tf: tf, candles: candles, trades: trades, pairs: pairs,
+      selectedPairIndex: selectedPairIndex, view: centerJournalViewOnPair(candles, pairs[selectedPairIndex])
+    };
     wireJournalChartInteractions(canvas);
     wireJournalTradesListClick();
+    wireJournalTfPills();
     drawJournalChart(canvas, candles);
     renderJournalTradesList(pairs);
+    renderJournalTfPills();
     startJournalLiveRefresh(asset, raw);
   } catch (e) {
     emptyEl.style.display = 'flex';
@@ -6958,11 +7013,16 @@ window.__testJournalChart = function () {
   ];
   const pairs = computeTradePairsForChart(trades);
   const selectedPairIndex = pairs.length - 1;
-  journalChartState = { candles: candles, trades: trades, pairs: pairs, selectedPairIndex: selectedPairIndex, view: centerJournalViewOnPair(candles, pairs[selectedPairIndex]) };
+  journalChartState = {
+    asset: 'TEST', raw: 'TESTUSDT', tf: '5', candles: candles, trades: trades, pairs: pairs,
+    selectedPairIndex: selectedPairIndex, view: centerJournalViewOnPair(candles, pairs[selectedPairIndex])
+  };
   wireJournalChartInteractions(canvas);
   wireJournalTradesListClick();
+  wireJournalTfPills();
   drawJournalChart(canvas, candles);
   renderJournalTradesList(pairs);
+  renderJournalTfPills();
 };
 
 console.log('MEXC Screener запущен (MEXC Spot WS v3, protobuf)');
