@@ -957,12 +957,18 @@ body {
   border-radius: 8px; font-size: 11.5px; font-family: var(--font-mono); margin-bottom: 5px; border-left: 3px solid transparent;
   border: 1px solid transparent; border-left-width: 3px; transition: transform .12s ease, border-color .12s ease, background .12s ease;
   animation: journalRowIn .28s cubic-bezier(.16,1,.3,1) both; animation-delay: calc(var(--row-i, 0) * 18ms);
+  cursor: pointer;
 }
 .journal-trade-row:hover { transform: translateX(-2px); border-color: rgba(255,255,255,.14); }
 .journal-trade-row.buy { border-left-color: var(--green); background: rgba(0,192,118,.07); }
 .journal-trade-row.buy:hover { background: rgba(0,192,118,.12); }
 .journal-trade-row.sell { border-left-color: var(--red); background: rgba(248,73,96,.07); }
 .journal-trade-row.sell:hover { background: rgba(248,73,96,.12); }
+/* Выбранная (показанная сейчас на графике) позиция — заметно светлее и с рамкой на весь периметр,
+   не только левый край, чтобы явно выделяться среди остальных строк списка. */
+.journal-trade-row.active { border-color: rgba(255,255,255,.3); box-shadow: 0 0 0 1px rgba(255,255,255,.08) inset; }
+.journal-trade-row.buy.active { background: rgba(0,192,118,.16); }
+.journal-trade-row.sell.active { background: rgba(248,73,96,.16); }
 .journal-trade-side { display: inline-flex; align-items: center; gap: 4px; }
 .journal-trade-side.buy { color: var(--green); font-weight: 700; }
 .journal-trade-side.sell { color: var(--red); font-weight: 700; }
