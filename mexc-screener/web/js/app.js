@@ -4009,10 +4009,14 @@ function buildBalanceStatsGridHtml(hist, total, assetCount, dustCount) {
   return tiles + assetsTile;
 }
 
-// --- Календарь P&L: изменение стоимости портфеля по дням, на основе тех же снимков BALANCE_HISTORY,
-// которыми уже пользуются стат-плитки и "заработано по монетам" — просто агрегированные по дням.
-// Важная оговорка (как и у остальной статистики баланса): это изменение ОБЩЕЙ стоимости портфеля,
-// а не "чистый" реализованный P&L по сделкам — ввод/вывод средств тоже повлияет на цифру дня.
+// --- Календарь P&L: результат ПО ЗАКРЫТЫМ СДЕЛКАМ за каждый день (сумма pnl всех realized-сделок
+// с этой датой), а не изменение общей стоимости портфеля по снимкам баланса, как было раньше.
+// Причина смены подхода: изменение стоимости портфеля требует снимка ЗА ПРЕДЫДУЩИЙ день как опорную
+// точку (старая computeDailyPnlMap(hist), см. git-историю) — для активного скальпера/дневного трейдера, у которого
+// баланс большую часть времени лежит в USDT между сделками, это часто даёт "+0.00%" за сегодня, даже
+// если реальный результат по сделкам за сегодня ощутимо в плюсе (просто ЗА ВЧЕРА снимка ещё не было,
+// не с чем сравнить). Реализованный PnL по сделкам не требует никакой "опорной точки" — работает
+// с первой же сделки, ровно то же число, что уже показывают "Обзор"/P&L-плитки/"Лучший день" на Рисках.
 const RU_MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 let balanceCalendarMonth = new Date(); // какой месяц сейчас показан в календаре (число дня не важно)
 
@@ -4020,21 +4024,17 @@ function balCalDayKey(d) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
-// Map dayKey -> { abs, pct, endValue } — изменение относительно последнего снимка ПРЕДЫДУЩЕГО дня,
-// у которого были данные (не обязательно вчера, если в истории есть пропуски).
-function computeDailyPnlMap(hist) {
+// Map dayKey -> { abs, count } — сумма pnl всех реализованных сделок за этот день + их количество
+// (количество показывается в подсказке при наведении, см. renderBalanceCalendarWithTrades).
+function computeDailyRealizedPnlMap(trades) {
   const map = new Map();
-  if (!hist || !hist.length) return map;
-  const lastOfDay = new Map();
-  hist.forEach(function (p) { lastOfDay.set(balCalDayKey(new Date(p.t)), p.v); });
-  const sortedDays = Array.from(lastOfDay.keys()).sort();
-  let prevValue = null;
-  sortedDays.forEach(function (key) {
-    const v = lastOfDay.get(key);
-    if (prevValue != null) {
-      map.set(key, { abs: v - prevValue, pct: prevValue > 0 ? (v - prevValue) / prevValue * 100 : 0, endValue: v });
-    }
-    prevValue = v;
+  if (!trades || !trades.length) return map;
+  trades.forEach(function (t) {
+    const key = balCalDayKey(new Date(t.time));
+    const entry = map.get(key) || { abs: 0, count: 0 };
+    entry.abs += t.pnl;
+    entry.count++;
+    map.set(key, entry);
   });
   return map;
 }
@@ -4042,14 +4042,27 @@ function computeDailyPnlMap(hist) {
 // animate=false — используется при "лёгком" фоновом обновлении раз в 3с (см. lightRefreshFinresContent),
 // чтобы значения дня обновлялись живьём, но карточки не переигрывали анимацию появления каждый тик.
 // animate=true (по умолчанию) — при открытии вкладки P&L и при навигации по месяцам.
+//
+// Сама сетка строится синхронно из УЖЕ закешированных сделок (если finresRealized уже когда-либо
+// грузился в этой сессии — типичный случай при переключении вкладок туда-обратно), чтобы не мигать
+// пустым календарём на каждое открытие вкладки, и одновременно фоново запрашивает свежие данные
+// (тот же 60с-кэш finresLoadRealized, что и у остальной статистики Финреза).
 function renderBalanceCalendar(animate) {
+  if (finresRealized && !finresRealized.loading) renderBalanceCalendarWithTrades(finresRealized.trades, animate);
+  finresLoadRealized(false).then(function (data) {
+    if (finresTab !== 'pnl') return;
+    renderBalanceCalendarWithTrades(data.trades, animate);
+  });
+}
+
+function renderBalanceCalendarWithTrades(trades, animate) {
   animate = animate !== false;
   const grid = document.getElementById('balCalGrid');
   const label = document.getElementById('balCalMonthLabel');
   const summaryEl = document.getElementById('balCalSummary');
-  if (!grid || !label || !summaryEl || !lastBalanceState) return;
+  if (!grid || !label || !summaryEl) return;
 
-  const dailyMap = computeDailyPnlMap(lastBalanceState.hist);
+  const dailyMap = computeDailyRealizedPnlMap(trades);
   const year = balanceCalendarMonth.getFullYear();
   const month = balanceCalendarMonth.getMonth();
   label.textContent = RU_MONTHS[month] + ' ' + year;
@@ -4089,7 +4102,9 @@ function renderBalanceCalendar(animate) {
       innerCls += isFuture ? ' future' : ' no-data';
     }
     cellIndex++;
-    const titleAttr = entry ? (key + ': ' + (entry.abs >= 0 ? '+' : '-') + fmtUsd(Math.abs(entry.abs)).slice(1)) : key;
+    const titleAttr = entry
+      ? (key + ': ' + (entry.abs >= 0 ? '+' : '-') + fmtUsd(Math.abs(entry.abs)).slice(1) + ' (' + entry.count + ' сдел' + (entry.count === 1 ? 'ка' : (entry.count < 5 ? 'ки' : 'ок')) + ')')
+      : key;
     html += '<div class="' + cls + '" title="' + titleAttr + '">' +
       '<div class="' + innerCls + '" style="' + styleAttr + '"><span class="balcal-daynum">' + d + '</span>' + amountHtml + '</div></div>';
   }
@@ -4097,8 +4112,8 @@ function renderBalanceCalendar(animate) {
   grid.innerHTML = html;
 
   summaryEl.innerHTML = monthDaysWithData
-    ? 'За месяц: <span class="' + (monthDelta >= 0 ? 'up' : 'down') + '">' + (monthDelta >= 0 ? '+' : '-') + fmtUsd(Math.abs(monthDelta)).slice(1) + '</span> · дней с данными: ' + monthDaysWithData
-    : 'Пока нет данных за этот месяц — снимки баланса копятся, пока открыта эта страница.';
+    ? 'За месяц: <span class="' + (monthDelta >= 0 ? 'up' : 'down') + '">' + (monthDelta >= 0 ? '+' : '-') + fmtUsd(Math.abs(monthDelta)).slice(1) + '</span> · дней со сделками: ' + monthDaysWithData
+    : 'Пока нет реализованных сделок за этот месяц.';
 }
 
 // ============================================================================================
@@ -4813,28 +4828,41 @@ function renderFinresAssetsTab(el, animate) {
 
 // ------------------------------------------------------------------------------------------
 // Финрез — вкладка "Риски": концентрация портфеля (доля крупнейшего актива, топ-3) и просадка
-// по истории снимков баланса. Считается на лету из lastBalanceState — без новых запросов к MEXC.
+// по эквити-кривой реализованных сделок. Концентрация считается на лету из lastBalanceState —
+// без новых запросов к MEXC.
 // ------------------------------------------------------------------------------------------
+// Стейблкоины намеренно исключены из "крупнейший актив/топ-3": для активного трейдера, который между
+// сделками возвращается в USDT (баланс между округлениями почти целиком в кэше), буквальная
+// концентрация "100% в USDT" технически верна, но вводит в заблуждение — это не риск в том смысле,
+// в каком им является 100% в одной волатильной монете. Проценты при этом всё равно считаются от
+// ОБЩЕЙ стоимости портфеля (не только от суммы нестейбл-активов) — так цифра честно отражает реальную
+// долю риска в портфеле целиком, а не раздувается искусственно, если нестейблов совсем немного.
 function computeFinresConcentration(priced, total) {
-  if (!priced.length || !(total > 0)) return { top1: null, top1Pct: 0, top3Pct: 0 };
-  const top1 = priced[0];
+  const nonStable = priced.filter(function (r) { return !STABLECOINS.hasOwnProperty(r.asset); });
+  if (!nonStable.length || !(total > 0)) return { top1: null, top1Pct: 0, top3Pct: 0 };
+  const top1 = nonStable[0]; // priced уже отсортирован по usdtValue убыв. (см. renderAccountBalances)
   const top1Pct = top1.usdtValue / total * 100;
-  const top3Pct = priced.slice(0, 3).reduce(function (s, r) { return s + r.usdtValue; }, 0) / total * 100;
+  const top3Pct = nonStable.slice(0, 3).reduce(function (s, r) { return s + r.usdtValue; }, 0) / total * 100;
   return { top1: top1, top1Pct: top1Pct, top3Pct: top3Pct };
 }
 
-// Максимальная просадка стоимости портфеля от исторического пика (по накопленной истории снимков).
-function computeFinresMaxDrawdown(hist) {
-  if (!hist || hist.length < 2) return null;
-  let peak = hist[0].v, maxDdPct = 0, maxDdAbs = 0;
-  hist.forEach(function (p) {
-    if (p.v > peak) peak = p.v;
-    if (peak > 0) {
-      const ddPct = (p.v - peak) / peak * 100;
-      if (ddPct < maxDdPct) { maxDdPct = ddPct; maxDdAbs = p.v - peak; }
-    }
+// Максимальная просадка ЭКВИТИ-КРИВОЙ реализованных сделок (нарастающая сумма pnl по времени) от
+// собственного пика — не просадка стоимости портфеля по снимкам баланса, как было раньше (см.
+// комментарий у computeDailyRealizedPnlMap: та же причина смены подхода — портфель активного
+// трейдера большую часть времени лежит в USDT между сделками, и его "просадка" почти всегда 0%,
+// даже когда серия убыточных сделок реально просадила P&L). pct считается от пика в деньгах — если
+// эквити ещё ни разу не выходила в плюс (пик <= 0), процент показать честно не от чего, тогда null.
+function computeFinresMaxDrawdownFromTrades(trades) {
+  if (!trades || trades.length < 2) return null;
+  const sorted = trades.slice().sort(function (a, b) { return a.time - b.time; });
+  let cum = 0, peak = 0, maxDdAbs = 0, peakAtMaxDd = 0;
+  sorted.forEach(function (t) {
+    cum += t.pnl;
+    if (cum > peak) peak = cum;
+    const dd = cum - peak;
+    if (dd < maxDdAbs) { maxDdAbs = dd; peakAtMaxDd = peak; }
   });
-  return { pct: maxDdPct, abs: maxDdAbs };
+  return { abs: maxDdAbs, pct: peakAtMaxDd > 1e-9 ? (maxDdAbs / peakAtMaxDd * 100) : null };
 }
 
 // Показатели РИСКА по реализованным сделкам (в отличие от computeFinresConcentration/MaxDrawdown
@@ -4884,7 +4912,8 @@ function renderFinresRiskTradeStatsHtml(data, loading) {
     return statCard('Лучший день', '···', null, null) +
       statCard('Худший день', '···', null, null) +
       statCard('Серии подряд', '···', null, null) +
-      statCard('Profit Factor', '···', null, null);
+      statCard('Profit Factor', '···', null, null) +
+      statCard('Просадка эквити', '···', null, null);
   }
   const stats = data && data.trades.length ? computeFinresTradeStats(data.trades) : null;
   if (!stats) {
@@ -4892,10 +4921,12 @@ function renderFinresRiskTradeStatsHtml(data, loading) {
   }
   const pf = stats.profitFactor === Infinity ? '∞' : stats.profitFactor.toFixed(2);
   const rr = stats.riskReward === Infinity ? '∞' : stats.riskReward.toFixed(2);
+  const dd = computeFinresMaxDrawdownFromTrades(data.trades);
   return statCard('Лучший день', (stats.bestDay >= 0 ? '+' : '-') + fmtUsd(Math.abs(stats.bestDay)).slice(1), stats.bestDay >= 0 ? 'up' : 'down', 'по реализованному PnL') +
     statCard('Худший день', (stats.worstDay >= 0 ? '+' : '-') + fmtUsd(Math.abs(stats.worstDay)).slice(1), stats.worstDay >= 0 ? 'up' : 'down', 'по реализованному PnL') +
     statCard('Серии подряд', stats.maxWinStreak + ' / ' + stats.maxLossStreak, null, 'макс. побед / макс. убытков') +
-    statCard('Profit Factor', pf, stats.profitFactor >= 1.5 ? 'up' : (stats.profitFactor < 1 ? 'down' : null), 'Risk/Reward ' + rr);
+    statCard('Profit Factor', pf, stats.profitFactor >= 1.5 ? 'up' : (stats.profitFactor < 1 ? 'down' : null), 'Risk/Reward ' + rr) +
+    statCard('Просадка эквити', dd ? '-' + fmtUsd(Math.abs(dd.abs)).slice(1) : '$0.00', dd && dd.abs < -0.01 ? 'down' : 'muted', dd && dd.pct != null ? dd.pct.toFixed(2) + '% от пика P&L' : 'ещё не выходили в плюс');
 }
 
 // Раунд 12 ("доработать Риски"): третья строка — риск ОТКРЫТЫХ (ещё не проданных) позиций, которого
@@ -4931,9 +4962,14 @@ function renderFinresRiskTab(el, animate) {
     el.innerHTML = '<div class="finres-tab-body finres-anim-in"><div class="finres-empty"><i class="ri-wallet-3-line"></i>Нет данных баланса — откройте вкладку "Настройки аккаунта" и дождитесь подключения.</div></div>';
     return;
   }
-  const priced = lastBalanceState.priced, total = lastBalanceState.total, hist = lastBalanceState.hist;
+  const priced = lastBalanceState.priced, total = lastBalanceState.total;
   const conc = computeFinresConcentration(priced, total);
-  const dd = computeFinresMaxDrawdown(hist);
+  // "Просадка от пика" переехала во вторую строку (эквити-кривая реализованных сделок, см.
+  // computeFinresMaxDrawdownFromTrades) — просадка стоимости ПОРТФЕЛЯ здесь была почти всегда 0% для
+  // активного трейдера (баланс между сделками в основном в кэше), вводила в заблуждение.
+  const stableValue = priced.filter(function (r) { return STABLECOINS.hasOwnProperty(r.asset); })
+    .reduce(function (s, r) { return s + r.usdtValue; }, 0);
+  const stablePct = total > 0 ? (stableValue / total * 100) : 0;
 
   function statCard(label, valueHtml, cls, subHtml) {
     return '<div class="finres-stat-card' + (cls ? ' ' + cls : '') + '"><div class="finres-stat-label">' + label + '</div>' +
@@ -4943,9 +4979,9 @@ function renderFinresRiskTab(el, animate) {
 
   const top1Cls = conc.top1Pct >= 50 ? 'down' : (conc.top1Pct >= 30 ? null : 'up');
   const statsHtml =
-    statCard('Крупнейший актив', conc.top1 ? conc.top1.asset : '—', top1Cls, conc.top1 ? conc.top1Pct.toFixed(1) + '% портфеля' : null) +
-    statCard('Топ-3 концентрация', conc.top3Pct.toFixed(1) + '%', conc.top3Pct >= 70 ? 'down' : null, 'доля трёх крупнейших активов') +
-    statCard('Просадка от пика', dd ? dd.pct.toFixed(2) + '%' : '—', dd && dd.pct < -0.01 ? 'down' : 'muted', dd ? fmtUsd(dd.abs) : 'копим историю') +
+    statCard('Крупнейший актив', conc.top1 ? conc.top1.asset : '—', top1Cls, conc.top1 ? conc.top1Pct.toFixed(1) + '% портфеля' : (priced.length ? 'нет открытых позиций' : null)) +
+    statCard('Топ-3 концентрация', conc.top3Pct.toFixed(1) + '%', conc.top3Pct >= 70 ? 'down' : null, 'доля трёх крупнейших НЕ-стейблкоинов') +
+    statCard('В кэше (USDT/USDC…)', stablePct.toFixed(1) + '%', null, fmtUsd(stableValue) + ' вне рынка') +
     statCard('Активов в портфеле', String(priced.length), null, 'учтено в общей стоимости');
 
   const warnHtml = conc.top1 && conc.top1Pct >= 50
@@ -5447,10 +5483,20 @@ function computeOpenPositionForSymbol(trades) {
   return position > 1e-9 ? { qty: position, costBasis: costBasis, avgCost: costBasis / position } : null;
 }
 
-// Тянет /api/v3/myTrades по каждой монете из текущего баланса (последовательно — так безопаснее
-// для лимитов MEXC, чем параллельный залп из N подписанных запросов) и считает реализованный PnL.
-// Чистая "рабочая" часть загрузки — НЕ трогает finresRealized/флаг loading сама, этим управляет
-// обёртка finresLoadRealized() ниже (см. её комментарий про самовосстановление после сбоя).
+// Сколько символов тянуть ОДНОВРЕМЕННО в finresLoadRealizedCore ниже. Раньше было строго
+// последовательно ("безопаснее для лимитов MEXC") — но для активного скальпера/дневного трейдера
+// (см. автообнаружение монет через приватный поток сделок выше) knownSymbols легко разрастается
+// до полусотни+ монет, а каждый запрос при этом ещё и падает по CORS в браузере и уходит в куда более
+// медленный native-фолбэк через curl.exe (отдельный процесс на КАЖДЫЙ запрос) — строго
+// последовательно это реально могло растягиваться на десятки секунд и ощущалось как "Финрез завис/
+// не грузится". 5 одновременных запросов — весь список уходит кратно быстрее, а MEXC даже для
+// подписанных приватных эндпоинтов даёт заметно больший запас по лимиту, чем 5 req/s.
+const FINRES_LOAD_CONCURRENCY = 5;
+
+// Тянет /api/v3/myTrades по каждой монете из текущего баланса (батчами по FINRES_LOAD_CONCURRENCY
+// одновременно, см. её комментарий) и считает реализованный PnL. Чистая "рабочая" часть загрузки —
+// НЕ трогает finresRealized/флаг loading сама, этим управляет обёртка finresLoadRealized() ниже
+// (см. её комментарий про самовосстановление после сбоя).
 async function finresLoadRealizedCore() {
   // Символы для запроса — объединение ТЕКУЩЕГО баланса и всего, что когда-либо было "замечено"
   // (knownSymbols, см. выше): так полностью закрытая (проданная в ноль) позиция не выпадает из
@@ -5472,45 +5518,55 @@ async function finresLoadRealizedCore() {
   const bySymbol = {};
   const openPositions = [];
   let lastError = null;
-  for (let i = 0; i < targets.length; i++) {
-    const t = targets[i];
-    try {
-      const trades = await withRetry(function () { return fetchMyTrades(t.raw, 1000); }, 3, [1000, 3000, 8000], 'Finrez:' + t.asset, function (err) {
-        return !/invalid symbol/i.test((err && err.message) || '');
-      });
-      bySymbol[t.asset] = trades;
-      computeRealizedPnlForSymbol(trades).forEach(function (r) {
-        allRealized.push({ time: r.time, asset: t.asset, pnl: r.pnl, price: r.price, qty: r.qty, cost: r.cost });
-      });
-      // Нереализованный риск открытой позиции (для вкладки "Риски") — только если знаем текущую
-      // живую цену актива (из текущего баланса или тикера); без цены оценить риск честно нельзя.
-      const openPos = computeOpenPositionForSymbol(trades);
-      if (openPos) {
-        const priceRow = priced.filter(function (r) { return r.asset === t.asset; })[0];
-        const currentPrice = priceRow ? priceRow.price : mexcUsdtPrice(t.asset);
-        if (currentPrice != null) {
-          const value = openPos.qty * currentPrice;
-          const unrealizedPnl = value - openPos.costBasis;
-          openPositions.push({
-            asset: t.asset, qty: openPos.qty, avgCost: openPos.avgCost, currentPrice: currentPrice,
-            costBasis: openPos.costBasis, value: value, unrealizedPnl: unrealizedPnl,
-            unrealizedPct: openPos.costBasis > 1e-9 ? (unrealizedPnl / openPos.costBasis * 100) : 0
-          });
+  // Каждый "воркер" вынимает следующий ещё не обработанный символ из общей очереди targets и обрабатывает
+  // его целиком (включая retry/backoff) — как только освобождается, берёт следующий. Общий обход
+  // завершается, когда очередь пуста; PnL/allRealized/openPositions — общие массивы, но т.к. JS
+  // однопоточный и мутация происходит только между await (никогда параллельно), гонок здесь нет.
+  let nextIndex = 0;
+  async function worker() {
+    while (nextIndex < targets.length) {
+      const t = targets[nextIndex++];
+      try {
+        const trades = await withRetry(function () { return fetchMyTrades(t.raw, 1000); }, 3, [1000, 3000, 8000], 'Finrez:' + t.asset, function (err) {
+          return !/invalid symbol/i.test((err && err.message) || '');
+        });
+        bySymbol[t.asset] = trades;
+        computeRealizedPnlForSymbol(trades).forEach(function (r) {
+          allRealized.push({ time: r.time, asset: t.asset, pnl: r.pnl, price: r.price, qty: r.qty, cost: r.cost });
+        });
+        // Нереализованный риск открытой позиции (для вкладки "Риски") — только если знаем текущую
+        // живую цену актива (из текущего баланса или тикера); без цены оценить риск честно нельзя.
+        const openPos = computeOpenPositionForSymbol(trades);
+        if (openPos) {
+          const priceRow = priced.filter(function (r) { return r.asset === t.asset; })[0];
+          const currentPrice = priceRow ? priceRow.price : mexcUsdtPrice(t.asset);
+          if (currentPrice != null) {
+            const value = openPos.qty * currentPrice;
+            const unrealizedPnl = value - openPos.costBasis;
+            openPositions.push({
+              asset: t.asset, qty: openPos.qty, avgCost: openPos.avgCost, currentPrice: currentPrice,
+              costBasis: openPos.costBasis, value: value, unrealizedPnl: unrealizedPnl,
+              unrealizedPct: openPos.costBasis > 1e-9 ? (unrealizedPnl / openPos.costBasis * 100) : 0
+            });
+          }
         }
-      }
-    } catch (e) {
-      // "Invalid symbol" значит, что для этого актива на споте MEXC вообще нет такой пары (например,
-      // raw пришлось честно угадать через assetToRawSymbol, и угадка не подтвердилась) — это НЕ сбой
-      // подключения и не повод пугать пользователя сырым текстом ошибки API, поэтому такую конкретную
-      // причину пропускаем молча. Любую другую ошибку (сеть, лимиты, авторизация) по-прежнему показываем.
-      if (/invalid symbol/i.test(e.message || '')) {
-        logD('Finrez', t.asset + ': invalid symbol (' + t.raw + '), пропущено');
-      } else {
-        lastError = e.message;
-        logW('Finrez', t.asset + ' (' + t.raw + '): не удалось загрузить сделки после повторов — ' + e.message);
+      } catch (e) {
+        // "Invalid symbol" значит, что для этого актива на споте MEXC вообще нет такой пары (например,
+        // raw пришлось честно угадать через assetToRawSymbol, и угадка не подтвердилась) — это НЕ сбой
+        // подключения и не повод пугать пользователя сырым текстом ошибки API, поэтому такую конкретную
+        // причину пропускаем молча. Любую другую ошибку (сеть, лимиты, авторизация) по-прежнему показываем.
+        if (/invalid symbol/i.test(e.message || '')) {
+          logD('Finrez', t.asset + ': invalid symbol (' + t.raw + '), пропущено');
+        } else {
+          lastError = e.message;
+          logW('Finrez', t.asset + ' (' + t.raw + '): не удалось загрузить сделки после повторов — ' + e.message);
+        }
       }
     }
   }
+  await Promise.all(
+    Array.from({ length: Math.min(FINRES_LOAD_CONCURRENCY, targets.length) }, worker)
+  );
   allRealized.sort(function (a, b) { return a.time - b.time; });
   openPositions.sort(function (a, b) { return Math.abs(b.unrealizedPnl) - Math.abs(a.unrealizedPnl); });
   return { trades: allRealized, bySymbol: bySymbol, openPositions: openPositions, loadedAt: Date.now(), loading: false, error: lastError };
