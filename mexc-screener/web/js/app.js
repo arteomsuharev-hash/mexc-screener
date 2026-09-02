@@ -3933,47 +3933,31 @@ function drawJournalChart(canvas, candles, trades) {
     ctx.fillRect(x - bodyW / 2, top, bodyW, bh);
   });
 
-  // Маркеры входа/выхода — простая двухштриховая "галочка" (без заливки, без свечения): по фидбеку
-  // "должна быть просто красная и зелёная чайка" — минималистичный шеврон ^ (вход) / v (выход) точно
-  // на цене исполнения. Сделки одной стороны на одной свече по-прежнему группируются в один маркер
-  // по средней цене (иначе на плотном скальпинге несколько маркеров подряд опять сливались бы) —
-  // с "×N" рядом, если сделок в кластере больше одной. Считаются только сделки в ТЕКУЩЕМ видимом окне.
-  const tradeGroups = {};
+  // Маркеры входа/выхода — простая двухштриховая "галочка" (без заливки, без свечения, без подписи
+  // числом рядом): по фидбеку "должна быть просто красная и зелёная чайка" и "каждый вход — это
+  // новая сделка, маркерами показывается только одна сделка, без предыдущих" — КАЖДАЯ сделка рисует
+  // СВОЙ отдельный маркер на СВОЕЙ реальной цене исполнения (без усреднения/группировки с другими
+  // сделками той же свечи, как было раньше) — раз цены исполнения у разных сделок обычно чуть
+  // отличаются, маркеры естественно не сливаются в одну точку. Считаются только сделки в текущем
+  // видимом окне (зум/пан).
   (trades || []).forEach(function (t) {
     let idx = Math.floor((t.time - candles[0].t) / intervalMs);
     idx = Math.max(0, Math.min(n - 1, idx));
     if (idx < startIdx || idx >= endIdx) return;
-    const key = idx + '_' + (t.buy ? 'b' : 's');
-    if (!tradeGroups[key]) tradeGroups[key] = { idx: idx, buy: t.buy, sumPrice: 0, count: 0 };
-    tradeGroups[key].sumPrice += t.price;
-    tradeGroups[key].count++;
-  });
-  Object.keys(tradeGroups).forEach(function (key) {
-    const g = tradeGroups[key];
-    const x = xOfTime(candles[g.idx].t);
-    const y = yOf(g.sumPrice / g.count);
-    const color = g.buy ? '#00C076' : '#F84960';
-
+    const x = xOfTime(candles[idx].t);
+    const y = yOf(t.price);
+    const color = t.buy ? '#00C076' : '#F84960';
     ctx.save();
     ctx.strokeStyle = color;
     ctx.lineWidth = 1.75;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.beginPath();
-    if (g.buy) { ctx.moveTo(x - 5, y + 5); ctx.lineTo(x, y); ctx.lineTo(x + 5, y + 5); }
+    if (t.buy) { ctx.moveTo(x - 5, y + 5); ctx.lineTo(x, y); ctx.lineTo(x + 5, y + 5); }
     else { ctx.moveTo(x - 5, y - 5); ctx.lineTo(x, y); ctx.lineTo(x + 5, y - 5); }
     ctx.stroke();
     ctx.restore();
-
-    if (g.count > 1) {
-      ctx.font = '700 9px var(--font-mono, monospace)';
-      ctx.fillStyle = color;
-      ctx.textBaseline = 'middle';
-      ctx.textAlign = 'left';
-      ctx.fillText('×' + g.count, x + 7, y);
-    }
   });
-  ctx.textAlign = 'left';
 
   ctx.fillStyle = 'rgba(255,255,255,.35)';
   ctx.font = '9px var(--font-mono, monospace)';
