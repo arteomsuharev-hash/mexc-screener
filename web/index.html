@@ -484,6 +484,21 @@
             <div class="setting-control"><button class="settings-btn danger" id="clearData">Очистить</button></div>
           </div>
         </div>
+        <div class="settings-group">
+          <div class="settings-group-title">Обновления</div>
+          <div class="setting-row">
+            <span class="setting-label">Текущая версия</span>
+            <div class="setting-control"><span id="appVersionLabel" style="font-family:var(--font-mono); color:var(--text-muted);">—</span></div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label" id="updateStatusLabel">Проверьте, вышла ли новая версия</span>
+            <div class="setting-control"><button class="settings-btn" id="checkUpdateBtn">Проверить обновления</button></div>
+          </div>
+          <div class="setting-row" id="updateAvailableRow" style="display:none;">
+            <span class="setting-label" id="updateAvailableLabel"></span>
+            <div class="setting-control"><button class="settings-btn" id="downloadUpdateBtn">Скачать и установить</button></div>
+          </div>
+        </div>
       </div>
     </div>
 
