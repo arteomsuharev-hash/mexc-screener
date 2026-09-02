@@ -41,10 +41,26 @@ const MEXC_PROTO_SRC = [
   '  repeated PublicDealsV3ApiItem deals = 1;',
   '  string eventType = 2;',
   '}',
+  // Стакан (partial depth) — только для watchlist-монет (Tier 2, см. ниже), НЕ для всего рынка
+  // разом: MEXC отдаёт его отдельным каналом на символ (spot@public.limit.depth.v3.api.pb@<SYM>@20),
+  // а не единым потоком, как miniTickers. Схема и номер поля (303) подтверждены живым фреймом
+  // MEXC (см. tests/verify_depth_proto.js) и официальным proto-репозиторием mexcdevelop/websocket-proto.
+  'message PublicLimitDepthV3ApiItem {',
+  '  string price = 1;',
+  '  string quantity = 2;',
+  '}',
+  'message PublicLimitDepthsV3Api {',
+  '  repeated PublicLimitDepthV3ApiItem asks = 1;',
+  '  repeated PublicLimitDepthV3ApiItem bids = 2;',
+  '  string eventType = 3;',
+  '  string version = 4;',
+  '  int64 lastOrderCreateTime = 5;',
+  '}',
   'message PushDataV3ApiWrapper {',
   '  string channel = 1;',
   '  oneof body {',
   '    PublicDealsV3Api publicDeals = 301;',
+  '    PublicLimitDepthsV3Api publicLimitDepths = 303;',
   '    PublicMiniTickerV3Api publicMiniTicker = 309;',
   '    PublicMiniTickersV3Api publicMiniTickers = 310;',
   '  }',
@@ -65,11 +81,12 @@ try {
   console.error('MEXC proto schema init failed', e);
 }
 
-// Общие DOM-независимые утилиты (логирование, withRetry, pushRing) вынесены в core-utils.js —
+// Общие DOM-независимые утилиты (логирование, withRetry) вынесены в core-utils.js —
 // загружается отдельным <script> до этого файла (см. index.html) и переиспользуется тестами из
 // tests/ напрямую через require(), без необходимости эмулировать браузерное окружение.
 const logD = MexcCore.logD, logI = MexcCore.logI, logW = MexcCore.logW, logE = MexcCore.logE;
 const withRetry = MexcCore.withRetry;
+const pushRing = MexcCore.pushRing;
 
 let allCoins = [];
 const coinMap = new Map();
@@ -319,6 +336,26 @@ const STRATEGY_DEFS = {
   }
 };
 
+// ============================================
+// WATCHLIST (Tier 2) — дешёвый предфильтр рынка (выше) отдаёт сюда кандидатов на ГЛУБОКИЙ анализ.
+// ------------------------------------------------------------------
+// Скоринг ниже НЕ решает, что монета "интересна" в смысле готового паттерна — это делают
+// детекторы Tier 2 (следующий этап). Его единственная задача — дёшево (O(1) на монету, уже готовые
+// поля с текущего тика) отранжировать рынок по тому, у кого сейчас происходит хоть что-то
+// нестандартное, чтобы ограниченный бюджет WS-подключений на сделки/стакан (см. ниже) тратился не
+// вслепую по алфавиту, а на действительно активные монеты прямо сейчас.
+// ============================================
+function computeWatchlistCandidateScore(c) {
+  if (c.vol24 < STRATEGY_MIN_LIQUID_VOL24) return -1; // мёртвая пара — никогда не кандидат
+  const burst = burstRatio(c);
+  const move = c.vol5s || 0;
+  // "Ровный" оборот (низкий rateCV) — это не шум, а типичная сигнатура алгоритма/бота (см. algo
+  // выше), т.е. САМ ПО СЕБЕ хороший повод присмотреться на тиковом уровне (лесенка, повторяющиеся
+  // размеры сделок) — поэтому бонусим и стабильность, а не только всплески.
+  const steadyBonus = c.rateCV != null ? 1 / (1 + c.rateCV) : 0;
+  return burst + move * 100 + steadyBonus;
+}
+
 function rawSymbol(sym) {
   return String(sym || '').replace('/', '');
 }
@@ -553,6 +590,7 @@ function upsertCoin(row) {
     color: getCoinColor(display)
   };
   coin.signal = getSignal(coin);
+  coin.__wlScore = computeWatchlistCandidateScore(coin);
   coinMap.set(display, coin);
   return coin;
 }
@@ -1793,12 +1831,22 @@ function subscribeDeals(raw) {
   };
   dealsWs.onmessage = function (ev) {
     if (typeof ev.data === 'string') {
-      // Ack/ошибка подписки текстовым JSON-фреймом — раньше молча игнорировался целиком, из-за
-      // чего отклонённая подписка выглядела неотличимо от "просто тихой пары" (вечный спиннер без
-      // единого признака проблемы). Теперь хотя бы логируем, если сервер вернул код ошибки.
+      // Ack/ошибка подписки текстовым JSON-фреймом. MEXC умеет явно ОТКЛОНИТЬ подписку на канал
+      // сделок (замечено на практике: "Reason： Blocked!" — похоже на защиту от слишком частых/
+      // массовых подписок на этот конкретный канал с одного IP) — раньше такой отказ просто уходил
+      // в console.warn и лента молча оставалась пустой НАВСЕГДА (сокет технически "открыт", просто
+      // ничего не пришлёт), выглядя для пользователя как "по этой паре нет сделок". Явно отличаем
+      // этот случай и показываем причину прямо в ленте, вместо вечной тишины.
       try {
         const msg = JSON.parse(ev.data);
-        if (msg.code !== undefined && msg.code !== 0) console.warn('MEXC deals WS:', msg);
+        if (msg.code !== undefined && msg.code !== 0) {
+          logW('WS', 'подписка на сделки отклонена MEXC (' + raw + '): ' + (msg.msg || msg.code));
+          if (currentCoin && currentCoin.raw === raw) {
+            const list = document.getElementById('tradesList');
+            if (list) list.innerHTML = '<div class="trades-empty"><i class="ri-error-warning-line"></i>' +
+              '<span>MEXC отклонил подписку на ленту сделок: ' + String(msg.msg || 'причина не указана').replace(/</g, '&lt;') + '</span></div>';
+          }
+        }
       } catch (e) {}
       return;
     }
@@ -1831,6 +1879,737 @@ function subscribeDeals(raw) {
       if (currentCoin && currentCoin.raw === dealsReconnectRaw) subscribeDeals(dealsReconnectRaw);
     }, 3000);
   };
+}
+
+// ============================================================================
+// TIER 2 — WATCHLIST: глубокий анализ (сделки + стакан) для ОГРАНИЧЕННОГО списка монет
+// ------------------------------------------------------------------
+// Подписки на сделки/стакан — отдельное WS-соединение НА КАЖДЫЙ символ (MEXC не мультиплексирует
+// их в общий miniTickers-поток, см. комментарий у STRATEGY_DEFS), а тысячи пар рынка физически
+// нельзя держать открытыми одновременно — ни по ресурсам браузера, ни из вежливости к MEXC. Поэтому
+// тиковый + стаканный анализ ведётся не по всему рынку, а по watchlist — динамическому списку из
+// WATCHLIST_SIZE (+ форсированные — открытая монета/избранное) самых "интересных прямо сейчас" по
+// дешёвому Tier-1 скору (computeWatchlistCandidateScore выше). Список пересматривается раз в
+// WATCHLIST_EVAL_INTERVAL_MS с гистерезисом (MexcCore.computeWatchlistTransitions, юнит-тест —
+// tests/verify_watchlist_hysteresis.js), чтобы монета на границе топа не дёргала WS туда-обратно
+// каждый цикл.
+// ============================================================================
+const WATCHLIST_SIZE = 20;
+// Жёсткий потолок общего размера watchlist (см. комментарий у MexcCore.computeWatchlistTransitions
+// про то, почему "топ-N по рангу" без явного потолка не ограничивает суммарный размер списка на
+// волатильном рынке) — WATCHLIST_SIZE обычных мест + запас на форсированные (открытая монета +
+// избранное), которые добавляются вне очереди рейтинга.
+const WATCHLIST_HARD_CAP = 25;
+const WATCHLIST_EVICT_MARGIN = 10;
+const WATCHLIST_ADD_STREAK = 2;
+const WATCHLIST_EVICT_STREAK = 3;
+const WATCHLIST_EVAL_INTERVAL_MS = 20000;
+const WATCHLIST_MAX_RECONNECT_FAILS = 10;
+const WATCHLIST_COOLDOWN_MS = 5 * 60 * 1000;
+const WATCHLIST_DEPTH_LEVELS = 20;
+const TIER2_TRADES_CAP = 2000;
+const TIER2_DEPTH_CAP = 600;
+const TIER2_DEPTH_THROTTLE_MS = 500;
+const WATCHLIST_RECONNECT_DELAY_MS = 3000;
+// Живой эксперимент против настоящего MEXC (2026-09) показал: канал СДЕЛОК (spot@public.deals)
+// заметно строже защищён от частых/массовых подписок, чем канал стакана — быстрая серия
+// подписок/отписок на разные символы (ровно то, что делает цикл гистерезиса ниже при первом
+// заполнении watchlist) привела к явному отказу MEXC "Reason： Blocked!" для этого IP на канале
+// сделок, при этом канал стакана в той же сессии продолжал работать нормально. Поэтому НОВЫЕ
+// подписки watchlist растягиваются по времени (см. очередь ниже), а не открываются заливом по
+// WATCHLIST_ADD_STREAK-кандидатам одного цикла разом.
+const WATCHLIST_SUBSCRIBE_STAGGER_MS = 2000;
+// Отказ по политике MEXC ("Blocked") — это не транзиентный сбой сети, быстрый повтор его не
+// исправит и может выглядеть для MEXC ещё более подозрительно. Уходим сразу в тот же cooldown,
+// что и после WATCHLIST_MAX_RECONNECT_FAILS обычных неудач, не тратя быстрые попытки впустую.
+const WATCHLIST_BLOCKED_RE = /blocked/i;
+
+const tier2Trades = new Map();      // symbol ("BTC/USDT") -> ring buffer [{t, price, qty, side:'buy'|'sell'}], cap TIER2_TRADES_CAP
+const tier2Depth = new Map();       // symbol -> ring buffer [{t, bids, asks, bestBid, bestAsk, bidVol, askVol}], cap TIER2_DEPTH_CAP, троттлинг TIER2_DEPTH_THROTTLE_MS
+const watchlist = new Map();        // symbol -> {raw, addedAt, dealsWs, depthWs, dealsFailStreak, depthFailStreak, lastDepthPushAt}
+const watchlistPending = new Set(); // символы, поставленные в очередь на подписку (см. ниже), но ещё физически не подключённые
+const watchlistSubscribeQueue = [];
+let watchlistSubscribeQueueTimer = null;
+const watchlistCandidateStreaks = new Map();
+const watchlistEvictStreaks = new Map();
+const watchlistCooldowns = new Map(); // symbol -> until (ms) — временно исключена из кандидатов после WATCHLIST_MAX_RECONNECT_FAILS подряд
+
+// Здоровье Tier 2 — счётчики для будущей панели диагностики (этап 7 плана), уже сейчас доступны
+// из консоли разработчика для проверки, что watchlist вообще работает (window.__tier2Health, см.
+// самый конец файла).
+const tier2Health = { watchlistSize: 0, watchlistPending: 0, lastEvalAt: 0, tradesIngested: 0, depthPushesIngested: 0, connectionAttempts: 0, cooldownDrops: 0, patternEventsActive: 0 };
+
+function watchlistInCooldown(symbol) {
+  const until = watchlistCooldowns.get(symbol);
+  if (!until) return false;
+  if (until <= Date.now()) { watchlistCooldowns.delete(symbol); return false; }
+  return true;
+}
+
+function tier2ForcedSymbols() {
+  const forced = new Set();
+  if (currentCoin) forced.add(currentCoin.symbol);
+  allCoins.forEach(function (c) { if (c.fav) forced.add(c.symbol); });
+  return forced;
+}
+
+function watchlistHandleConnFail(symbol, kind) {
+  logW('Watchlist', symbol + ': ' + kind + ' — ' + WATCHLIST_MAX_RECONNECT_FAILS + ' неудачных попыток подряд, уходит в cooldown на ' + Math.round(WATCHLIST_COOLDOWN_MS / 60000) + ' мин');
+  watchlistCooldowns.set(symbol, Date.now() + WATCHLIST_COOLDOWN_MS);
+  tier2Health.cooldownDrops++;
+  unsubscribeWatchlistSymbol(symbol);
+}
+
+function openWatchlistDealsWs(symbol, raw, entry) {
+  tier2Health.connectionAttempts++;
+  let sock;
+  try {
+    sock = new WebSocket(MEXC_WS);
+    sock.binaryType = 'arraybuffer';
+  } catch (e) { watchlistHandleConnFail(symbol, 'сделки (не удалось создать сокет)'); return; }
+  entry.dealsWs = sock;
+  sock.onopen = function () {
+    entry.dealsFailStreak = 0;
+    sock.send(JSON.stringify({ method: 'SUBSCRIPTION', params: ['spot@public.deals.v3.api.pb@' + raw] }));
+  };
+  sock.onmessage = function (ev) {
+    if (typeof ev.data === 'string') {
+      // Явный отказ подписки текстовым control-фреймом (code !== 0) — особенно "Blocked ", см.
+      // комментарий у WATCHLIST_SUBSCRIBE_STAGGER_MS. Не разрываем соединение здесь напрямую —
+      // просто помечаем причину и закрываем сокет; ЕДИНСТВЕННОЕ место, которое решает, что делать
+      // дальше (обычный реконнект или сразу cooldown) — onclose ниже, чтобы не задваивать логику.
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg.code !== undefined && msg.code !== 0) {
+          logW('Watchlist', symbol + ': сделки — MEXC отклонил подписку (' + (msg.msg || msg.code) + ')');
+          if (WATCHLIST_BLOCKED_RE.test(msg.msg || '')) entry.dealsBlocked = true;
+          try { sock.close(); } catch (e2) {}
+        }
+      } catch (e) {}
+      return;
+    }
+    const obj = decodeProtoFrame(ev.data);
+    if (!obj || !obj.publicDeals || !obj.publicDeals.deals) return;
+    obj.publicDeals.deals.forEach(function (d) {
+      pushRing(tier2Trades, symbol, { t: Number(d.time) || Date.now(), price: num(d.price), qty: num(d.quantity), side: d.tradeType === 1 ? 'buy' : 'sell' }, TIER2_TRADES_CAP);
+      tier2Health.tradesIngested++;
+    });
+  };
+  sock.onerror = function () {};
+  sock.onclose = function () {
+    if (entry.dealsWs !== sock) return; // сокет уже заменён/символ отписан — не реагируем на устаревшее событие
+    entry.dealsWs = null;
+    if (!watchlist.has(symbol)) return;
+    if (entry.dealsBlocked) { watchlistHandleConnFail(symbol, 'сделки заблокированы MEXC для этого IP'); return; }
+    entry.dealsFailStreak++;
+    if (entry.dealsFailStreak >= WATCHLIST_MAX_RECONNECT_FAILS) {
+      watchlistHandleConnFail(symbol, 'сделки');
+    } else {
+      setTimeout(function () { if (watchlist.has(symbol)) openWatchlistDealsWs(symbol, raw, entry); }, WATCHLIST_RECONNECT_DELAY_MS);
+    }
+  };
+}
+
+function openWatchlistDepthWs(symbol, raw, entry) {
+  tier2Health.connectionAttempts++;
+  let sock;
+  try {
+    sock = new WebSocket(MEXC_WS);
+    sock.binaryType = 'arraybuffer';
+  } catch (e) { watchlistHandleConnFail(symbol, 'стакан (не удалось создать сокет)'); return; }
+  entry.depthWs = sock;
+  sock.onopen = function () {
+    entry.depthFailStreak = 0;
+    sock.send(JSON.stringify({ method: 'SUBSCRIPTION', params: ['spot@public.limit.depth.v3.api.pb@' + raw + '@' + WATCHLIST_DEPTH_LEVELS] }));
+  };
+  sock.onmessage = function (ev) {
+    if (typeof ev.data === 'string') {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg.code !== undefined && msg.code !== 0) {
+          logW('Watchlist', symbol + ': стакан — MEXC отклонил подписку (' + (msg.msg || msg.code) + ')');
+          if (WATCHLIST_BLOCKED_RE.test(msg.msg || '')) entry.depthBlocked = true;
+          try { sock.close(); } catch (e2) {}
+        }
+      } catch (e) {}
+      return;
+    }
+    const obj = decodeProtoFrame(ev.data);
+    if (!obj || !obj.publicLimitDepths) return;
+    const now = Date.now();
+    if (now - entry.lastDepthPushAt < TIER2_DEPTH_THROTTLE_MS) return; // троттлинг — не каждое обновление стакана попадает в буфер
+    entry.lastDepthPushAt = now;
+    const d = obj.publicLimitDepths;
+    const bids = (d.bids || []).map(function (x) { return { p: num(x.price), q: num(x.quantity) }; });
+    const asks = (d.asks || []).map(function (x) { return { p: num(x.price), q: num(x.quantity) }; });
+    const bidVol = bids.reduce(function (a, x) { return a + x.p * x.q; }, 0);
+    const askVol = asks.reduce(function (a, x) { return a + x.p * x.q; }, 0);
+    pushRing(tier2Depth, symbol, {
+      t: now, bids: bids, asks: asks,
+      bestBid: bids.length ? bids[0].p : null, bestAsk: asks.length ? asks[0].p : null,
+      bidVol: bidVol, askVol: askVol
+    }, TIER2_DEPTH_CAP);
+    tier2Health.depthPushesIngested++;
+  };
+  sock.onerror = function () {};
+  sock.onclose = function () {
+    if (entry.depthWs !== sock) return;
+    entry.depthWs = null;
+    if (!watchlist.has(symbol)) return;
+    if (entry.depthBlocked) { watchlistHandleConnFail(symbol, 'стакан заблокирован MEXC для этого IP'); return; }
+    entry.depthFailStreak++;
+    if (entry.depthFailStreak >= WATCHLIST_MAX_RECONNECT_FAILS) {
+      watchlistHandleConnFail(symbol, 'стакан');
+    } else {
+      setTimeout(function () { if (watchlist.has(symbol)) openWatchlistDepthWs(symbol, raw, entry); }, WATCHLIST_RECONNECT_DELAY_MS);
+    }
+  };
+}
+
+// Публичная точка входа для evaluateWatchlist() ниже — НЕ подключается немедленно, а становится в
+// очередь (см. WATCHLIST_SUBSCRIBE_STAGGER_MS выше) вместе с остальными кандидатами этого цикла,
+// чтобы не открывать десяток новых подписок на сделки залпом.
+function subscribeWatchlistSymbol(symbol, raw) {
+  if (watchlist.has(symbol) || watchlistPending.has(symbol)) return;
+  watchlistPending.add(symbol);
+  watchlistSubscribeQueue.push({ symbol: symbol, raw: raw });
+  drainWatchlistSubscribeQueue();
+}
+
+function drainWatchlistSubscribeQueue() {
+  if (watchlistSubscribeQueueTimer) return; // уже идёт отсчёт до следующей подписки в очереди
+  const next = watchlistSubscribeQueue.shift();
+  if (!next) return;
+  watchlistPending.delete(next.symbol);
+  subscribeWatchlistSymbolNow(next.symbol, next.raw);
+  watchlistSubscribeQueueTimer = setTimeout(function () {
+    watchlistSubscribeQueueTimer = null;
+    drainWatchlistSubscribeQueue();
+  }, WATCHLIST_SUBSCRIBE_STAGGER_MS);
+}
+
+function subscribeWatchlistSymbolNow(symbol, raw) {
+  if (watchlist.has(symbol)) return;
+  const entry = { raw: raw, addedAt: Date.now(), dealsWs: null, depthWs: null, dealsFailStreak: 0, depthFailStreak: 0, dealsBlocked: false, depthBlocked: false, lastDepthPushAt: 0 };
+  watchlist.set(symbol, entry);
+  logI('Watchlist', symbol + ' добавлена в глубокий анализ (' + raw + ')');
+  openWatchlistDealsWs(symbol, raw, entry);
+  openWatchlistDepthWs(symbol, raw, entry);
+}
+
+function unsubscribeWatchlistSymbol(symbol) {
+  // Символ мог быть только ПОСТАВЛЕН в очередь на подписку (см. subscribeWatchlistSymbol) и ещё
+  // не успеть физически подключиться к моменту, когда его решили вылистить — снимаем и из очереди тоже.
+  watchlistPending.delete(symbol);
+  for (let i = watchlistSubscribeQueue.length - 1; i >= 0; i--) {
+    if (watchlistSubscribeQueue[i].symbol === symbol) watchlistSubscribeQueue.splice(i, 1);
+  }
+  const entry = watchlist.get(symbol);
+  if (!entry) return;
+  try { if (entry.dealsWs) { entry.dealsWs.onclose = null; entry.dealsWs.close(); } } catch (e) {}
+  try { if (entry.depthWs) { entry.depthWs.onclose = null; entry.depthWs.close(); } } catch (e) {}
+  watchlist.delete(symbol);
+  watchlistEvictStreaks.delete(symbol);
+  logI('Watchlist', symbol + ' исключена из глубокого анализа');
+}
+
+// Раз в WATCHLIST_EVAL_INTERVAL_MS пересчитывает, кто должен быть в watchlist — вся РЕШАЮЩАЯ логика
+// (гистерезис) в MexcCore.computeWatchlistTransitions (core-utils.js, юнит-тестируется отдельно),
+// здесь только сбор входных данных (ранжированный список + форсированные монеты) и побочные эффекты
+// (реальные под-/отписки).
+function evaluateWatchlist() {
+  const now = Date.now();
+  const ranked = allCoins
+    .filter(function (c) { return c.__wlScore >= 0 && !watchlistInCooldown(c.symbol); })
+    .slice()
+    .sort(function (a, b) { return b.__wlScore - a.__wlScore; })
+    .map(function (c) { return c.symbol; });
+
+  const forced = tier2ForcedSymbols();
+  // "Уже участник" для целей гистерезиса включает и тех, кто ещё физически не подключился, но уже
+  // стоит в очереди на подключение (watchlistPending) — иначе один и тот же кандидат попал бы в
+  // toAdd повторно на следующем цикле, пока очередь ещё не дошла до него.
+  const currentMembers = new Set(watchlist.keys());
+  watchlistPending.forEach(function (s) { currentMembers.add(s); });
+
+  const transitions = MexcCore.computeWatchlistTransitions({
+    rankedSymbols: ranked,
+    currentMembers: currentMembers,
+    candidateStreaks: watchlistCandidateStreaks,
+    evictStreaks: watchlistEvictStreaks,
+    size: WATCHLIST_SIZE,
+    evictMargin: WATCHLIST_EVICT_MARGIN,
+    addStreakNeeded: WATCHLIST_ADD_STREAK,
+    evictStreakNeeded: WATCHLIST_EVICT_STREAK,
+    forced: forced,
+    maxSize: WATCHLIST_HARD_CAP
+  });
+
+  transitions.toEvict.forEach(unsubscribeWatchlistSymbol);
+  transitions.toAdd.forEach(function (symbol) {
+    const coin = coinMap.get(symbol);
+    if (coin) subscribeWatchlistSymbol(symbol, coin.raw);
+  });
+
+  tier2Health.watchlistSize = watchlist.size;
+  tier2Health.watchlistPending = watchlistPending.size;
+  tier2Health.lastEvalAt = now;
+  if (transitions.toAdd.length || transitions.toEvict.length) {
+    logD('Watchlist', 'цикл оценки: +' + transitions.toAdd.length + ' -' + transitions.toEvict.length + ', сейчас ' + watchlist.size + '/' + WATCHLIST_SIZE);
+  }
+}
+setInterval(evaluateWatchlist, WATCHLIST_EVAL_INTERVAL_MS);
+setTimeout(evaluateWatchlist, 5000); // не ждать первые 20с бездействия — рынок к этому времени уже наполнен
+
+// ============================================================================
+// PATTERN DETECTION ENGINE — детекторы Tier 2, работают ТОЛЬКО по watchlist-монетам (см. выше),
+// на буферах tier2Trades/tier2Depth. Реестр DETECTOR_DEFS — СВОЙ, отдельный от STRATEGY_DEFS
+// (Tier 1, весь рынок, mutually-exclusive выбор одной стратегии в UI): здесь одновременно может
+// "смотреть" сколько угодно детекторов на одну монету — это не взаимоисключающие профили, а разные
+// одновременно проверяемые гипотезы.
+//
+// Контракт детектора: detect(symbol) -> event-объект или null. Внутри — только чтение
+// tier2Trades/tier2Depth/coinMap, никаких побочных эффектов (не трогает DOM/WS/локальные хранилища)
+// — раннер (runPatternDetectors) сам решает, что делать с результатом.
+// ============================================================================
+const PATTERN_CLUSTER_TOLERANCE = 0.15; // ±15% — тот же допуск, что и для циклов в ТЗ (не "секунда в секунду")
+const PATTERN_MIN_SCORE = 55;           // ТЗ #8 — показываем только по-настоящему интересное, не всё подряд
+const PATTERN_DETECT_INTERVAL_MS = 2000;
+const PATTERN_LOOKBACK_TRADES = 200;    // сколько последних сделок буфера рассматривает detect() за раз
+
+// Сами детекторы — чистые функции (trades[], opts) -> event|null в core-utils.js (переиспользуются
+// tests/ на синтетических данных, см. verify_repeat_size_detector.js и соседние). Обёртки ниже
+// читают буфер конкретного символа и достраивают symbol/detectedAt, которые сама чистая функция не знает.
+const PATTERN_BURST_BUCKET_MS = 10000;
+function detectRepeatedTradeSizes(symbol) {
+  const ev = MexcCore.detectRepeatedTradeSizes(tier2Trades.get(symbol), {
+    tolerance: PATTERN_CLUSTER_TOLERANCE, minRepeats: DETECTOR_DEFS.repeatSize.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectRepeatedIntervals(symbol) {
+  const ev = MexcCore.detectRepeatedIntervals(tier2Trades.get(symbol), {
+    tolerance: PATTERN_CLUSTER_TOLERANCE, minRepeats: DETECTOR_DEFS.repeatInterval.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectBurstNoFollowThrough(symbol) {
+  const ev = MexcCore.detectBurstNoFollowThrough(tier2Trades.get(symbol), {
+    bucketMs: PATTERN_BURST_BUCKET_MS, minRepeats: DETECTOR_DEFS.burstNoFollow.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectCyclicity(symbol) {
+  const ev = MexcCore.detectCyclicity(tier2Trades.get(symbol), {
+    bucketMs: 2000, minRepeats: DETECTOR_DEFS.cycle.minRepeats, tolerance: PATTERN_CLUSTER_TOLERANCE, lookback: 2000
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectRepeatingSequence(symbol) {
+  const ev = MexcCore.detectRepeatingSequence(tier2Trades.get(symbol), {
+    minLen: 3, maxLen: 6, minRepeats: DETECTOR_DEFS.sequence.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectLadder(symbol) {
+  const ev = MexcCore.detectLadder(tier2Trades.get(symbol), {
+    tolerance: 0.3, minRepeats: DETECTOR_DEFS.ladder.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectErshik(symbol) {
+  const ev = MexcCore.detectErshik(tier2Trades.get(symbol), {
+    tolerance: 0.2, minRepeats: DETECTOR_DEFS.ershik.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+// Детекторы ниже читают tier2Depth — доступны ТОЛЬКО для watchlist-монет (см. Tier 2 выше), для
+// которых реально подключён канал стакана; на буфере, которого ещё нет (монета только что попала
+// в watchlist), MexcCore-функции сами корректно возвращают null (недостаточно снимков), крашей нет.
+function detectImbalance(symbol) {
+  const ev = MexcCore.detectImbalance(tier2Depth.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.imbalance.minRepeats, minZ: 2.5, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectAbsorption(symbol) {
+  const ev = MexcCore.detectAbsorption(tier2Depth.get(symbol), tier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.absorption.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectFakeLiquidity(symbol) {
+  const ev = MexcCore.detectFakeLiquidity(tier2Depth.get(symbol), tier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.fakeLiquidity.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectExhaustion(symbol) {
+  const ev = MexcCore.detectExhaustion(tier2Trades.get(symbol), {
+    bucketMs: PATTERN_BURST_BUCKET_MS, minRepeats: DETECTOR_DEFS.exhaustion.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectZoneReturn(symbol) {
+  const ev = MexcCore.detectZoneReturn(tier2Trades.get(symbol), {
+    tolerance: 0.005, minRepeats: DETECTOR_DEFS.zoneReturn.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+
+const DETECTOR_DEFS = {
+  repeatSize: { label: 'Идентичные размеры сделок', badge: 'SIZE', category: 'repeat', minRepeats: 5, detect: detectRepeatedTradeSizes },
+  repeatInterval: { label: 'Идентичные интервалы', badge: 'INTVL', category: 'repeat', minRepeats: 5, detect: detectRepeatedIntervals },
+  burstNoFollow: { label: 'Всплеск без продолжения', badge: 'BURST', category: 'inefficiency', minRepeats: 3, detect: detectBurstNoFollowThrough },
+  cycle: { label: 'Цикличность', badge: 'CYCLE', category: 'cycle', minRepeats: 8, detect: detectCyclicity },
+  sequence: { label: 'Повторяющаяся последовательность', badge: 'SEQ', category: 'sequence', minRepeats: 5, detect: detectRepeatingSequence },
+  ladder: { label: 'Лесенка', badge: 'LADDER', category: 'sequence', minRepeats: 8, detect: detectLadder },
+  ershik: { label: 'Ёршик', badge: 'ERSHIK', category: 'sequence', minRepeats: 8, detect: detectErshik },
+  imbalance: { label: 'Дисбаланс стакана', badge: 'IMBAL', category: 'depth', minRepeats: 20, detect: detectImbalance },
+  absorption: { label: 'Поглощение плотности', badge: 'ABSORB', category: 'depth', minRepeats: 20, detect: detectAbsorption },
+  fakeLiquidity: { label: 'Возможная фейковая ликвидность', badge: 'FAKE?', category: 'heuristic-lowconf', minRepeats: 20, detect: detectFakeLiquidity },
+  exhaustion: { label: 'Истощение импульса', badge: 'EXHAUST', category: 'inefficiency', minRepeats: 3, detect: detectExhaustion },
+  zoneReturn: { label: 'Повторная реакция на зону', badge: 'ZONE', category: 'repeat', minRepeats: 5, detect: detectZoneReturn }
+};
+
+// Человекочитаемое объяснение "почему сработало" — та же идея, что explainCoinForStrategy() у
+// Tier-1 стратегий (генерируется из реальных чисел конкретного события, не шаблон-заглушка), но
+// обобщено на любой ключ DETECTOR_DEFS вместо ветвления по 3 захардкоженным стратегиям.
+function explainPatternEvent(ev) {
+  if (ev.detectorKey === 'repeatSize') {
+    return 'Обнаружено ' + ev.repeatCount + ' сделок с похожим размером ($' + ev.sizeRangeUsd[0] + '–$' + ev.sizeRangeUsd[1] +
+      ') среди последних ' + PATTERN_LOOKBACK_TRADES + ' сделок. Суммарный объём кластера ≈ $' + ev.volumeUsd + '. Confidence ' + ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'repeatInterval') {
+    return 'Обнаружено ' + ev.repeatCount + ' пар сделок с похожим интервалом между собой (~' + ev.avgIntervalS + 'с, допуск ±' +
+      Math.round(PATTERN_CLUSTER_TOLERANCE * 100) + '%). Confidence ' + ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'burstNoFollow') {
+    return 'Всплеск объёма (' + ev.repeatCount + ' сделок за ' + (PATTERN_BURST_BUCKET_MS / 1000) + 'с, $' + ev.volumeUsd +
+      ') заметно выше обычного для этой монеты, но цена сдвинулась лишь на ' + (ev.priceMovePct * 100).toFixed(2) +
+      '% — нет пропорционального продолжения. Confidence ' + ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'cycle') {
+    return 'Обнаружена цикличность: ' + ev.repeatCount + ' повторов с интервалом ~' + ev.cycleS + 'с (допуск ±' +
+      Math.round(PATTERN_CLUSTER_TOLERANCE * 100) + '%)' +
+      (ev.buyRangeUsd ? '. BUY-события: $' + ev.buyRangeUsd[0] + '–$' + ev.buyRangeUsd[1] : '') +
+      (ev.sellRangeUsd ? ', SELL-события: $' + ev.sellRangeUsd[0] + '–$' + ev.sellRangeUsd[1] : '') +
+      '. Confidence ' + ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'sequence') {
+    return 'Обнаружена повторяющаяся последовательность "' + ev.sequencePattern + '" (B=покупка, S=продажа), ' +
+      ev.repeatCount + ' непересекающихся повторов, значимость заметно выше случайной. Confidence ' + ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'ladder') {
+    return 'Лесенка ' + ev.direction + ': ' + ev.repeatCount + ' последовательных шагов ~' + ev.avgStepPct +
+      '% каждый, средний интервал ~' + ev.avgIntervalS + 'с, объём ≈ $' + ev.volumeUsd + '. Длина забега статистически ' +
+      'значимо превышает ожидаемую для случайного блуждания. Confidence ' + ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'ershik') {
+    return 'Структурированное чередование покупок/продаж: ' + ev.repeatCount + ' сделок подряд со сменой стороны, ' +
+      'подтверждено ' + ev.structureSignals + ' из 3 структурных признаков (похожие размеры / похожие интервалы / ' +
+      'цена в узком диапазоне) — не просто рыночный шум. Confidence ' + ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'imbalance') {
+    return 'Дисбаланс стакана: объём на ' + (ev.direction === 'LONG' ? 'покупку' : 'продажу') + ' заметно выше обычного ' +
+      'для этой монеты (bid $' + ev.bidVolUsd.toLocaleString('ru-RU') + ' / ask $' + ev.askVolUsd.toLocaleString('ru-RU') +
+      '), устойчиво держится последние ' + ev.repeatCount + ' снимков стакана. Confidence ' + ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'absorption') {
+    return 'Плотность на уровне ' + fmtPrice(ev.priceLevel) + ' усохла на ' + ev.shrinkPct + '% за ' + ev.repeatCount +
+      ' снимков стакана, и это подтверждено реальным исполненным объёмом ($' + ev.volumeUsd.toLocaleString('ru-RU') +
+      ') у этой же цены — заявку "съели" потоком сделок, цена уровень не пробила. Confidence ' + ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'fakeLiquidity') {
+    return '⚠ ЭВРИСТИКА (не подтверждённый факт): крупная плотность на уровне ' + fmtPrice(ev.priceLevel) + ' исчезла (усохла на ' +
+      ev.shrinkPct + '%) за ' + ev.repeatCount + ' снимков стакана БЕЗ соответствующего исполненного объёма — похоже на ' +
+      'снятую/переставленную заявку, но по публичному стакану MEXC отличить это от иных причин невозможно. Confidence ' +
+      ev.confidencePct + '% (сознательно ограничен сверху).';
+  }
+  if (ev.detectorKey === 'exhaustion') {
+    return 'Истощение импульса: после всплеска объём монотонно снижается ' + ev.repeatCount + ' периодов подряд ' +
+      '(упал на ' + ev.volumeDeclinePct + '% от пика) — активность угасает. Confidence ' + ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'zoneReturn') {
+    return 'Цена ' + ev.repeatCount + ' раз возвращалась к зоне ' + fmtPrice(ev.zonePrice) + ' и каждый раз отскакивала ' +
+      'в среднем на ' + ev.avgReactionPct + '% — похоже на устойчивый уровень поддержки/сопротивления. Confidence ' +
+      ev.confidencePct + '%.';
+  }
+  return '';
+}
+
+// ------------------------------------------------------------------
+// История паттернов + отслеживание исхода БЕЗ LOOK-AHEAD BIAS (ТЗ #9, план Phase 6). Тот же
+// localStorage-идиом, что и BALANCE_HISTORY_KEY (age-cutoff → per-symbol cap → total cap,
+// см. loadBalanceHistory/pushBalanceHistory) — не новый механизм хранения.
+// ------------------------------------------------------------------
+const PATTERN_HISTORY_KEY = 'mexc_pattern_history';
+const PATTERN_HISTORY_MAX_PER_SYMBOL = 500;
+const PATTERN_HISTORY_MAX_TOTAL = 5000;
+const PATTERN_HISTORY_MAX_AGE_MS = 30 * 24 * 3600 * 1000;
+const PATTERN_SESSION_GRACE_MS = 15000; // см. MexcCore.shouldOpenNewPatternSession — один и тот же держащийся паттерн не плодит новую запись каждые 2с
+const PATTERN_SUCCESS_THRESHOLD_PCT = 0.3;
+const PATTERN_OUTCOME_KEYS = ['at30s', 'at2m', 'at10m', 'at30m']; // соответствует индексам MexcCore.PATTERN_OUTCOME_CHECKPOINTS_S
+
+let patternHistorySeq = 0;
+let patternHistory = (function loadPatternHistory() {
+  try {
+    const raw = localStorage.getItem(PATTERN_HISTORY_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(arr)) return [];
+    patternHistorySeq = arr.reduce(function (m, e) { return Math.max(m, e.id || 0); }, 0);
+    return arr;
+  } catch (e) { return []; }
+})();
+
+function savePatternHistory() {
+  try { localStorage.setItem(PATTERN_HISTORY_KEY, JSON.stringify(patternHistory)); } catch (e) { /* переживём без сохранения между сессиями */ }
+}
+
+const patternActiveSessions = new Map(); // symbol+'|'+detectorKey -> {historyId, lastSeenAt}
+
+// Регистрирует эпизод паттерна. Продолжающийся (тот же symbol+detectorKey держится без перерыва
+// дольше PATTERN_SESSION_GRACE_MS) — просто обновляет lastSeenAt, НЕ трогает уже замороженный
+// scoreAtSignal исходной записи (это и есть контракт "не look-ahead": сигнал не переоценивается
+// постфактум просто потому, что продолжает выполняться). Новый эпизод — считает pastSuccess
+// ИСКЛЮЧИТЕЛЬНО из уже ЗАКРЫТЫХ прошлых записей этого детектора (MexcCore.computePastSuccessRate),
+// пересчитывает финальный score через MexcCore.applyPatternScore (уважает maxConfidence — см.
+// fakeLiquidity) и кладёт новую запись в patternHistory.
+function registerPatternEvent(ev, now) {
+  const key = ev.symbol + '|' + ev.detectorKey;
+  const session = patternActiveSessions.get(key);
+  if (!MexcCore.shouldOpenNewPatternSession(session ? session.lastSeenAt : null, now, PATTERN_SESSION_GRACE_MS)) {
+    session.lastSeenAt = now;
+    ev.historyId = session.historyId;
+    return;
+  }
+  const pastSuccess = MexcCore.computePastSuccessRate(patternHistory, ev.detectorKey, {
+    checkpointKey: 'at2m', successThresholdPct: PATTERN_SUCCESS_THRESHOLD_PCT
+  });
+  ev.factors.pastSuccess = pastSuccess ? pastSuccess.rate : 0;
+  MexcCore.applyPatternScore(ev);
+
+  const id = ++patternHistorySeq;
+  ev.historyId = id;
+  patternHistory.push({
+    id: id, symbol: ev.symbol, detectorKey: ev.detectorKey, detectedAt: now,
+    direction: ev.direction, confidencePct: ev.confidencePct, scoreAtSignal: ev.scoreAtSignal,
+    priceAtSignal: ev.priceAtSignal, repeatCount: ev.repeatCount,
+    outcome: { at30s: null, at2m: null, at10m: null, at30m: null }
+  });
+  patternHistory = MexcCore.prunePatternHistory(patternHistory, {
+    maxPerSymbol: PATTERN_HISTORY_MAX_PER_SYMBOL, maxTotal: PATTERN_HISTORY_MAX_TOTAL, maxAgeMs: PATTERN_HISTORY_MAX_AGE_MS, now: now
+  });
+  savePatternHistory();
+  patternActiveSessions.set(key, { historyId: id, lastSeenAt: now });
+}
+
+// Раз в 10с проверяет, не пересекли ли записи истории очередную контрольную точку (30с/2м/10м/30м
+// после детекции) — и если да, считает MFE/MAE по цене, РЕАЛЬНО НАБЛЮДАВШЕЙСЯ с момента детекции
+// (буфер Tier 2, если монета всё ещё в watchlist; если нет — единственная доступная точка, текущая
+// цена из coinMap, честная деградация вместо вечно висящего незакрытым чекпоинта).
+function sweepPatternOutcomes() {
+  const now = Date.now();
+  let changed = false;
+  patternHistory.forEach(function (record) {
+    MexcCore.PATTERN_OUTCOME_CHECKPOINTS_S.forEach(function (s, idx) {
+      const outcomeKey = PATTERN_OUTCOME_KEYS[idx];
+      if (record.outcome[outcomeKey] != null) return; // уже закрыт
+      if (now - record.detectedAt < s * 1000) return; // ещё не время
+      const trades = tier2Trades.get(record.symbol);
+      let pricesSince = trades ? trades.filter(function (t) { return t.t >= record.detectedAt; }).map(function (t) { return t.price; }) : [];
+      if (!pricesSince.length) {
+        const coin = coinMap.get(record.symbol);
+        if (coin && coin.price) pricesSince = [coin.price];
+      }
+      const outcome = MexcCore.computeOutcomeMetrics(record.priceAtSignal, record.direction, pricesSince);
+      if (outcome) { record.outcome[outcomeKey] = outcome; changed = true; }
+    });
+  });
+  if (changed) savePatternHistory();
+}
+setInterval(sweepPatternOutcomes, 10000);
+
+// Текущий срез активных паттернов (последний прогон) — витрина для UI; постоянная история —
+// отдельно, в patternHistory выше.
+let activePatternEvents = [];
+
+function runPatternDetectors() {
+  const events = [];
+  watchlist.forEach(function (entry, symbol) {
+    Object.keys(DETECTOR_DEFS).forEach(function (key) {
+      let ev;
+      try {
+        ev = DETECTOR_DEFS[key].detect(symbol);
+      } catch (e) {
+        logE('Pattern', key + '/' + symbol + ': детектор упал с исключением — ' + e.message);
+        return;
+      }
+      if (ev && ev.scoreAtSignal >= PATTERN_MIN_SCORE) events.push(ev);
+    });
+  });
+
+  // Мульти-детекторное подтверждение (ТЗ #8, фактор "confirmation") — если на одной монете в ОДНОМ
+  // прогоне сработало ≥2 разных детектора, это взаимное подтверждение: пересчитываем им score с
+  // confirmation=1 через applyPatternScore (НЕ прямым scorePatternEvent — тот не знает про
+  // maxConfidence и молча снял бы честный потолок confidence у fakeLiquidity при подтверждении).
+  const bySymbol = new Map();
+  events.forEach(function (ev) {
+    if (!bySymbol.has(ev.symbol)) bySymbol.set(ev.symbol, []);
+    bySymbol.get(ev.symbol).push(ev);
+  });
+  events.forEach(function (ev) {
+    if (bySymbol.get(ev.symbol).length > 1) {
+      ev.factors.confirmation = 1;
+      MexcCore.applyPatternScore(ev);
+    }
+  });
+
+  const now = Date.now();
+  events.forEach(function (ev) { registerPatternEvent(ev, now); });
+
+  events.sort(function (a, b) { return b.scoreAtSignal - a.scoreAtSignal; });
+  activePatternEvents = events;
+  tier2Health.patternEventsActive = activePatternEvents.length;
+  const badge = document.getElementById('navPatternBadge');
+  if (badge) badge.textContent = activePatternEvents.length;
+  updatePatternsPage();
+}
+setInterval(runPatternDetectors, PATTERN_DETECT_INTERVAL_MS);
+
+// ------------------------------------------------------------------
+// UI страницы "Паттерны" — карточки найденных событий + сводка здоровья Tier 2 (watchlist,
+// соединения, обработанные сделки/стакан). Переиспользует визуальный язык .profile-strategy-card
+// (те же карточки, что у Профилей/Стратегий) и .finres-stat-card (те же плитки, что у Финреза) —
+// сознательно, а не отдельный "язык дизайна" для этой страницы (см. план).
+// ------------------------------------------------------------------
+function watchlistStatusText() {
+  const size = watchlist.size;
+  const pending = watchlistPending.size;
+  return 'Глубокий анализ: ' + size + '/' + WATCHLIST_SIZE + ' монет' + (pending ? ' (+' + pending + ' подключается)' : '') +
+    ' · соединений: ' + (size * 2) + ' · сделок обработано: ' + tier2Health.tradesIngested +
+    ' · обновлений стакана: ' + tier2Health.depthPushesIngested;
+}
+
+function patternStatCard(label, valueHtml, cls) {
+  return '<div class="finres-stat-card"><div class="finres-stat-label">' + label + '</div>' +
+    '<div class="finres-stat-value' + (cls ? ' ' + cls : '') + '">' + valueHtml + '</div></div>';
+}
+
+function patternCardHtml(ev) {
+  const def = DETECTOR_DEFS[ev.detectorKey];
+  const dirCls = ev.direction === 'LONG' ? 'signal-buy' : (ev.direction === 'SHORT' ? 'signal-sell' : 'signal-wait');
+  const details = [];
+  if (ev.repeatCount != null) details.push(ev.repeatCount + ' повторов');
+  if (ev.cycleS != null) details.push('цикл ~' + ev.cycleS + 'с');
+  if (ev.avgStepPct != null) details.push('шаг ~' + ev.avgStepPct + '%');
+  if (ev.avgIntervalS != null) details.push('~' + ev.avgIntervalS + 'с');
+  if (ev.sizeRangeUsd) details.push('$' + ev.sizeRangeUsd[0] + '–$' + ev.sizeRangeUsd[1]);
+  if (ev.buyRangeUsd) details.push('BUY $' + ev.buyRangeUsd[0] + '–$' + ev.buyRangeUsd[1]);
+  if (ev.sellRangeUsd) details.push('SELL $' + ev.sellRangeUsd[0] + '–$' + ev.sellRangeUsd[1]);
+  if (ev.sequencePattern) details.push('"' + ev.sequencePattern + '"');
+  if (ev.imbalanceRatio != null) details.push('ratio ' + ev.imbalanceRatio);
+  if (ev.priceLevel != null) details.push('уровень ' + fmtPrice(ev.priceLevel));
+  if (ev.shrinkPct != null) details.push('усохло ' + ev.shrinkPct + '%');
+  if (ev.volumeDeclinePct != null) details.push('спад ' + ev.volumeDeclinePct + '%');
+  if (ev.zonePrice != null) details.push('зона ' + fmtPrice(ev.zonePrice));
+  if (ev.avgReactionPct != null) details.push('реакция ' + ev.avgReactionPct + '%');
+  if (ev.volumeUsd != null) details.push('$' + Math.round(ev.volumeUsd).toLocaleString('ru-RU'));
+  const ago = Math.max(0, Math.round((Date.now() - ev.detectedAt) / 1000));
+  const heuristicCls = ev.isHeuristic ? ' pattern-card-heuristic' : '';
+  return '<div class="profile-strategy-card pattern-card' + heuristicCls + '">' +
+    '<div class="card-top"><span class="card-icon"><i class="ri-radar-2-line"></i></span>' +
+    '<h4>' + ev.symbol.replace(/</g, '&lt;') + '<span class="card-count">' + ev.confidencePct + '%</span></h4></div>' +
+    '<div style="display:flex;gap:6px;align-items:center;margin:6px 0 8px;flex-wrap:wrap;">' +
+    '<span class="signal-badge ' + dirCls + '">' + ev.direction + '</span>' +
+    '<span style="font-size:11px;color:var(--text-muted);">' + def.label + ' · ' + ago + 'с назад</span>' +
+    (ev.isHeuristic ? '<span style="font-size:10px;color:var(--orange);border:1px solid rgba(255,159,10,.4);border-radius:4px;padding:1px 6px;">ЭВРИСТИКА</span>' : '') +
+    '</div>' +
+    '<p>' + explainPatternEvent(ev) + '</p>' +
+    (details.length ? '<div style="margin-top:8px;font-size:11px;color:var(--text-muted);font-family:var(--font-mono);">' + details.join(' · ') + '</div>' : '') +
+    '</div>';
+}
+
+function updatePatternsPage() {
+  const page = document.getElementById('page-patterns');
+  if (!page || !page.classList.contains('active')) return;
+
+  const statusEl = document.getElementById('watchlistStatusText');
+  if (statusEl) statusEl.textContent = watchlistStatusText();
+
+  const healthGrid = document.getElementById('patternsHealthGrid');
+  if (healthGrid) {
+    healthGrid.innerHTML =
+      patternStatCard('Watchlist', watchlist.size + '/' + WATCHLIST_SIZE) +
+      patternStatCard('WS-соединений', watchlist.size * 2) +
+      patternStatCard('Сделок обработано', tier2Health.tradesIngested) +
+      patternStatCard('Обновлений стакана', tier2Health.depthPushesIngested) +
+      patternStatCard('Активных паттернов', activePatternEvents.length, activePatternEvents.length ? 'up' : null) +
+      patternStatCard('В cooldown', tier2Health.cooldownDrops, tier2Health.cooldownDrops ? 'down' : null);
+  }
+
+  const grid = document.getElementById('patternsGrid');
+  const countEl = document.getElementById('patternsCount');
+  // ТЗ #8/#9: "лучше 5 действительно интересных ситуаций, чем 100 слабых" — теперь, когда весь
+  // движок (12 детекторов) собран, сужаем до буквально ~5, как и просили.
+  const top = activePatternEvents.slice(0, 5);
+  if (countEl) countEl.textContent = activePatternEvents.length + ' активных';
+  if (grid) {
+    if (!top.length) {
+      grid.innerHTML = '<div class="finres-empty" style="grid-column:1/-1;"><i class="ri-radar-2-line"></i>' +
+        (watchlist.size === 0
+          ? 'Watchlist ещё наполняется — паттерны появятся, когда накопится история сделок по отслеживаемым монетам.'
+          : 'Пока не найдено ни одного паттерна с достаточной уверенностью — это нормально, показываем только то, что реально выглядит неслучайным, а не любой шум.') +
+        '</div>';
+    } else {
+      grid.innerHTML = top.map(patternCardHtml).join('');
+    }
+  }
+
+  updatePatternValidationPanel();
+}
+
+// Простая train/test валидация против переобучения (ТЗ #15) — по КАЖДОМУ детектору, у которого уже
+// накопилось достаточно ЗАКРЫТЫХ (outcome.at2m заполнен) записей истории, сравнивает винрейт
+// "reference" (закрыто раньше 24ч назад) против "recent" (закрыто позже) — MexcCore.computeValidationSplit.
+// Заметная просадка recent относительно reference помечается прямо в таблице, а не скрывается.
+const PATTERN_VALIDATION_MIN_SAMPLE = 5;
+function updatePatternValidationPanel() {
+  const el = document.getElementById('patternValidationBody');
+  if (!el) return;
+  const rows = Object.keys(DETECTOR_DEFS).map(function (key) {
+    const split = MexcCore.computeValidationSplit(patternHistory, key, { checkpointKey: 'at2m', successThresholdPct: PATTERN_SUCCESS_THRESHOLD_PCT });
+    return { key: key, label: DETECTOR_DEFS[key].label, split: split };
+  }).filter(function (r) { return r.split.reference.sampleSize >= PATTERN_VALIDATION_MIN_SAMPLE || r.split.recent.sampleSize >= PATTERN_VALIDATION_MIN_SAMPLE; });
+
+  if (!rows.length) {
+    el.innerHTML = '<tr><td colspan="4" class="finres-empty" style="padding:20px;"><i class="ri-flask-line"></i>' +
+      'Пока недостаточно закрытых сигналов (нужно дождаться истечения окна +2 минуты после детекции) — таблица наполнится по мере работы.</td></tr>';
+    return;
+  }
+  el.innerHTML = rows.map(function (r) {
+    const refPct = r.split.reference.rate != null ? Math.round(r.split.reference.rate * 100) + '%' : '—';
+    const recPct = r.split.recent.rate != null ? Math.round(r.split.recent.rate * 100) + '%' : '—';
+    const recCls = r.split.degraded ? 'down' : (r.split.recent.rate != null && r.split.reference.rate != null && r.split.recent.rate >= r.split.reference.rate ? 'up' : '');
+    return '<tr>' +
+      '<td>' + r.label + '</td>' +
+      '<td>' + refPct + ' <span style="color:var(--text-muted);font-size:10px;">(n=' + r.split.reference.sampleSize + ')</span></td>' +
+      '<td class="' + recCls + '">' + recPct + ' <span style="color:var(--text-muted);font-size:10px;">(n=' + r.split.recent.sampleSize + ')</span></td>' +
+      '<td>' + (r.split.degraded ? '<span style="color:var(--orange);">⚠ просадка ≥20 п.п.</span>' : (r.split.reference.sampleSize >= PATTERN_VALIDATION_MIN_SAMPLE && r.split.recent.sampleSize >= PATTERN_VALIDATION_MIN_SAMPLE ? '<span style="color:var(--green);">стабильно</span>' : '—')) + '</td>' +
+      '</tr>';
+  }).join('');
 }
 
 function sortCoins(field) {
@@ -1931,6 +2710,7 @@ function switchPage(pageId) {
   if (pageId === 'analytics') updateAnalytics();
   if (pageId === 'alerts') updateAlerts();
   if (pageId === 'profiles') updateProfilesPage();
+  if (pageId === 'patterns') updatePatternsPage();
   if (pageId === 'account') refreshAccountBalancesIfConnected();
   if (pageId === 'finres') {
     // Сразу красим хиро/вкладку из уже закешированного lastBalanceState (если он есть — например,
@@ -4964,6 +5744,30 @@ restartAnalyticsInterval();
 
 // Обновление часов
 setInterval(updateClock, 1000);
+
+// Диагностика Tier 2 (watchlist) из консоли разработчика, пока для этого нет отдельной панели в UI
+// (этап 7 плана) — window.__tier2Health.watchlistSize / .tradesIngested и т.д., а также
+// window.__tier2Watchlist() для списка монет прямо сейчас в глубоком анализе.
+window.__tier2Health = tier2Health;
+window.__tier2Watchlist = function () { return Array.from(watchlist.keys()); };
+window.__tier2TradesFor = function (symbol) { return tier2Trades.get(symbol) || []; };
+window.__tier2DepthFor = function (symbol) { return tier2Depth.get(symbol) || []; };
+window.__patternEvents = function () { return activePatternEvents.map(function (ev) { return Object.assign({ explanation: explainPatternEvent(ev) }, ev); }); };
+window.__patternHistory = function () { return patternHistory; };
+window.__sweepPatternOutcomesNow = sweepPatternOutcomes;
+// Только для ручной проверки UI страницы "Паттерны" без ожидания реальных срабатываний детекторов
+// (например, в песочнице разработки, где живая лента сделок недоступна) — впрыскивает синтетическое
+// событие прямо в витрину. НЕ вызывается production-кодом.
+window.__injectFakePatternEvent = function (partial) {
+  const ev = Object.assign({
+    symbol: 'TEST/USDT', detectorKey: 'repeatSize', direction: 'LONG',
+    confidencePct: 78, repeatCount: 12, sizeRangeUsd: [190, 210], volumeUsd: 2400,
+    detectedAt: Date.now(), factors: {}
+  }, partial || {});
+  activePatternEvents = [ev].concat(activePatternEvents);
+  updatePatternsPage();
+  return ev;
+};
 
 console.log('MEXC Screener запущен (MEXC Spot WS v3, protobuf)');
 

@@ -35,6 +35,7 @@
       <a class="nav-item" data-page="account"><i class="ri-key-2-line"></i><span>Настройки аккаунта</span><span class="nav-dot" id="navAccountDot" title="Не подключено"></span></a>
       <a class="nav-item" data-page="finres"><i class="ri-funds-line"></i><span>Финрез</span></a>
       <div class="nav-section">Система</div>
+      <a class="nav-item" data-page="patterns"><i class="ri-radar-2-line"></i><span>Паттерны</span><span class="nav-badge" id="navPatternBadge">0</span></a>
       <a class="nav-item" data-page="profiles"><i class="ri-user-line"></i><span>Профили</span></a>
       <a class="nav-item" data-page="settings"><i class="ri-settings-3-line"></i><span>Настройки</span></a>
       <a class="nav-item" data-action="download-app" id="downloadAppNav"><i class="ri-download-2-line"></i><span>Скачать приложение</span></a>
@@ -298,6 +299,46 @@
         <div class="analytics-card"><h3>Топ падение 24ч</h3><div id="topLosers"></div></div>
         <div class="analytics-card"><h3>Лидер по объёму</h3><div id="topVolume"></div></div>
         <div class="analytics-card"><h3>Волатильность 60с</h3><div id="topVolat"></div></div>
+      </div>
+    </div>
+
+    <div class="page" id="page-patterns">
+      <div style="padding:16px 20px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; gap:12px;">
+        <h2 style="font-size:18px; font-weight:600;"><i class="ri-radar-2-line" style="color:var(--blue);"></i> Паттерны</h2>
+        <span style="color:var(--text-muted);font-size:12px;" id="patternsCount">0 активных</span>
+      </div>
+      <div style="flex:1; overflow-y:auto; padding:20px 24px;">
+        <div class="strategy-hint-bar visible">
+          <i class="ri-radar-2-line"></i>
+          <span class="strategy-hint-badge">WATCHLIST</span>
+          <span class="strategy-hint-text" id="watchlistStatusText">Наполняется...</span>
+        </div>
+        <div class="profile-strategy-note" style="margin-top:14px;">
+          <strong>Важно про глубокий анализ.</strong> В отличие от «Профилей» (тикерная эвристика по
+          всему рынку сразу), детекторы паттернов работают на реальных сделках и стакане конкретных
+          монет — но это отдельные WS-подключения НА КАЖДУЮ монету, и тысячи их одновременно физически
+          не открыть. Поэтому глубокий анализ ведётся только по ограниченному, постоянно
+          обновляющемуся списку watchlist (по умолчанию до 20 самых активных прямо сейчас монет +
+          открытая монета/избранное) — не по всему рынку. Монеты вне watchlist здесь не появятся,
+          какими бы интересными они ни выглядели на вкладке «Скринер».
+        </div>
+        <div class="finres-stats-grid" id="patternsHealthGrid" style="margin-top:18px;"></div>
+        <h4 style="font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:24px 0 10px;">Обнаруженные паттерны</h4>
+        <div class="profile-grid" id="patternsGrid"></div>
+
+        <h4 style="font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:24px 0 10px;">Валидация детекторов</h4>
+        <p style="color:var(--text-secondary);font-size:12px;line-height:1.5;margin-bottom:12px;">
+          Честная защита от переобучения (без исторического архива тика/стакана, которого физически
+          нет — см. README): сравнение винрейта детектора на «старых» (закрыты раньше 24ч назад) и
+          «свежих» (закрыты позже) сигналах, только по УЖЕ ЗАВЕРШЁННЫМ (прошло ≥2 минуты после
+          детекции) исходам. Заметная просадка — повод не доверять детектору вслепую прямо сейчас.
+        </p>
+        <div class="finres-table-card">
+          <table class="finres-table">
+            <thead><tr><th>Детектор</th><th>Винрейт (старые)</th><th>Винрейт (свежие)</th><th>Статус</th></tr></thead>
+            <tbody id="patternValidationBody"></tbody>
+          </table>
+        </div>
       </div>
     </div>
 
