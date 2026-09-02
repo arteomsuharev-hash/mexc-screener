@@ -612,7 +612,22 @@ function upsertCoin(row) {
 }
 
 function rebuildList() {
-  allCoins = Array.from(coinMap.values());
+  if (tableHoverFreezeSymbol) {
+    // Курсор на строке — applySortOnly() ниже намеренно не пересортирует (заморозка порядка), но
+    // upsertCoin() на каждый тик создаёт НОВЫЙ объект монеты (не мутирует старый), поэтому просто
+    // перечитать coinMap.values() всё равно означало бы отдать порядок вставки в Map, а не текущий
+    // видимый порядок строк. Сохраняем текущую позицию каждой монеты, обновляя её на свежий объект
+    // из coinMap — значения в ячейках живые, порядок строк не скачет, пока курсор не уйдёт со стола.
+    const known = new Set();
+    allCoins = allCoins.map(function (c) {
+      const fresh = coinMap.get(c.symbol);
+      if (fresh) known.add(c.symbol);
+      return fresh || c;
+    });
+    coinMap.forEach(function (c, symbol) { if (!known.has(symbol)) allCoins.push(c); });
+  } else {
+    allCoins = Array.from(coinMap.values());
+  }
   applySortOnly();
 }
 
