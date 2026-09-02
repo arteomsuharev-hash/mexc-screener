@@ -919,7 +919,7 @@ body {
    панель, а не плоский прямоугольник. */
 .journal-modal {
   background: var(--bg-card); border: 1px solid rgba(255,255,255,.1); border-radius: 14px;
-  width: 920px; max-width: 94vw; height: 78vh; max-height: 720px; display: flex; flex-direction: column; overflow: hidden;
+  width: 1180px; max-width: 96vw; height: 640px; max-height: 82vh; display: flex; flex-direction: column; overflow: hidden;
   box-shadow:
     0 2px 0 rgba(255,255,255,.03) inset,
     0 30px 70px -24px rgba(0,0,0,.7),

@@ -3930,6 +3930,20 @@ function wirePnlChartCrosshair(canvas, tooltipEl) {
 // Наведение мышью на график журнала — своё, изолированное состояние (не ownChartHover главного
 // графика), см. wireJournalChartInteractions.
 let journalChartHover = null; // { x, y }
+// Раунд "сделай 1 в 1 как на референсе" (tradermake.money): панель инструментов рисования, глазки-
+// индикаторы, зум-кнопки и растяжение осей — та же техника, что и у "своего графика" на главной
+// странице скринера (см. ownChartTool/ownChartDrawings/wireOwnChartInteractions выше по файлу), но
+// со своим, полностью изолированным состоянием (journalChart*), по тому же принципу, что и раньше —
+// не трогаем уже рабочий главный график ради модалки журнала.
+let journalChartTool = 'cursor';
+let journalChartDrawings = [];
+let journalChartPendingTrend = null;
+let journalChartRulerDrag = null;
+let journalPriceScaleMult = 1;   // ручное растяжение/сжатие оси цены (перетаскивание правой шкалы)
+let journalPriceScaleDrag = null;
+let journalTimeScaleDrag = null; // ручное растяжение/сжатие оси времени (перетаскивание нижней шкалы)
+let journalShowVolume = true;    // переключается глазком в панели "Индикаторы"
+let journalShowEntryExit = true; // переключается глазком в панели "Индикаторы"
 
 function drawJournalChart(canvas, candles) {
   if (!canvas || !candles || !candles.length) return;
@@ -3946,8 +3960,8 @@ function drawJournalChart(canvas, candles) {
   // и легенда OHLC+Vol сверху слева (следует за курсором, как в TradingView).
   const padLeft = 8, padRight = 58, padTop = 26, padBottom = 22;
   const plotWTotal = Math.max(10, w - padLeft - padRight), plotHTotal = Math.max(10, h - padTop - padBottom);
-  const volumeH = Math.round(plotHTotal * 0.16);
-  const paneGap = 6;
+  const volumeH = journalShowVolume ? Math.round(plotHTotal * 0.16) : 0;
+  const paneGap = journalShowVolume ? 6 : 0;
   const plotW = plotWTotal;
   const plotH = plotHTotal - volumeH - paneGap;
   const volTop = padTop + plotH + paneGap;
@@ -3978,6 +3992,10 @@ function drawJournalChart(canvas, candles) {
   let max = Math.max.apply(null, slice.map(function (c) { return c.h; }));
   const pricePad = (max - min) * 0.12 || (max * 0.01) || 1;
   min -= pricePad; max += pricePad;
+  if (journalPriceScaleMult !== 1) {
+    const priceCenter = (min + max) / 2, priceHalf = (max - min) / 2 * journalPriceScaleMult;
+    min = priceCenter - priceHalf; max = priceCenter + priceHalf;
+  }
 
   let maxVol = Math.max.apply(null, slice.map(function (c) { return c.v; }));
   if (!Number.isFinite(maxVol) || maxVol <= 0) maxVol = 1;
@@ -3994,8 +4012,9 @@ function drawJournalChart(canvas, candles) {
 
   // Метаданные окна — читает wireJournalChartInteractions ниже для колеса мыши/панорамы/hover.
   canvas.__journalChart = {
-    xOfTime: xOfTime, timeOfX: timeOfX, priceOfY: priceOfY, plotW: plotW, plotH: plotH,
-    padLeft: padLeft, padTop: padTop, slot: slot, intervalMs: intervalMs, volTop: volTop, volumeH: volumeH
+    xOfTime: xOfTime, timeOfX: timeOfX, priceOfY: priceOfY, yOf: yOf, plotW: plotW, plotH: plotH,
+    padLeft: padLeft, padTop: padTop, slot: slot, intervalMs: intervalMs, volTop: volTop, volumeH: volumeH,
+    min: min, max: max
   };
 
   // --- горизонтальная сетка + подписи цены ---
@@ -4024,14 +4043,16 @@ function drawJournalChart(canvas, candles) {
     ctx.beginPath(); ctx.moveTo(x, padTop); ctx.lineTo(x, volTop + volumeH); ctx.stroke();
   }
 
-  // --- объём (панель снизу) ---
-  slice.forEach(function (c) {
-    const x = xOfTime(c.t);
-    const up = c.c >= c.o;
-    ctx.fillStyle = up ? 'rgba(38,166,154,.45)' : 'rgba(239,83,80,.45)';
-    const vy = volYOf(c.v);
-    ctx.fillRect(x - bodyW / 2, vy, bodyW, (volTop + volumeH) - vy);
-  });
+  // --- объём (панель снизу, если включена в панели "Индикаторы" — VOLG) ---
+  if (journalShowVolume) {
+    slice.forEach(function (c) {
+      const x = xOfTime(c.t);
+      const up = c.c >= c.o;
+      ctx.fillStyle = up ? 'rgba(38,166,154,.45)' : 'rgba(239,83,80,.45)';
+      const vy = volYOf(c.v);
+      ctx.fillRect(x - bodyW / 2, vy, bodyW, (volTop + volumeH) - vy);
+    });
+  }
 
   slice.forEach(function (c) {
     const x = xOfTime(c.t);
@@ -4049,6 +4070,94 @@ function drawJournalChart(canvas, candles) {
     ctx.fillRect(x - bodyW / 2, top, bodyW, bh);
   });
 
+  // --- построения пользователя: уровни/трендлинии/лучи/прямые (своё изолированное состояние
+  // journalChartDrawings/journalChartTool — не трогаем ownChartDrawings главного графика) ---
+  journalChartDrawings.forEach(function (dr) {
+    if (dr.type === 'hline') {
+      const y = yOf(dr.v);
+      if (y < padTop - 20 || y > h - padBottom + 20) return;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,193,7,.85)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(padLeft, y);
+      ctx.lineTo(padLeft + plotW, y);
+      ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = '#131722';
+      ctx.fillRect(padLeft + plotW + 1, y - 8, padRight - 2, 16);
+      ctx.fillStyle = '#FFC107';
+      ctx.textAlign = 'left';
+      ctx.fillText(fmtPrice(dr.v), padLeft + plotW + 5, y);
+    } else if (dr.type === 'trend' || dr.type === 'ray' || dr.type === 'xline') {
+      const x1 = xOfTime(dr.p1.t), y1 = yOf(dr.p1.v);
+      const x2 = xOfTime(dr.p2.t), y2 = yOf(dr.p2.v);
+      const dx = x2 - x1, dy = y2 - y1;
+      let seg = { x1: x1, y1: y1, x2: x2, y2: y2 };
+      if (dr.type !== 'trend' && (dx !== 0 || dy !== 0)) {
+        const clipped = clipRayToRect(x1, y1, dx, dy, padLeft, padLeft + plotW, padTop, padTop + plotH,
+          dr.type === 'ray' ? 0 : -Infinity, Infinity);
+        if (clipped) seg = clipped;
+      }
+      ctx.save();
+      ctx.strokeStyle = 'rgba(30,128,255,.85)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(seg.x1, seg.y1);
+      ctx.lineTo(seg.x2, seg.y2);
+      ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = 'rgba(30,128,255,.85)';
+      [[x1, y1], [x2, y2]].forEach(function (p) {
+        ctx.beginPath();
+        ctx.arc(p[0], p[1], 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+  });
+
+  if (journalChartPendingTrend && journalChartHover) {
+    const x1 = xOfTime(journalChartPendingTrend.p1.t), y1 = yOf(journalChartPendingTrend.p1.v);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(30,128,255,.5)';
+    ctx.setLineDash([4, 3]);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(journalChartHover.x, journalChartHover.y);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  if (journalChartRulerDrag) {
+    const r = journalChartRulerDrag;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,.7)';
+    ctx.setLineDash([3, 3]);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(r.x1, r.y1);
+    ctx.lineTo(r.x2, r.y2);
+    ctx.stroke();
+    ctx.restore();
+    const dv = r.v2 - r.v1;
+    const dPct = r.v1 !== 0 ? (dv / r.v1) * 100 : 0;
+    const dBars = Math.round((r.t2 - r.t1) / intervalMs);
+    const up = dv >= 0;
+    const label = (up ? '+' : '') + fmtPrice(dv) + '  (' + (up ? '+' : '') + dPct.toFixed(2) + '%)  ' + dBars + ' бар' + (Math.abs(dBars) === 1 ? '' : 'ов');
+    ctx.font = '11px var(--font-mono, monospace)';
+    const tw = ctx.measureText(label).width;
+    const bx = Math.min(Math.max(r.x2, padLeft + tw / 2 + 6), padLeft + plotW - tw / 2 - 6);
+    const by = r.y2 < padTop + 20 ? r.y2 + 18 : r.y2 - 14;
+    ctx.fillStyle = up ? 'rgba(0,192,118,.92)' : 'rgba(248,73,96,.92)';
+    ctx.fillRect(bx - tw / 2 - 6, by - 10, tw + 12, 20);
+    ctx.fillStyle = '#0b0e14';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, bx, by);
+    ctx.textAlign = 'left';
+  }
+
   // Раунд "1 в 1 как на tradermake.money": вместо маркера на КАЖДУЮ сделку (что на активном
   // скальпинге неизбежно упирается в кашу — сколько ни разводи и ни зумируй, у трейдера с полусотней
   // сделок в день их физически некуда деть на одном экране) — график показывает ОДНУ выбранную
@@ -4056,7 +4165,7 @@ function drawJournalChart(canvas, candles) {
   // линией-уровнем на каждой цене и подписью результата в процентах — ровно тот же язык, что в
   // референсе. Какая позиция выбрана — journalChartState.selectedPairIndex, туда же ведёт клик по
   // строке в списке справа (см. renderJournalTradesList/wireJournalTradesListClick).
-  const selPair = journalChartState && journalChartState.pairs && journalChartState.pairs[journalChartState.selectedPairIndex];
+  const selPair = journalShowEntryExit && journalChartState && journalChartState.pairs && journalChartState.pairs[journalChartState.selectedPairIndex];
   if (selPair) {
     const entryX = xOfTime(selPair.entryTime), entryY = yOf(selPair.entryPrice);
     const exitX = xOfTime(selPair.exitTime), exitY = yOf(selPair.exitPrice);
@@ -4224,10 +4333,48 @@ function wireJournalChartInteractions(canvas) {
   }, { passive: false });
 
   canvas.addEventListener('mousedown', function (ev) {
-    if (ev.button !== 0 || !canvas.__journalChart) return;
+    if (ev.button !== 0) return;
+    const chart = canvas.__journalChart;
+    if (!chart) return;
     const rect = canvas.getBoundingClientRect();
-    journalPanDrag = { startX: ev.clientX - rect.left, startOffset: (journalChartState && journalChartState.view && journalChartState.view.offset) || 0 };
-    canvas.classList.add('panning');
+    const x = ev.clientX - rect.left, y = ev.clientY - rect.top;
+    // Перетаскивание шкалы цены (справа) / шкалы времени (снизу) — работает независимо от
+    // выбранного инструмента рисования, как у "своего графика" (см. wireOwnChartInteractions).
+    if (x > chart.padLeft + chart.plotW) {
+      journalPriceScaleDrag = { startY: y, startMult: journalPriceScaleMult };
+      return;
+    }
+    if (y > chart.volTop + chart.volumeH) {
+      const n = journalChartState ? journalChartState.candles.length : 0;
+      const view = (journalChartState && journalChartState.view) || { visibleCount: n, offset: 0 };
+      const centerIdx = n - view.offset - view.visibleCount / 2;
+      journalTimeScaleDrag = { startX: x, startVisible: view.visibleCount, centerIdx: centerIdx };
+      return;
+    }
+    if (journalChartTool === 'cursor') {
+      journalPanDrag = { startX: x, startOffset: (journalChartState && journalChartState.view && journalChartState.view.offset) || 0 };
+      canvas.classList.add('panning');
+    } else if (journalChartTool === 'hline') {
+      const v = chart.priceOfY(y);
+      journalChartDrawings.push({ type: 'hline', v: v });
+      journalChartTool = 'cursor';
+      syncJournalToolButtons();
+      redraw();
+    } else if (journalChartTool === 'trend' || journalChartTool === 'ray' || journalChartTool === 'xline') {
+      const t = chart.timeOfX(x), v = chart.priceOfY(y);
+      if (!journalChartPendingTrend) {
+        journalChartPendingTrend = { tool: journalChartTool, p1: { t: t, v: v } };
+      } else {
+        journalChartDrawings.push({ type: journalChartPendingTrend.tool, p1: journalChartPendingTrend.p1, p2: { t: t, v: v } });
+        journalChartPendingTrend = null;
+        journalChartTool = 'cursor';
+        syncJournalToolButtons();
+      }
+      redraw();
+    } else if (journalChartTool === 'ruler') {
+      journalChartRulerDrag = { x1: x, y1: y, t1: chart.timeOfX(x), v1: chart.priceOfY(y), x2: x, y2: y, t2: chart.timeOfX(x), v2: chart.priceOfY(y) };
+      redraw();
+    }
   });
 
   window.addEventListener('mousemove', function (ev) {
@@ -4235,6 +4382,28 @@ function wireJournalChartInteractions(canvas) {
     if (!chart || !journalChartState) return;
     const rect = canvas.getBoundingClientRect();
     const x = ev.clientX - rect.left, y = ev.clientY - rect.top;
+    if (journalPriceScaleDrag) {
+      const dy = y - journalPriceScaleDrag.startY;
+      const factor = Math.exp(dy * 0.006);
+      journalPriceScaleMult = Math.max(0.15, Math.min(8, journalPriceScaleDrag.startMult * factor));
+      redraw();
+      return;
+    }
+    if (journalTimeScaleDrag) {
+      const dx = x - journalTimeScaleDrag.startX;
+      const factor = Math.exp(-dx * 0.006);
+      const n = journalChartState.candles.length;
+      let newVisible = Math.round(journalTimeScaleDrag.startVisible * factor);
+      newVisible = Math.max(6, Math.min(n, newVisible));
+      const maxOffset = Math.max(0, n - newVisible);
+      let newOffset = n - newVisible - (journalTimeScaleDrag.centerIdx - newVisible / 2);
+      journalChartState.view = { visibleCount: newVisible, offset: Math.max(0, Math.min(maxOffset, newOffset)) };
+      redraw();
+      return;
+    }
+    if (!journalPanDrag) {
+      canvas.style.cursor = x > chart.padLeft + chart.plotW ? 'ns-resize' : (y > chart.volTop + chart.volumeH ? 'ew-resize' : '');
+    }
     if (journalPanDrag) {
       const deltaCandles = (x - journalPanDrag.startX) / chart.slot;
       const n = journalChartState.candles.length;
@@ -4245,8 +4414,14 @@ function wireJournalChartInteractions(canvas) {
       redraw();
       return;
     }
-    // Курсор вне холста (событие всё равно приходит через window, не только canvas) — гасим hover.
-    if (x < 0 || x > rect.width || y < 0 || y > rect.height) {
+    if (journalChartRulerDrag) {
+      journalChartRulerDrag.x2 = x; journalChartRulerDrag.y2 = y;
+      journalChartRulerDrag.t2 = chart.timeOfX(x); journalChartRulerDrag.v2 = chart.priceOfY(y);
+      redraw();
+      return;
+    }
+    // Курсор вне области построения (событие всё равно приходит через window, не только canvas) — гасим hover.
+    if (x < chart.padLeft || x > chart.padLeft + chart.plotW || y < chart.padTop || y > chart.volTop + chart.volumeH) {
       if (journalChartHover) { journalChartHover = null; redraw(); }
       return;
     }
@@ -4255,11 +4430,48 @@ function wireJournalChartInteractions(canvas) {
   });
 
   canvas.addEventListener('mouseleave', function () {
-    if (!journalPanDrag && journalChartHover) { journalChartHover = null; redraw(); }
+    if (!journalPanDrag && !journalChartRulerDrag && journalChartHover) { journalChartHover = null; redraw(); }
   });
 
   window.addEventListener('mouseup', function () {
     if (journalPanDrag) { journalPanDrag = null; canvas.classList.remove('panning'); }
+    if (journalChartRulerDrag) { journalChartRulerDrag = null; redraw(); }
+    journalPriceScaleDrag = null;
+    journalTimeScaleDrag = null;
+  });
+
+  canvas.addEventListener('contextmenu', function (ev) {
+    ev.preventDefault();
+    const chart = canvas.__journalChart;
+    if (!chart || !journalChartDrawings.length) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = ev.clientX - rect.left, y = ev.clientY - rect.top;
+    const threshold = 8;
+    let bestIdx = -1, bestDist = threshold;
+    journalChartDrawings.forEach(function (dr, i) {
+      let dist = Infinity;
+      if (dr.type === 'hline') {
+        dist = Math.abs(chart.yOf(dr.v) - y);
+      } else if (dr.type === 'trend' || dr.type === 'ray' || dr.type === 'xline') {
+        const x1 = chart.xOfTime(dr.p1.t), y1 = chart.yOf(dr.p1.v);
+        const x2 = chart.xOfTime(dr.p2.t), y2 = chart.yOf(dr.p2.v);
+        const tLo = dr.type === 'xline' ? -Infinity : 0;
+        const tHi = dr.type === 'trend' ? 1 : Infinity;
+        dist = distToSegment(x, y, x1, y1, x2, y2, tLo, tHi);
+      }
+      if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+    });
+    if (bestIdx >= 0) {
+      journalChartDrawings.splice(bestIdx, 1);
+      redraw();
+      showAppToast('Построение удалено');
+    }
+  });
+}
+
+function syncJournalToolButtons() {
+  document.querySelectorAll('#journalVToolbar .ochart-tool[data-jtool]').forEach(function (b) {
+    b.classList.toggle('active', b.getAttribute('data-jtool') === journalChartTool);
   });
 }
 
@@ -6855,11 +7067,158 @@ function closeJournalModal() {
   document.getElementById('journalModal').classList.remove('active');
   stopJournalLiveRefresh();
   journalChartState = null;
+  // Построения/зум-по-осям не привязаны к конкретной монете (в отличие от ownChartDrawings у
+  // главного графика) — сбрасываем при закрытии, чтобы при следующем открытии журнала для ДРУГОЙ
+  // сделки не остались линии/растяжение от предыдущей.
+  journalChartTool = 'cursor';
+  journalChartDrawings = [];
+  journalChartPendingTrend = null;
+  journalChartRulerDrag = null;
+  journalPriceScaleMult = 1;
 }
 document.getElementById('journalModalClose').addEventListener('click', closeJournalModal);
 document.getElementById('journalModal').addEventListener('click', function (e) {
   if (e.target === this) closeJournalModal();
 });
+
+// Панель инструментов рисования слева (та же техника, что у "своего графика") — делегированный
+// клик по кнопкам с data-jtool.
+document.querySelectorAll('#journalVToolbar .ochart-tool[data-jtool]').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    journalChartTool = btn.getAttribute('data-jtool');
+    journalChartPendingTrend = null;
+    syncJournalToolButtons();
+  });
+});
+
+// Панель "Индикаторы" (глазки VOLG/Точки входа-выхода) — открывается и от "Индикаторы", и от
+// шестерёнки "Настройки", тот же приём, что и у главного "своего графика" (position:fixed,
+// позиционируется под реально кликнутой кнопкой).
+(function wireJournalIndicatorsPanel() {
+  const panelEl = document.getElementById('journalIndicatorsPanel');
+  const btns = [document.getElementById('journalIndicatorsBtn'), document.getElementById('journalSettingsBtn')].filter(Boolean);
+  if (!panelEl || !btns.length) return;
+  function toggle(anchorEl) {
+    const isOpenForThis = panelEl.classList.contains('show') && panelEl.__anchor === anchorEl;
+    if (isOpenForThis) { panelEl.classList.remove('show'); return; }
+    const r = anchorEl.getBoundingClientRect();
+    panelEl.style.top = (r.bottom + 6) + 'px';
+    const panelW = 190;
+    panelEl.style.left = Math.max(6, Math.min(window.innerWidth - panelW - 6, r.left)) + 'px';
+    panelEl.__anchor = anchorEl;
+    panelEl.classList.add('show');
+  }
+  btns.forEach(function (btn) {
+    btn.addEventListener('click', function (e) { e.stopPropagation(); toggle(btn); });
+  });
+  document.addEventListener('click', function (e) {
+    if (!panelEl.classList.contains('show')) return;
+    if (panelEl.contains(e.target) || btns.indexOf(e.target) !== -1) return;
+    panelEl.classList.remove('show');
+  });
+  function syncIndRow(row, on) {
+    row.classList.toggle('ind-off', !on);
+    const eyeBtn = row.querySelector('.ochart-ind-eye');
+    eyeBtn.classList.toggle('active', on);
+    eyeBtn.querySelector('i').className = on ? 'ri-eye-line' : 'ri-eye-off-line';
+  }
+  panelEl.querySelectorAll('.ochart-ind-row').forEach(function (row) {
+    row.addEventListener('click', function () {
+      const ind = row.getAttribute('data-ind');
+      if (ind === 'volume') { journalShowVolume = !journalShowVolume; syncIndRow(row, journalShowVolume); }
+      else if (ind === 'entryexit') { journalShowEntryExit = !journalShowEntryExit; syncIndRow(row, journalShowEntryExit); }
+      if (journalChartState) drawJournalChart(document.getElementById('journalChartCanvas'), journalChartState.candles);
+    });
+  });
+})();
+
+function journalZoom(factor) {
+  if (!journalChartState) return;
+  const n = journalChartState.candles.length;
+  const view = journalChartState.view || { visibleCount: n, offset: 0 };
+  const center = n - view.offset - view.visibleCount / 2;
+  let newVisible = Math.round(view.visibleCount * factor);
+  newVisible = Math.max(6, Math.min(n, newVisible));
+  const maxOffset = Math.max(0, n - newVisible);
+  const newOffset = Math.max(0, Math.min(maxOffset, n - newVisible - (center - newVisible / 2)));
+  journalChartState.view = { visibleCount: newVisible, offset: newOffset };
+  drawJournalChart(document.getElementById('journalChartCanvas'), journalChartState.candles);
+}
+const journalZoomInBtnEl = document.getElementById('journalZoomIn');
+if (journalZoomInBtnEl) journalZoomInBtnEl.addEventListener('click', function () { journalZoom(1 / 1.3); });
+const journalZoomOutBtnEl = document.getElementById('journalZoomOut');
+if (journalZoomOutBtnEl) journalZoomOutBtnEl.addEventListener('click', function () { journalZoom(1.3); });
+
+const journalClearBtnEl = document.getElementById('journalClearDrawings');
+if (journalClearBtnEl) {
+  journalClearBtnEl.addEventListener('click', function () {
+    journalChartDrawings = [];
+    if (journalChartState) drawJournalChart(document.getElementById('journalChartCanvas'), journalChartState.candles);
+    showAppToast('Построения на графике сделок очищены');
+  });
+}
+const journalResetViewBtnEl = document.getElementById('journalResetView');
+if (journalResetViewBtnEl) {
+  journalResetViewBtnEl.addEventListener('click', function () {
+    if (!journalChartState) return;
+    const selPair = journalChartState.pairs && journalChartState.pairs[journalChartState.selectedPairIndex];
+    journalChartState.view = selPair ? centerJournalViewOnPair(journalChartState.candles, selPair)
+      : { visibleCount: Math.min(120, journalChartState.candles.length), offset: 0 };
+    journalPriceScaleMult = 1;
+    drawJournalChart(document.getElementById('journalChartCanvas'), journalChartState.candles);
+  });
+}
+
+// Скриншот графика сделок — тот же Blob+ObjectURL+<a download> приём, что и у "своего графика"/CSV.
+const journalScreenshotBtnEl = document.getElementById('journalScreenshot');
+if (journalScreenshotBtnEl) {
+  journalScreenshotBtnEl.addEventListener('click', function () {
+    const srcCanvas = document.getElementById('journalChartCanvas');
+    if (!srcCanvas || !journalChartState || !journalChartState.candles) { showAppToast('Нет данных для скриншота'); return; }
+    const out = document.createElement('canvas');
+    out.width = srcCanvas.width; out.height = srcCanvas.height;
+    const octx = out.getContext('2d');
+    octx.fillStyle = '#131722';
+    octx.fillRect(0, 0, out.width, out.height);
+    octx.drawImage(srcCanvas, 0, 0);
+    out.toBlob(function (blob) {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'mexc-journal-' + (journalChartState.raw || 'chart') + '-' + Date.now() + '.png';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      showAppToast('Скриншот графика сохранён');
+    }, 'image/png');
+  });
+}
+
+// Полноэкранный режим для модалки журнала — на весь .journal-modal (шапка+тулбар+график+список).
+const journalFullscreenBtnEl = document.getElementById('journalFullscreen');
+if (journalFullscreenBtnEl) {
+  journalFullscreenBtnEl.addEventListener('click', function () {
+    const modalEl = document.querySelector('#journalModal .journal-modal');
+    if (!modalEl) return;
+    if (!document.fullscreenElement) {
+      modalEl.requestFullscreen().catch(function () { showAppToast('Не удалось включить полноэкранный режим'); });
+    } else {
+      document.exitFullscreen().catch(function () {});
+    }
+  });
+  document.addEventListener('fullscreenchange', function () {
+    const modalEl = document.querySelector('#journalModal .journal-modal');
+    const isFs = document.fullscreenElement === modalEl;
+    journalFullscreenBtnEl.classList.toggle('active', isFs);
+    journalFullscreenBtnEl.querySelector('i').className = isFs ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line';
+    journalFullscreenBtnEl.title = isFs ? 'Выйти из полноэкранного режима' : 'Полноэкранный режим';
+    setTimeout(function () {
+      if (journalChartState) drawJournalChart(document.getElementById('journalChartCanvas'), journalChartState.candles);
+    }, 60);
+  });
+}
 document.getElementById('finresContent').addEventListener('click', function (e) {
   const chip = e.target.closest('.journal-chip');
   if (!chip) return;
