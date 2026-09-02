@@ -37,7 +37,11 @@ body {
 /* SIDEBAR */
 .sidebar {
   width: var(--sidebar-width);
-  background: linear-gradient(180deg, #0E1318 0%, #0B0E11 100%);
+  /* Раньше был литеральный тёмный градиент (#0E1318→#0B0E11), не завязанный на CSS-переменные —
+     переключение на светлую тему (themeToggle в app.js переопределяет --bg-* на :root) сайдбар
+     никак не затрагивало, он оставался тёмным. Теперь строим тот же по ощущению градиент из
+     переменных, чтобы сайдбар следовал теме, как и остальной интерфейс. */
+  background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
   border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
@@ -79,7 +83,7 @@ body {
   overflow: hidden;
   transition: opacity .2s, transform .28s;
 }
-.logo-title { font-size: 13px; font-weight: 700; letter-spacing: .8px; color: #FFFFFF; }
+.logo-title { font-size: 13px; font-weight: 700; letter-spacing: .8px; color: var(--text-primary); }
 .logo-sub { font-size: 9px; color: var(--text-muted); letter-spacing: 1.6px; text-transform: uppercase; font-weight: 600; margin-top: 3px; }
 .nav { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 10px 8px; }
 .nav-section {
@@ -105,10 +109,10 @@ body {
 }
 .nav-item span { overflow: hidden; transition: opacity .2s; }
 .nav-item i { font-size: 18px; width: 22px; text-align: center; flex-shrink: 0; }
-.nav-item:hover { background: rgba(255,255,255,.05); color: #fff; transform: translateX(2px); }
+.nav-item:hover { background: rgba(128,128,128,.12); color: var(--text-primary); transform: translateX(2px); }
 .nav-item.active {
   background: linear-gradient(90deg, rgba(30,128,255,.14), rgba(30,128,255,.03));
-  color: #fff;
+  color: var(--text-primary);
   box-shadow: inset 0 0 0 1px rgba(30,128,255,.18);
 }
 .nav-item.active::before {
@@ -126,8 +130,8 @@ body {
   height: 18px;
   padding: 0 5px;
   border-radius: 9px;
-  background: rgba(255,255,255,.1);
-  color: #fff;
+  background: rgba(128,128,128,.22);
+  color: var(--text-primary);
   font-size: 10px;
   font-weight: 600;
   display: flex;
@@ -149,7 +153,7 @@ body {
   border-radius: 8px;
   transition: background .2s, color .2s;
 }
-.sidebar-action:hover { background: rgba(255,255,255,.05); color: #fff; }
+.sidebar-action:hover { background: rgba(128,128,128,.12); color: var(--text-primary); }
 .sidebar-action i { font-size: 16px; width: 22px; text-align: center; flex-shrink: 0; }
 .sidebar-action span { overflow: hidden; }
 .toggle-switch {
@@ -182,10 +186,16 @@ body {
 .sidebar.collapsed .sidebar-action span,
 .sidebar.collapsed .nav-badge,
 .sidebar.collapsed .conn-pill span { opacity: 0; width: 0; overflow: hidden; pointer-events: none; }
-.sidebar.collapsed .nav-item { justify-content: center; padding: 10px 0; }
+/* Паддинг НЕ переопределяем (был "10px 0") — он не входит в transition у .nav-item, поэтому менялся
+   мгновенно, пока ширина сайдбара плавно анимируется 320мс, и иконка визуально "прыгала" в середине
+   анимации. Паддинг слева/справа и так симметричный (12px/12px), так что justify-content:center
+   центрирует иконку одинаково в обоих состояниях без необходимости его менять. */
+.sidebar.collapsed .nav-item { justify-content: center; }
 .sidebar.collapsed .sidebar-action { justify-content: center; }
 .sidebar.collapsed .toggle-switch { display: none; }
-.sidebar.collapsed .logo { justify-content: center; padding: 18px 8px 16px; }
+/* Тот же приём, что у .nav-item выше: паддинг слева/справа уже симметричный (16px/16px), не
+   переопределяем его (был "18px 8px 16px") — только центрируем, чтобы не было скачка иконки. */
+.sidebar.collapsed .logo { justify-content: center; }
 .sidebar.collapsed .nav-item.active::before { display: none; }
 
 /* MAIN */
@@ -539,8 +549,31 @@ body {
   padding: 8px; border-bottom: 1px solid rgba(43,49,57,.5);
   white-space: nowrap; font-family: var(--font-mono);
 }
-.data-table tr { cursor: pointer; transition: background .12s; position: relative; }
-.data-table tr:hover { background: var(--bg-hover); }
+.data-table tr {
+  cursor: pointer; position: relative;
+}
+/* "Стекло" при наведении — строка чуть приподнимается и увеличивается над остальным списком
+   (transform + z-index), с полупрозрачным размытым фоном (backdrop-filter), как карточка на iOS,
+   а не просто плоская подсветка. Работает вместе с фиксацией порядка при наведении
+   (tableHoverFreezeSymbol, см. applySortOnly) — строка не только визуально "выплывает", но и
+   физически не убегает по списку, пока курсор на ней.
+   БЕЗ transition на transform/box-shadow: таблица целиком пересобирается (tbody.innerHTML=...) на
+   каждый живой тик цены (~раз в 400мс, см. scheduleRender), то есть наведённая строка — это новый
+   DOM-узел каждые ~400мс. CSS-переход не успевает доиграть на одном узле и визуально "залипает" в
+   начальном состоянии. Мгновенное применение при :hover выглядит для глаза так же плавно (эффект и
+   так проявляется/пропадает почти сразу), но не ломается из-за постоянной пересборки. */
+.data-table tr:hover {
+  background: rgba(255,255,255,.075);
+  transform: scale(1.012) translateY(-1px);
+  z-index: 6;
+  box-shadow:
+    0 12px 28px -10px rgba(0,0,0,.55),
+    0 0 0 1px rgba(255,255,255,.09),
+    inset 0 1px 0 rgba(255,255,255,.07);
+  backdrop-filter: blur(7px) saturate(1.4);
+  -webkit-backdrop-filter: blur(7px) saturate(1.4);
+  border-radius: 8px;
+}
 .data-table tr.selected { background: rgba(30,128,255,.08); box-shadow: inset 3px 0 0 var(--blue); }
 @keyframes rowEnterIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 .data-table tr.row-enter { animation: rowEnterIn .3s ease both; }
@@ -1027,10 +1060,18 @@ body {
 .content.grid-mode .data-table { display: none; }
 .content.grid-mode .grid-view { display: grid; }
 .grid-card {
-  background: var(--bg-card); border: 1px solid var(--border-color);
-  border-radius: 10px; padding: 14px; cursor: pointer; transition: border-color .15s, transform .15s;
+  background: var(--bg-card); border: 1px solid var(--border-color); position: relative;
+  border-radius: 10px; padding: 14px; cursor: pointer;
+  transition: border-color .15s;
+  /* Без transition на transform/box-shadow — та же причина, что у .data-table tr:hover выше
+     (карточки тоже пересобираются в grid.innerHTML= на каждый живой тик, см. renderTable). */
 }
-.grid-card:hover { border-color: rgba(255,255,255,.2); transform: translateY(-1px); }
+.grid-card:hover {
+  border-color: rgba(255,255,255,.2); transform: translateY(-3px) scale(1.015); z-index: 6;
+  box-shadow: 0 14px 30px -10px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.07);
+  backdrop-filter: blur(7px) saturate(1.4);
+  -webkit-backdrop-filter: blur(7px) saturate(1.4);
+}
 .grid-card.selected { border-color: #fff; }
 .grid-card-top { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .grid-card-price { font-family: var(--font-mono); font-size: 18px; font-weight: 700; }

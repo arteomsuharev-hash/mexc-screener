@@ -484,40 +484,6 @@ function copySymbolForVataga(symbol) {
   }
 }
 
-// Десктоп-версия (Windows) встроена в саму страницу как base64 — ZIP с exe + bat-скриптом авторазблокировки
-// (см. <script id="desktopAppData"> в конце файла). Скачивание работает без стороннего хостинга, прямо из HTML.
-function downloadDesktopApp() {
-  const holder = document.getElementById('desktopAppData');
-  if (!holder || !holder.textContent) {
-    showModal('Недоступно', 'Файл приложения не встроен в эту сборку скринера.');
-    return;
-  }
-  try {
-    const b64 = holder.textContent.trim();
-    const binary = atob(b64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    const blob = new Blob([bytes], { type: 'application/zip' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'MEXC-Screener-Windows.zip';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
-    showModal('Загрузка началась',
-      'MEXC-Screener-Windows.zip (~0.8 МБ) сохраняется в папку загрузок браузера.\n\n' +
-      'Windows блокирует запуск любого .exe без платной подписи издателя — поэтому внутри архива, ' +
-      'помимо MEXC-Screener.exe, лежит файл «Запустить.bat»: он снимает эту блокировку и сразу ' +
-      'открывает приложение.\n\n' +
-      '1) Распакуйте архив целиком в одну папку (файлы должны остаться рядом друг с другом).\n' +
-      '2) Запустите «Запустить.bat» — дальше можно открывать сам .exe напрямую.');
-  } catch (e) {
-    showModal('Ошибка', 'Не удалось подготовить файл для скачивания: ' + e.message);
-  }
-}
-
 // ============================================
 // Автообновление desktop-приложения — страница «Настройки» → «Обновления».
 // Источник правды о версиях — GitHub Releases конкретного репозитория (UPDATE_REPO_OWNER/NAME
@@ -6734,7 +6700,6 @@ async function runDiagnostics() {
 document.querySelectorAll('.nav-item').forEach(function (item) {
   item.addEventListener('click', function (e) {
     e.preventDefault();
-    if (this.dataset.action === 'download-app') { downloadDesktopApp(); return; }
     switchPage(this.dataset.page);
   });
 });
