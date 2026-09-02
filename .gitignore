@@ -4,5 +4,10 @@ desktop/resources/css/
 desktop/resources/js/app.js
 desktop/resources/js/core-utils.js
 MEXC-Screener-Windows.zip
+MEXC-Screener-Windows/
 .DS_Store
 node_modules/
+
+# Neutralino CLI binaries (multi-platform runtime, ~15MB, redownloaded by `neu update`/`neu build` —
+# vendored tool binaries, not project source, shouldn't live in version control).
+desktop/bin/
