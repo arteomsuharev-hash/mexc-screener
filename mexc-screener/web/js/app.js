@@ -5018,12 +5018,26 @@ function loadKnownSymbols() {
   try {
     const raw = localStorage.getItem(KNOWN_SYMBOLS_KEY);
     const arr = raw ? JSON.parse(raw) : [];
-    if (Array.isArray(arr)) arr.forEach(function (e) { if (e && e.asset && e.raw) knownSymbols[e.asset] = e.raw; });
+    let hadStablecoin = false;
+    if (Array.isArray(arr)) arr.forEach(function (e) {
+      if (!e || !e.asset || !e.raw) return;
+      // Стейблкоин сам против себя ("USDTUSDT" и т.п.) — не реальная спот-пара, MEXC всегда ответит
+      // "Invalid symbol". Раньше такие записи могли попасть сюда (до того как эта проверка появилась
+      // и в rememberSymbol ниже, и в finresLoadRealizedCore для текущего баланса) и с тех пор молча
+      // пережёвывались на каждое обновление Финреза — один гарантированно провальный запрос впустую.
+      if (STABLECOINS.hasOwnProperty(e.asset)) { hadStablecoin = true; return; }
+      knownSymbols[e.asset] = e.raw;
+    });
+    if (hadStablecoin) {
+      const arr2 = Object.keys(knownSymbols).map(function (a) { return { asset: a, raw: knownSymbols[a] }; });
+      persistSet(KNOWN_SYMBOLS_KEY, JSON.stringify(arr2));
+    }
   } catch (e) { /* localStorage недоступен — просто не будет "памяти" между сессиями, не критично */ }
 }
 loadKnownSymbols();
 function rememberSymbol(asset, raw) {
   if (!asset || !raw || knownSymbols[asset] === raw) return;
+  if (STABLECOINS.hasOwnProperty(asset)) return; // см. комментарий в loadKnownSymbols
   knownSymbols[asset] = raw;
   try {
     const arr = Object.keys(knownSymbols).map(function (a) { return { asset: a, raw: knownSymbols[a] }; });
