@@ -3878,44 +3878,69 @@ function drawJournalChart(canvas, candles, trades) {
   function xOf(i) { return padLeft + i * slot + slot / 2; }
   function yOf(v) { return padTop + plotH - ((v - min) / (max - min)) * plotH; }
 
+  // Более стильная сетка: тонкая линия + подложка под ценовую подпись (а не голый текст поверх
+  // свечей) — читается увереннее и меньше "спорит" визуально с самим графиком.
   ctx.font = '9px var(--font-mono, monospace)';
   ctx.textBaseline = 'middle';
   [max - pricePad, (min + max) / 2, min + pricePad].forEach(function (v) {
     const y = yOf(v);
-    ctx.strokeStyle = 'rgba(255,255,255,.06)';
+    ctx.strokeStyle = 'rgba(255,255,255,.05)';
     ctx.beginPath(); ctx.moveTo(padLeft, y); ctx.lineTo(padLeft + plotW, y); ctx.stroke();
-    ctx.fillStyle = 'rgba(255,255,255,.4)';
-    ctx.fillText(fmtPrice(v), padLeft + plotW + 5, y);
+    const label = fmtPrice(v);
+    const labelW = ctx.measureText(label).width;
+    ctx.fillStyle = 'rgba(255,255,255,.04)';
+    ctx.fillRect(padLeft + plotW + 2, y - 7, labelW + 6, 14);
+    ctx.fillStyle = 'rgba(255,255,255,.5)';
+    ctx.fillText(label, padLeft + plotW + 5, y);
   });
 
   candles.forEach(function (c, i) {
     const x = xOf(i);
     const up = c.c >= c.o;
-    ctx.strokeStyle = ctx.fillStyle = up ? '#26A69A' : '#EF5350';
+    const color = up ? '#26A69A' : '#EF5350';
+    ctx.strokeStyle = color;
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(x, yOf(c.h)); ctx.lineTo(x, yOf(c.l)); ctx.stroke();
     const openY = yOf(c.o), closeY = yOf(c.c);
     const top = Math.min(openY, closeY), bh = Math.max(1, Math.abs(closeY - openY));
+    // Лёгкий вертикальный градиент вместо плошного заливки тела свечи — небольшой "глянец", не меняет
+    // читаемость (тот же оттенок сверху донизу, просто чуть светлее у верхнего края).
+    const bodyGrad = ctx.createLinearGradient(0, top, 0, top + bh);
+    bodyGrad.addColorStop(0, up ? '#2FBFAF' : '#FF6B7A');
+    bodyGrad.addColorStop(1, color);
+    ctx.fillStyle = bodyGrad;
     ctx.fillRect(x - bodyW / 2, top, bodyW, bh);
   });
 
   const tfMs = candles.length > 1 ? (candles[1].t - candles[0].t) : 60000;
+  // Маркеры входа/выхода — крупнее прежних, с мягким свечением своего цвета (shadowBlur) и белой
+  // окантовкой тела — по фидбеку "сделать стильнее/современнее", чтобы точки сразу бросались в глаза
+  // на фоне свечей, а не терялись рядом с ними.
   (trades || []).forEach(function (t) {
     let idx = Math.floor((t.time - candles[0].t) / tfMs);
     idx = Math.max(0, Math.min(candles.length - 1, idx));
     const c = candles[idx];
     const x = xOf(idx);
+    const color = t.buy ? '#00C076' : '#F84960';
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 8;
     ctx.beginPath();
     if (t.buy) {
-      const y = yOf(c.l) + 15;
-      ctx.fillStyle = '#00C076';
-      ctx.moveTo(x, y - 9); ctx.lineTo(x - 6, y + 3); ctx.lineTo(x + 6, y + 3);
+      const y = yOf(c.l) + 16;
+      ctx.moveTo(x, y - 10); ctx.lineTo(x - 7, y + 4); ctx.lineTo(x + 7, y + 4);
     } else {
-      const y = yOf(c.h) - 15;
-      ctx.fillStyle = '#F84960';
-      ctx.moveTo(x, y + 9); ctx.lineTo(x - 6, y - 3); ctx.lineTo(x + 6, y - 3);
+      const y = yOf(c.h) - 16;
+      ctx.moveTo(x, y + 10); ctx.lineTo(x - 7, y - 4); ctx.lineTo(x + 7, y - 4);
     }
-    ctx.closePath(); ctx.fill();
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = 1.25;
+    ctx.strokeStyle = 'rgba(255,255,255,.55)';
+    ctx.stroke();
+    ctx.restore();
   });
 
   ctx.fillStyle = 'rgba(255,255,255,.35)';
@@ -4686,7 +4711,7 @@ function renderFinresTradesTable(data) {
       '<td>' + fmtPrice(entryPrice) + '</td>' +
       '<td>' + fmtPrice(t.price) + '</td>' +
       '<td>' + fmtNum(t.qty, 4) + '</td>' +
-      '<td class="' + cls + '">' + (win ? '+' : '-') + fmtUsd(Math.abs(t.pnl)).slice(1) + '</td>' +
+      '<td><span class="finres-pnl-chip ' + cls + '">' + (win ? '+' : '-') + fmtUsd(Math.abs(t.pnl)).slice(1) + '</span></td>' +
       '<td class="' + cls + '">' + (win ? '+' : '') + pnlPct.toFixed(2) + '%</td>' +
       '<td><span class="finres-result-badge ' + (win ? 'win' : 'loss') + '">' + (win ? 'WIN' : 'LOSS') + '</span></td>' +
       '</tr>';
@@ -6504,6 +6529,37 @@ window.__fakeFinresLogin = function () {
 
   switchPage('finres');
   console.log('[fake] Финрез: total=' + (lastBalanceState ? lastBalanceState.total.toFixed(2) : '?') + ', trades=' + trades.length);
+};
+
+// Только для ручной проверки дизайна модалки "журнал сделок" (openJournalForAsset тянет реальные
+// klines+myTrades с биржи — не годится для оценки вёрстки без настоящего ключа): открывает модалку
+// с синтетическими свечами и сделками, минуя сеть целиком. НЕ вызывается production-кодом.
+window.__testJournalChart = function () {
+  const overlay = document.getElementById('journalModal');
+  const titleEl = document.getElementById('journalModalTitle');
+  const emptyEl = document.getElementById('journalChartEmpty');
+  const canvas = document.getElementById('journalChartCanvas');
+  overlay.classList.add('active');
+  titleEl.innerHTML = '<i class="ri-file-list-3-line"></i> TEST/USDT — журнал сделок';
+  emptyEl.style.display = 'none';
+  let price = 0.043;
+  const candles = [];
+  const t0 = Date.now() - 300 * 5 * 60000;
+  for (let i = 0; i < 300; i++) {
+    const o = price;
+    price *= 1 + (Math.random() - 0.5) * 0.03;
+    const c = price;
+    const h = Math.max(o, c) * (1 + Math.random() * 0.01);
+    const l = Math.min(o, c) * (1 - Math.random() * 0.01);
+    candles.push({ t: t0 + i * 5 * 60000, o: o, h: h, l: l, c: c });
+  }
+  const trades = [
+    { time: candles[80].t, buy: true, price: candles[80].c, qty: 100 },
+    { time: candles[95].t, buy: false, price: candles[95].c, qty: 100 },
+    { time: candles[150].t, buy: true, price: candles[150].c, qty: 200 },
+    { time: candles[210].t, buy: false, price: candles[210].c, qty: 200 }
+  ];
+  drawJournalChart(canvas, candles, trades);
 };
 
 console.log('MEXC Screener запущен (MEXC Spot WS v3, protobuf)');
