@@ -2,7 +2,7 @@
   "applicationId": "com.mexcscreener.app",
   "version": "1.0.0",
   "defaultMode": "window",
-  "port": 57821,
+  "port": 38217,
   "documentRoot": "/resources/",
   "url": "/",
   "enableServer": true,
