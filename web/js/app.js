@@ -354,15 +354,22 @@ const STRATEGY_DEFS = {
 // нестандартное, чтобы ограниченный бюджет WS-подключений на сделки/стакан (см. ниже) тратился не
 // вслепую по алфавиту, а на действительно активные монеты прямо сейчас.
 // ============================================
+// Живое наблюдение (после недели работы Tier 2): формула раньше иногда тянула в watchlist тихие,
+// почти мёртвые монеты вместо реально активных. Причина — steadyBonus (бонус за "ровный" оборот,
+// сигнатура бота/маркет-мейкера) считался ДАЖЕ у монет, где оборота, по сути, нет вообще: пара
+// случайных тиков за 60с тоже даёт низкий rateCV чисто от недостатка данных, а не от реальной
+// ровности темпа. В спокойный момент рынка, когда у большинства монет burst=0 и move=0, именно
+// эта "ложная стабильность" начинала решать весь рейтинг. Фикс: steadyBonus домножается на
+// activityFloor — он больше нуля, только если за последние 5с был хоть какой-то реальный оборот
+// ($20+, это уже заметно выше среднего темпа для минимально ликвидной по STRATEGY_MIN_LIQUID_VOL24
+// монеты — 20000/17280 5с-окон в сутки ≈ $1.15 в среднем на окно).
 function computeWatchlistCandidateScore(c) {
   if (c.vol24 < STRATEGY_MIN_LIQUID_VOL24) return -1; // мёртвая пара — никогда не кандидат
   const burst = burstRatio(c);
   const move = c.vol5s || 0;
-  // "Ровный" оборот (низкий rateCV) — это не шум, а типичная сигнатура алгоритма/бота (см. algo
-  // выше), т.е. САМ ПО СЕБЕ хороший повод присмотреться на тиковом уровне (лесенка, повторяющиеся
-  // размеры сделок) — поэтому бонусим и стабильность, а не только всплески.
   const steadyBonus = c.rateCV != null ? 1 / (1 + c.rateCV) : 0;
-  return burst + move * 100 + steadyBonus;
+  const activityFloor = Math.min(1, (c.vol5 || 0) / 20);
+  return burst + move * 100 + steadyBonus * activityFloor;
 }
 
 function rawSymbol(sym) {
@@ -2627,10 +2634,46 @@ setInterval(sweepPatternOutcomes, 10000);
 // отдельно, в patternHistory выше.
 let activePatternEvents = [];
 
+// Отключённые пользователем детекторы (стр. «Паттерны», чипы-переключатели) — не считаются вообще
+// (не тратится даже дешёвый бюджет вычислений на watchlist-монетах), а не просто скрываются в UI.
+// Персистентность — тот же localStorage-идиом, что и у остальных настроек интерфейса.
+const DETECTOR_ENABLED_KEY = 'mexc_detector_enabled';
+let disabledDetectorKeys = (function loadDisabledDetectors() {
+  try {
+    const raw = localStorage.getItem(DETECTOR_ENABLED_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch (e) { return new Set(); }
+})();
+function saveDisabledDetectors() {
+  try { localStorage.setItem(DETECTOR_ENABLED_KEY, JSON.stringify(Array.from(disabledDetectorKeys))); } catch (e) { /* переживём без сохранения между сессиями */ }
+}
+function toggleDetectorEnabled(key) {
+  if (disabledDetectorKeys.has(key)) disabledDetectorKeys.delete(key);
+  else disabledDetectorKeys.add(key);
+  saveDisabledDetectors();
+  renderDetectorFilterRow();
+}
+function renderDetectorFilterRow() {
+  const row = document.getElementById('detectorFilterRow');
+  if (!row) return;
+  row.innerHTML = Object.keys(DETECTOR_DEFS).map(function (key) {
+    const def = DETECTOR_DEFS[key];
+    const on = !disabledDetectorKeys.has(key);
+    const catCls = def.category === 'heuristic-lowconf' ? ' cat-heuristic' : '';
+    return '<span class="detector-chip ' + (on ? 'on' : 'off') + catCls + '" data-detector="' + key + '">' +
+      '<span class="chip-dot"></span>' + def.label + '</span>';
+  }).join('');
+  row.querySelectorAll('.detector-chip[data-detector]').forEach(function (chip) {
+    chip.addEventListener('click', function () { toggleDetectorEnabled(this.dataset.detector); });
+  });
+}
+
 function runPatternDetectors() {
   const events = [];
   watchlist.forEach(function (entry, symbol) {
     Object.keys(DETECTOR_DEFS).forEach(function (key) {
+      if (disabledDetectorKeys.has(key)) return;
       let ev;
       try {
         ev = DETECTOR_DEFS[key].detect(symbol);
@@ -2689,6 +2732,27 @@ function patternStatCard(label, valueHtml, cls) {
     '<div class="finres-stat-value' + (cls ? ' ' + cls : '') + '">' + valueHtml + '</div></div>';
 }
 
+// Последние WARNING/ERROR из общего кольцевого лога (MexcCore.logRing, собирается с Phase 1 —
+// WS-разрывы, отказы подписки MEXC, сбои Финреза и т.д.), но раньше нигде не показывался в UI,
+// только в консоли разработчика. Показываем только предупреждения/ошибки — не спамим DEBUG/INFO.
+function renderPatternLogPanel() {
+  const panel = document.getElementById('patternLogPanel');
+  const list = document.getElementById('patternLogList');
+  if (!panel || !list) return;
+  const entries = MexcCore.logRing.filter(function (e) { return e.level === 'WARNING' || e.level === 'ERROR'; }).slice(-20).reverse();
+  if (!entries.length) { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  list.innerHTML = entries.map(function (e) {
+    const time = new Date(e.t).toTimeString().slice(0, 8);
+    return '<div class="pattern-log-row">' +
+      '<span class="pattern-log-time">' + time + '</span>' +
+      '<span class="pattern-log-level ' + e.level + '">' + e.level + '</span>' +
+      '<span class="pattern-log-scope">[' + e.scope + ']</span>' +
+      '<span class="pattern-log-msg" title="' + String(e.msg).replace(/"/g, '&quot;') + '">' + e.msg + '</span>' +
+      '</div>';
+  }).join('');
+}
+
 function patternCardHtml(ev) {
   const def = DETECTOR_DEFS[ev.detectorKey];
   const dirCls = ev.direction === 'LONG' ? 'signal-buy' : (ev.direction === 'SHORT' ? 'signal-sell' : 'signal-wait');
@@ -2732,14 +2796,20 @@ function updatePatternsPage() {
 
   const healthGrid = document.getElementById('patternsHealthGrid');
   if (healthGrid) {
+    const wsAgeS = Math.round((Date.now() - lastMiniTickerAt) / 1000);
+    const wsOk = ws && ws.readyState === 1 && wsAgeS < 30;
     healthGrid.innerHTML =
+      patternStatCard('Основной поток', wsOk ? 'LIVE' : 'МОЛЧИТ/ОБРЫВ', wsOk ? 'up' : 'down') +
       patternStatCard('Watchlist', watchlist.size + '/' + WATCHLIST_SIZE) +
-      patternStatCard('WS-соединений', watchlist.size * 2) +
+      patternStatCard('WS-соединений (Tier 2)', watchlist.size * 2) +
+      patternStatCard('Подключений всего', tier2Health.connectionAttempts) +
       patternStatCard('Сделок обработано', tier2Health.tradesIngested) +
       patternStatCard('Обновлений стакана', tier2Health.depthPushesIngested) +
       patternStatCard('Активных паттернов', activePatternEvents.length, activePatternEvents.length ? 'up' : null) +
+      patternStatCard('В истории', patternHistory.length) +
       patternStatCard('В cooldown', tier2Health.cooldownDrops, tier2Health.cooldownDrops ? 'down' : null);
   }
+  renderPatternLogPanel();
 
   const grid = document.getElementById('patternsGrid');
   const countEl = document.getElementById('patternsCount');
@@ -2891,7 +2961,7 @@ function switchPage(pageId) {
   if (pageId === 'analytics') updateAnalytics();
   if (pageId === 'alerts') updateAlerts();
   if (pageId === 'profiles') updateProfilesPage();
-  if (pageId === 'patterns') updatePatternsPage();
+  if (pageId === 'patterns') { renderDetectorFilterRow(); updatePatternsPage(); }
   if (pageId === 'account') refreshAccountBalancesIfConnected();
   if (pageId === 'finres') {
     // Сразу красим хиро/вкладку из уже закешированного lastBalanceState (если он есть — например,

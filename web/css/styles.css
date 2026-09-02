@@ -547,6 +547,36 @@ body {
   user-select: none;
 }
 .profile-nav-pill:hover { border-color: var(--blue); color: var(--text-primary); }
+
+.detector-filter-row { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 4px; }
+.detector-chip {
+  display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border-color); border-radius: 16px;
+  padding: 5px 12px 5px 8px; font-size: 11.5px; color: var(--text-muted); cursor: pointer; background: var(--bg-secondary);
+  transition: border-color .15s, color .15s, background .15s, opacity .15s; user-select: none;
+}
+.detector-chip:hover { border-color: var(--blue); }
+.detector-chip .chip-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); flex-shrink: 0; transition: background .15s; }
+.detector-chip.on { color: var(--text-primary); border-color: rgba(30,128,255,.4); background: rgba(30,128,255,.06); }
+.detector-chip.on .chip-dot { background: var(--blue); box-shadow: 0 0 6px 1px rgba(30,128,255,.6); }
+/* Категория "эвристика без ground truth" (fakeLiquidity) — янтарный тон даже когда включена,
+   чтобы её "особый" статус был виден прямо в переключателях, а не только в самих карточках. */
+.detector-chip.on.cat-heuristic { color: var(--orange); border-color: rgba(255,159,10,.4); background: rgba(255,159,10,.07); }
+.detector-chip.on.cat-heuristic .chip-dot { background: var(--orange); box-shadow: 0 0 6px 1px rgba(255,159,10,.6); }
+.detector-chip.off { opacity: .55; }
+
+.pattern-log-panel {
+  margin-top: 14px; border: 1px solid var(--border-color); border-radius: 10px; overflow: hidden; background: var(--bg-secondary);
+}
+.pattern-log-title { padding: 9px 14px; font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border-color); }
+.pattern-log-list { max-height: 180px; overflow-y: auto; }
+.pattern-log-row { display: flex; gap: 8px; align-items: baseline; padding: 5px 14px; font-size: 11px; font-family: var(--font-mono); border-bottom: 1px solid rgba(43,49,57,.4); }
+.pattern-log-row:last-child { border-bottom: none; }
+.pattern-log-time { color: var(--text-muted); flex-shrink: 0; }
+.pattern-log-level { flex-shrink: 0; font-weight: 700; width: 44px; }
+.pattern-log-level.WARNING { color: var(--orange); }
+.pattern-log-level.ERROR { color: var(--red); }
+.pattern-log-scope { color: var(--blue); flex-shrink: 0; }
+.pattern-log-msg { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .profile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-bottom: 14px; }
 .profile-strategy-card {
   position: relative; border: 1px solid var(--border-color); border-radius: 10px; padding: 16px 18px 18px;
