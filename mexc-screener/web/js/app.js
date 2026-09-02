@@ -3857,6 +3857,10 @@ function wirePnlChartCrosshair(canvas, tooltipEl) {
 // главного "своего графика" скринера — своя, изолированная реализация той же техники (см.
 // wireJournalChartInteractions/drawCandleChart выше по файлу), чтобы не трогать уже рабочий
 // основной график ради модалки журнала.
+// Наведение мышью на график журнала — своё, изолированное состояние (не ownChartHover главного
+// графика), см. wireJournalChartInteractions.
+let journalChartHover = null; // { x, y }
+
 function drawJournalChart(canvas, candles) {
   if (!canvas || !candles || !candles.length) return;
   const dpr = window.devicePixelRatio || 1;
@@ -3866,8 +3870,17 @@ function drawJournalChart(canvas, candles) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
 
-  const padLeft = 8, padRight = 58, padTop = 20, padBottom = 22;
-  const plotW = Math.max(10, w - padLeft - padRight), plotH = Math.max(10, h - padTop - padBottom);
+  // Раунд "сделай как на референсе (tradermake.money)": добавлена панель объёма снизу (как у
+  // "своего графика" на главной странице скринера, см. drawCandleChart выше по файлу — тот же
+  // приём volTop/volumeH, просто изолированная копия, не общий global state), вертикальная сетка
+  // и легенда OHLC+Vol сверху слева (следует за курсором, как в TradingView).
+  const padLeft = 8, padRight = 58, padTop = 26, padBottom = 22;
+  const plotWTotal = Math.max(10, w - padLeft - padRight), plotHTotal = Math.max(10, h - padTop - padBottom);
+  const volumeH = Math.round(plotHTotal * 0.16);
+  const paneGap = 6;
+  const plotW = plotWTotal;
+  const plotH = plotHTotal - volumeH - paneGap;
+  const volTop = padTop + plotH + paneGap;
 
   const n = candles.length;
   const intervalMs = n > 1 ? (candles[1].t - candles[0].t) : 60000;
@@ -3896,6 +3909,9 @@ function drawJournalChart(canvas, candles) {
   const pricePad = (max - min) * 0.12 || (max * 0.01) || 1;
   min -= pricePad; max += pricePad;
 
+  let maxVol = Math.max.apply(null, slice.map(function (c) { return c.v; }));
+  if (!Number.isFinite(maxVol) || maxVol <= 0) maxVol = 1;
+
   const slot = plotW / visibleCount;
   const bodyW = Math.max(1.5, Math.min(slot * 0.62, 9));
   const firstT = candles[startIdx].t;
@@ -3904,10 +3920,15 @@ function drawJournalChart(canvas, candles) {
   function timeOfX(x) { return firstT + ((x - padLeft - slot / 2) / slot) * intervalMs; }
   function yOf(v) { return padTop + plotH - ((v - min) / (max - min)) * plotH; }
   function priceOfY(y) { return min + ((padTop + plotH - y) / plotH) * (max - min); }
+  function volYOf(vv) { return volTop + volumeH - (vv / maxVol) * volumeH; }
 
-  // Метаданные окна — читает wireJournalChartInteractions ниже для колеса мыши/панорамы.
-  canvas.__journalChart = { xOfTime: xOfTime, timeOfX: timeOfX, priceOfY: priceOfY, plotW: plotW, plotH: plotH, padLeft: padLeft, slot: slot, intervalMs: intervalMs };
+  // Метаданные окна — читает wireJournalChartInteractions ниже для колеса мыши/панорамы/hover.
+  canvas.__journalChart = {
+    xOfTime: xOfTime, timeOfX: timeOfX, priceOfY: priceOfY, plotW: plotW, plotH: plotH,
+    padLeft: padLeft, padTop: padTop, slot: slot, intervalMs: intervalMs, volTop: volTop, volumeH: volumeH
+  };
 
+  // --- горизонтальная сетка + подписи цены ---
   ctx.font = '9px var(--font-mono, monospace)';
   ctx.textBaseline = 'middle';
   [max - pricePad, (min + max) / 2, min + pricePad].forEach(function (v) {
@@ -3920,6 +3941,26 @@ function drawJournalChart(canvas, candles) {
     ctx.fillRect(padLeft + plotW + 2, y - 7, labelW + 6, 14);
     ctx.fillStyle = 'rgba(255,255,255,.5)';
     ctx.fillText(label, padLeft + plotW + 5, y);
+  });
+
+  // --- вертикальная сетка по временным меткам, на всю высоту (обе панели) ---
+  const timeTicks = 4;
+  for (let i = 0; i <= timeTicks; i++) {
+    const idx = Math.round((i / timeTicks) * (slice.length - 1));
+    const c = slice[idx];
+    if (!c) continue;
+    const x = xOfTime(c.t);
+    ctx.strokeStyle = 'rgba(255,255,255,.045)';
+    ctx.beginPath(); ctx.moveTo(x, padTop); ctx.lineTo(x, volTop + volumeH); ctx.stroke();
+  }
+
+  // --- объём (панель снизу) ---
+  slice.forEach(function (c) {
+    const x = xOfTime(c.t);
+    const up = c.c >= c.o;
+    ctx.fillStyle = up ? 'rgba(38,166,154,.45)' : 'rgba(239,83,80,.45)';
+    const vy = volYOf(c.v);
+    ctx.fillRect(x - bodyW / 2, vy, bodyW, (volTop + volumeH) - vy);
   });
 
   slice.forEach(function (c) {
@@ -4007,6 +4048,74 @@ function drawJournalChart(canvas, candles) {
     ctx.fillText(label, xOfTime(c.t), h - 6);
   });
   ctx.textAlign = 'left';
+
+  // --- crosshair при наведении (своё состояние journalChartHover, не общее с главным графиком) ---
+  const hoverActive = journalChartHover && !journalPanDrag &&
+    journalChartHover.x >= padLeft && journalChartHover.x <= padLeft + plotW &&
+    journalChartHover.y >= padTop && journalChartHover.y <= volTop + volumeH;
+  if (hoverActive) {
+    const hx = journalChartHover.x, hy = journalChartHover.y;
+    const inPricePane = hy >= padTop && hy <= padTop + plotH;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,.28)';
+    ctx.setLineDash([3, 3]);
+    ctx.lineWidth = 1;
+    if (inPricePane) { ctx.beginPath(); ctx.moveTo(padLeft, hy); ctx.lineTo(padLeft + plotW, hy); ctx.stroke(); }
+    ctx.beginPath(); ctx.moveTo(hx, padTop); ctx.lineTo(hx, volTop + volumeH); ctx.stroke();
+    ctx.restore();
+
+    if (inPricePane) {
+      const hoverPrice = priceOfY(hy);
+      const priceLabel = fmtPrice(hoverPrice);
+      ctx.font = '10px var(--font-mono, monospace)';
+      ctx.fillStyle = '#1E80FF';
+      ctx.fillRect(padLeft + plotW + 1, hy - 8, padRight - 2, 16);
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(priceLabel, padLeft + plotW + 5, hy);
+    }
+
+    const hoverTime = timeOfX(hx);
+    const timeStr = ochartTimeLabel(hoverTime, slice[slice.length - 1].t - slice[0].t);
+    ctx.font = '10px var(--font-mono, monospace)';
+    const tw2 = ctx.measureText(timeStr).width;
+    ctx.fillStyle = '#1E80FF';
+    ctx.fillRect(Math.max(padLeft, Math.min(padLeft + plotW - tw2 - 10, hx - tw2 / 2 - 5)), h - padBottom, tw2 + 10, padBottom);
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(timeStr, Math.max(padLeft + tw2 / 2 + 5, Math.min(padLeft + plotW - tw2 / 2 - 5, hx)), h - padBottom / 2 + 4);
+    ctx.textAlign = 'left';
+  }
+
+  // --- легенда OHLC+Vol сверху слева: последняя видимая свеча по умолчанию, наведённая — при
+  // наведении курсора (как в TradingView/референсе — строка "T: ... O: ... H: ... L: ... C: ... V: ..."). ---
+  {
+    let legendCandle = slice[slice.length - 1];
+    if (hoverActive) {
+      let idx = Math.floor((journalChartHover.x - padLeft) / slot);
+      idx = Math.max(0, Math.min(slice.length - 1, idx));
+      legendCandle = slice[idx];
+    }
+    if (legendCandle) {
+      const k = legendCandle;
+      const up = k.c >= k.o;
+      const chg = k.o !== 0 ? ((k.c - k.o) / k.o) * 100 : 0;
+      const d = new Date(k.t);
+      const dateStr = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + ' ' +
+        String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+      const ohlc = dateStr + '   O ' + fmtPrice(k.o) + '  H ' + fmtPrice(k.h) + '  L ' + fmtPrice(k.l) + '  C ' + fmtPrice(k.c) +
+        '  ' + (up ? '+' : '') + chg.toFixed(2) + '%' + '   Vol ' + fmtNum(k.v, 2);
+      ctx.font = '10.5px var(--font-mono, monospace)';
+      ctx.fillStyle = 'rgba(19,23,34,.82)';
+      const ow = ctx.measureText(ohlc).width;
+      ctx.fillRect(padLeft - 2, 2, ow + 14, 18);
+      ctx.fillStyle = up ? '#26A69A' : '#EF5350';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(ohlc, padLeft + 4, 11);
+    }
+  }
 }
 
 // Колесо мыши (зум к позиции курсора) + зажать-и-тащить (панорама) на графике журнала сделок —
@@ -4052,18 +4161,31 @@ function wireJournalChartInteractions(canvas) {
   });
 
   window.addEventListener('mousemove', function (ev) {
-    if (!journalPanDrag || !journalChartState) return;
     const chart = canvas.__journalChart;
-    if (!chart) return;
+    if (!chart || !journalChartState) return;
     const rect = canvas.getBoundingClientRect();
-    const x = ev.clientX - rect.left;
-    const deltaCandles = (x - journalPanDrag.startX) / chart.slot;
-    const n = journalChartState.candles.length;
-    const visibleCount = (journalChartState.view && journalChartState.view.visibleCount) || n;
-    const maxOffset = Math.max(0, n - visibleCount);
-    const newOffset = Math.max(0, Math.min(maxOffset, journalPanDrag.startOffset + deltaCandles));
-    journalChartState.view = { visibleCount: visibleCount, offset: newOffset };
+    const x = ev.clientX - rect.left, y = ev.clientY - rect.top;
+    if (journalPanDrag) {
+      const deltaCandles = (x - journalPanDrag.startX) / chart.slot;
+      const n = journalChartState.candles.length;
+      const visibleCount = (journalChartState.view && journalChartState.view.visibleCount) || n;
+      const maxOffset = Math.max(0, n - visibleCount);
+      const newOffset = Math.max(0, Math.min(maxOffset, journalPanDrag.startOffset + deltaCandles));
+      journalChartState.view = { visibleCount: visibleCount, offset: newOffset };
+      redraw();
+      return;
+    }
+    // Курсор вне холста (событие всё равно приходит через window, не только canvas) — гасим hover.
+    if (x < 0 || x > rect.width || y < 0 || y > rect.height) {
+      if (journalChartHover) { journalChartHover = null; redraw(); }
+      return;
+    }
+    journalChartHover = { x: x, y: y };
     redraw();
+  });
+
+  canvas.addEventListener('mouseleave', function () {
+    if (!journalPanDrag && journalChartHover) { journalChartHover = null; redraw(); }
   });
 
   window.addEventListener('mouseup', function () {
@@ -6813,7 +6935,7 @@ window.__testJournalChart = function () {
     const c = price;
     const h = Math.max(o, c) * (1 + Math.random() * 0.01);
     const l = Math.min(o, c) * (1 - Math.random() * 0.01);
-    candles.push({ t: t0 + i * 5 * 60000, o: o, h: h, l: l, c: c });
+    candles.push({ t: t0 + i * 5 * 60000, o: o, h: h, l: l, c: c, v: 1000 + Math.random() * 9000 });
   }
   // Несколько отдельных закрытых позиций (вход→выход), в т.ч. одна с плотным доливом на активном
   // скальпинге (candles[250]-[251], несколько BUY/SELL подряд буквально по одинаковой округлённой
