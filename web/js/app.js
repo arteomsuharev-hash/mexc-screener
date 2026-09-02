@@ -3873,9 +3873,14 @@ function drawJournalChart(canvas, candles, trades) {
   const intervalMs = n > 1 ? (candles[1].t - candles[0].t) : 60000;
 
   // --- окно зума/пана ---
+  // По умолчанию (пока пользователь ни разу не покрутил колесо) — НЕ вся история разом (n свечей
+  // могло быть 1000, впритык на ~800px ширины панели каждая свеча — доли пикселя, а плотный кластер
+  // сделок за пару минут схлопывается в одну точку независимо от того, как рисуются сами маркеры).
+  // 120 свечей — тот же порядок, что у "своего графика" на главной странице скринера (там 140) —
+  // разумный масштаб для чтения, пользователь может отдалить колесом, если нужен весь диапазон.
   const stateView = (journalChartState && journalChartState.view) || {};
-  let visibleCount = Math.round(stateView.visibleCount || n);
-  visibleCount = Math.max(15, Math.min(n, visibleCount));
+  let visibleCount = Math.round(stateView.visibleCount || Math.min(n, 120));
+  visibleCount = Math.max(6, Math.min(n, visibleCount));
   const maxOffset = Math.max(0, n - visibleCount);
   let offset = Math.round(stateView.offset || 0);
   offset = Math.max(0, Math.min(maxOffset, offset));
@@ -3936,27 +3941,39 @@ function drawJournalChart(canvas, candles, trades) {
   // Маркеры входа/выхода — простая двухштриховая "галочка" (без заливки, без свечения, без подписи
   // числом рядом): по фидбеку "должна быть просто красная и зелёная чайка" и "каждый вход — это
   // новая сделка, маркерами показывается только одна сделка, без предыдущих" — КАЖДАЯ сделка рисует
-  // СВОЙ отдельный маркер на СВОЕЙ реальной цене исполнения (без усреднения/группировки с другими
-  // сделками той же свечи, как было раньше) — раз цены исполнения у разных сделок обычно чуть
-  // отличаются, маркеры естественно не сливаются в одну точку. Считаются только сделки в текущем
-  // видимом окне (зум/пан).
+  // СВОЙ отдельный маркер на СВОЕЙ реальной цене исполнения, без усреднения/группировки в одну точку.
+  // При этом на плотном скальпинге несколько сделок подряд нередко исполняются буквально по одной
+  // и той же цене (не просто "близкой") — тогда даже честные индивидуальные Y всё равно совпадают
+  // пиксель в пиксель. Чтобы такие маркеры не наезжали друг на друга, сделки одной стороны на одной
+  // свече веерно раздвигаются по X внутри ширины свечи (сама Y-позиция каждой остаётся её РЕАЛЬНОЙ
+  // ценой — раздвигается только горизонтальный зазор, не цена).
+  const markerBuckets = {};
   (trades || []).forEach(function (t) {
     let idx = Math.floor((t.time - candles[0].t) / intervalMs);
     idx = Math.max(0, Math.min(n - 1, idx));
     if (idx < startIdx || idx >= endIdx) return;
-    const x = xOfTime(candles[idx].t);
-    const y = yOf(t.price);
-    const color = t.buy ? '#00C076' : '#F84960';
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.75;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    if (t.buy) { ctx.moveTo(x - 5, y + 5); ctx.lineTo(x, y); ctx.lineTo(x + 5, y + 5); }
-    else { ctx.moveTo(x - 5, y - 5); ctx.lineTo(x, y); ctx.lineTo(x + 5, y - 5); }
-    ctx.stroke();
-    ctx.restore();
+    const key = idx + '_' + (t.buy ? 'b' : 's');
+    (markerBuckets[key] || (markerBuckets[key] = { idx: idx, list: [] })).list.push(t);
+  });
+  Object.keys(markerBuckets).forEach(function (bucket) {
+    const b = markerBuckets[bucket];
+    const baseX = xOfTime(candles[b.idx].t);
+    const fanW = Math.min(slot * 0.85, Math.max(0, b.list.length - 1) * 7);
+    b.list.forEach(function (t, i) {
+      const x = b.list.length > 1 ? baseX - fanW / 2 + (fanW / (b.list.length - 1)) * i : baseX;
+      const y = yOf(t.price);
+      const color = t.buy ? '#00C076' : '#F84960';
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.75;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      if (t.buy) { ctx.moveTo(x - 5, y + 5); ctx.lineTo(x, y); ctx.lineTo(x + 5, y + 5); }
+      else { ctx.moveTo(x - 5, y - 5); ctx.lineTo(x, y); ctx.lineTo(x + 5, y - 5); }
+      ctx.stroke();
+      ctx.restore();
+    });
   });
 
   ctx.fillStyle = 'rgba(255,255,255,.35)';
@@ -4000,7 +4017,7 @@ function wireJournalChartInteractions(canvas) {
     const n = candles.length;
     const view = journalChartState.view || { visibleCount: n, offset: 0 };
     let newVisible = Math.round(view.visibleCount * factor);
-    newVisible = Math.max(15, Math.min(n, newVisible));
+    newVisible = Math.max(6, Math.min(n, newVisible));
     const newSlot = chart.plotW / newVisible;
     const idxInWindow = (mouseX - chart.padLeft) / newSlot;
     const globalIdxAtCursor = (timeAtCursor - candles[0].t) / chart.intervalMs;
@@ -4790,7 +4807,7 @@ function renderFinresTradesTable(data) {
       '<td>' + fmtPrice(entryPrice) + '</td>' +
       '<td>' + fmtPrice(t.price) + '</td>' +
       '<td>' + fmtNum(t.qty, 4) + '</td>' +
-      '<td><span class="finres-pnl-chip ' + cls + '">' + (win ? '+' : '-') + fmtUsd(Math.abs(t.pnl)).slice(1) + '</span></td>' +
+      '<td><span class="finres-pnl-chip ' + cls + '">' + (win ? '+' : '-') + fmtUsd(Math.abs(t.pnl)) + '</span></td>' +
       '<td class="' + cls + '">' + (win ? '+' : '') + pnlPct.toFixed(2) + '%</td>' +
       '<td><span class="finres-result-badge ' + (win ? 'win' : 'loss') + '">' + (win ? 'WIN' : 'LOSS') + '</span></td>' +
       '</tr>';
@@ -6685,13 +6702,16 @@ window.__testJournalChart = function () {
     { time: candles[95].t, buy: false, price: candles[95].c, qty: 100 },
     { time: candles[150].t, buy: true, price: candles[150].c, qty: 200 },
     { time: candles[210].t, buy: false, price: candles[210].c, qty: 200 },
-    // Плотный скальпинг-кластер (несколько сделок на соседних свечах подряд) — та самая ситуация,
-    // где раньше маркеры сливались в кашу (репорт пользователя на реальном BONER/USDT).
-    { time: candles[250].t, buy: true, price: candles[250].c * 0.999, qty: 50 },
-    { time: candles[250].t + 10000, buy: true, price: candles[250].c * 1.001, qty: 60 },
-    { time: candles[251].t, buy: false, price: candles[251].c * 1.002, qty: 50 },
-    { time: candles[251].t + 10000, buy: false, price: candles[251].c * 0.998, qty: 30 },
+    // Плотный скальпинг-кластер (несколько сделок на соседних свечах подряд, часть буквально по
+    // одинаковой округлённой цене — та самая ситуация с реального BONER/USDT в репорте пользователя,
+    // где даже честные индивидуальные Y совпадали пиксель в пиксель).
+    { time: candles[250].t, buy: true, price: candles[250].c, qty: 50 },
+    { time: candles[250].t + 10000, buy: true, price: candles[250].c, qty: 60 },
+    { time: candles[250].t + 20000, buy: true, price: candles[250].c, qty: 40 },
+    { time: candles[251].t, buy: false, price: candles[251].c, qty: 50 },
+    { time: candles[251].t + 10000, buy: false, price: candles[251].c, qty: 30 },
     { time: candles[251].t + 20000, buy: false, price: candles[251].c, qty: 30 },
+    { time: candles[251].t + 30000, buy: false, price: candles[251].c, qty: 20 },
     { time: candles[252].t, buy: true, price: candles[252].c, qty: 40 }
   ];
   journalChartState = { candles: candles, trades: trades };
