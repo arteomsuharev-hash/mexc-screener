@@ -605,7 +605,43 @@
       <div class="journal-tf-pills" id="journalTfPills"></div>
       <button type="button" class="journal-modal-close" id="journalModalClose"><i class="ri-close-line"></i></button>
     </div>
+    <div class="own-chart-topbar" id="journalToolbar">
+      <div class="ochart-indicators-wrap">
+        <button type="button" class="ochart-pill" id="journalIndicatorsBtn" title="Индикаторы"><i class="ri-eye-line"></i><span>Индикаторы</span></button>
+      </div>
+      <span class="ochart-hint">Колесо мыши — масштаб, зажать и тащить — панорама, тащить за шкалу цены/времени — растяжение</span>
+      <div class="ochart-topbar-right">
+        <button type="button" class="ochart-tool" id="journalZoomOut" title="Отдалить"><i class="ri-zoom-out-line"></i></button>
+        <button type="button" class="ochart-tool" id="journalZoomIn" title="Приблизить"><i class="ri-zoom-in-line"></i></button>
+        <span class="ochart-sep"></span>
+        <button type="button" class="ochart-tool" id="journalSettingsBtn" title="Настройки графика (индикаторы)"><i class="ri-settings-3-line"></i></button>
+        <button type="button" class="ochart-tool" id="journalScreenshot" title="Сохранить скриншот графика"><i class="ri-camera-line"></i></button>
+        <button type="button" class="ochart-tool" id="journalFullscreen" title="Полноэкранный режим"><i class="ri-fullscreen-line"></i></button>
+        <span class="ochart-sep"></span>
+        <button type="button" class="ochart-tool" id="journalClearDrawings" title="Очистить все построения"><i class="ri-delete-bin-line"></i></button>
+        <button type="button" class="ochart-tool" id="journalResetView" title="Сбросить масштаб"><i class="ri-crop-2-line"></i></button>
+      </div>
+    </div>
+    <div class="ochart-indicators-panel" id="journalIndicatorsPanel">
+      <div class="ochart-ind-row" data-ind="volume">
+        <button type="button" class="ochart-ind-eye active" title="Показать/скрыть"><i class="ri-eye-line"></i></button>
+        <span>Объём (VOLG)</span>
+      </div>
+      <div class="ochart-ind-row" data-ind="entryexit">
+        <button type="button" class="ochart-ind-eye active" title="Показать/скрыть"><i class="ri-eye-line"></i></button>
+        <span>Точки входа/выхода</span>
+      </div>
+    </div>
     <div class="journal-modal-body">
+      <div class="ochart-vtoolbar" id="journalVToolbar">
+        <button type="button" class="ochart-tool active" data-jtool="cursor" title="Курсор / панорама (зажмите и тащите)"><i class="ri-cursor-line"></i></button>
+        <span class="ochart-vsep"></span>
+        <button type="button" class="ochart-tool" data-jtool="hline" title="Уровень (горизонтальная линия)"><i class="ri-subtract-line"></i></button>
+        <button type="button" class="ochart-tool" data-jtool="trend" title="Отрезок (трендовая линия между двумя точками)"><i class="ri-slideshow-line"></i></button>
+        <button type="button" class="ochart-tool" data-jtool="ray" title="Луч (бесконечен в одну сторону)"><i class="ri-arrow-right-up-line"></i></button>
+        <button type="button" class="ochart-tool" data-jtool="xline" title="Прямая (бесконечна в обе стороны)"><i class="ri-expand-diagonal-line"></i></button>
+        <button type="button" class="ochart-tool" data-jtool="ruler" title="Линейка (замер цены/времени)"><i class="ri-ruler-2-line"></i></button>
+      </div>
       <div class="journal-chart-wrap" id="journalChartWrap">
         <canvas id="journalChartCanvas"></canvas>
         <div class="journal-chart-empty" id="journalChartEmpty"></div>
