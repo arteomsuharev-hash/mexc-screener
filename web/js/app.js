@@ -4193,14 +4193,14 @@ function drawJournalChart(canvas, candles) {
     ctx.stroke();
     ctx.restore();
 
-    // Точка выхода — красный крестик × (как в референсе, вместо шеврона вниз).
+    // Точка выхода — красный шеврон ˅ (та же "галочка", что и у входа, просто зеркально вниз и
+    // другим цветом — по фидбеку "нужны две галочки на вход и на выход, крестик не нужен").
     ctx.save();
     ctx.strokeStyle = '#F84960';
     ctx.lineWidth = 2;
-    ctx.lineCap = 'round';
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.beginPath();
-    ctx.moveTo(exitX - 5, exitY - 5); ctx.lineTo(exitX + 5, exitY + 5);
-    ctx.moveTo(exitX + 5, exitY - 5); ctx.lineTo(exitX - 5, exitY + 5);
+    ctx.moveTo(exitX - 6, exitY - 6); ctx.lineTo(exitX, exitY); ctx.lineTo(exitX + 6, exitY - 6);
     ctx.stroke();
     ctx.restore();
 
