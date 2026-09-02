@@ -56,11 +56,30 @@ const MEXC_PROTO_SRC = [
   '  string version = 4;',
   '  int64 lastOrderCreateTime = 5;',
   '}',
+  // Приватный канал (только по подписке с ?listenKey= в URL, см. openPrivateDealsStream ниже) —
+  // сделки САМОГО аккаунта по ВСЕМ парам сразу (без указания символа в имени канала), в отличие от
+  // публичного PublicDealsV3Api. Схема и номер поля (306) — из официального proto-репозитория
+  // mexcdevelop/websocket-proto (PrivateDealsV3Api.proto/PushDataV3ApiWrapper.proto).
+  'message PrivateDealsV3Api {',
+  '  string price = 1;',
+  '  string quantity = 2;',
+  '  string amount = 3;',
+  '  int32 tradeType = 4;',
+  '  bool isMaker = 5;',
+  '  bool isSelfTrade = 6;',
+  '  string tradeId = 7;',
+  '  string clientOrderId = 8;',
+  '  string orderId = 9;',
+  '  string feeAmount = 10;',
+  '  string feeCurrency = 11;',
+  '  int64 time = 12;',
+  '}',
   'message PushDataV3ApiWrapper {',
   '  string channel = 1;',
   '  oneof body {',
   '    PublicDealsV3Api publicDeals = 301;',
   '    PublicLimitDepthsV3Api publicLimitDepths = 303;',
+  '    PrivateDealsV3Api privateDeals = 306;',
   '    PublicMiniTickerV3Api publicMiniTicker = 309;',
   '    PublicMiniTickersV3Api publicMiniTickers = 310;',
   '  }',
@@ -3365,7 +3384,7 @@ async function execCommandSelfTest() {
 // распространяются ограничения CORS. curl.exe — обычный скомпилированный бинарник (в отличие от
 // PowerShell с закодированным скриптом, который антивирусы чаще проверяют дольше как потенциально
 // подозрительный). Используется автоматически, только если обычный fetch() не сработал.
-async function nativeCurlGet(url, apiKey) {
+async function nativeCurlGet(url, apiKey, method) {
   if (!window.Neutralino) {
     return null; // нативный путь недоступен (не десктоп-приложение)
   }
@@ -3374,7 +3393,11 @@ async function nativeCurlGet(url, apiKey) {
   // apiKey нужен только для приватных подписанных запросов — публичные эндпоинты (например klines)
   // вызывают эту же функцию без ключа, тогда заголовок просто не добавляем.
   const header = apiKey ? ' -H "X-MEXC-APIKEY: ' + stripQuotes(apiKey) + '"' : '';
-  const cmd = 'curl.exe -s -S --max-time 10' + header + ' "' + stripQuotes(url) + '"';
+  // -X нужен только для не-GET (например POST/PUT/DELETE /api/v3/userDataStream — см. listenKeyRequest
+  // ниже); MEXC у этих эндпоинтов, как и у GET, ожидает подписанные параметры в query string, тело
+  // запроса не нужно, поэтому просто меняем метод, а не добавляем -d.
+  const methodFlag = (method && method !== 'GET') ? ' -X ' + method : '';
+  const cmd = 'curl.exe -s -S --max-time 10' + methodFlag + header + ' "' + stripQuotes(url) + '"';
   const result = await nlCall('os.execCommand', { command: cmd, background: false }, 14000);
   if (result && result.exitCode === 0) {
     return { ok: true, body: result.stdOut };
@@ -3400,14 +3423,15 @@ async function buildSignedUrl(path, params) {
   return MEXC_REST + path + '?' + qs + '&signature=' + signature;
 }
 
-async function mexcSignedRequest(path, params, onProgress) {
+async function mexcSignedRequest(path, params, onProgress, method) {
+  method = method || 'GET';
   let url = await buildSignedUrl(path, params);
 
   let text = null;
   let httpOk = true;
   if (onProgress) onProgress('browser');
   try {
-    const res = await fetchWithTimeout(url, { method: 'GET', headers: { 'X-MEXC-APIKEY': mexcApiKey } }, 8000);
+    const res = await fetchWithTimeout(url, { method: method, headers: { 'X-MEXC-APIKEY': mexcApiKey } }, 8000);
     text = await res.text();
     httpOk = res.ok;
     if (!httpOk) {
@@ -3424,7 +3448,7 @@ async function mexcSignedRequest(path, params, onProgress) {
     url = await buildSignedUrl(path, params); // свежий timestamp/подпись перед native-попыткой
     let native = null;
     try {
-      native = await nativeCurlGet(url, mexcApiKey);
+      native = await nativeCurlGet(url, mexcApiKey, method);
     } catch (nativeErr) {
       throw new Error('Браузер не смог достучаться до api.mexc.com напрямую (' + fetchReason + '), и запасной способ через curl.exe тоже не сработал: ' + nativeErr.message);
     }
@@ -3454,6 +3478,132 @@ async function mexcSignedRequest(path, params, onProgress) {
     throw new Error(msg);
   }
   return data;
+}
+
+// ============================================================================
+// ПРИВАТНЫЙ ПОТОК СДЕЛОК АККАУНТА (spot@private.deals.v3.api.pb) — автоматическое обнаружение монет
+// для Финреза, без ручного поиска на вкладке "Сделки".
+//
+// Проблема, которую это решает: Финрез строит историю только по монетам ИЗ ТЕКУЩЕГО БАЛАНСА +
+// knownSymbols (см. её комментарий выше) — если позицию открыли и полностью закрыли (что для
+// скальпера/дневного трейдера, торгующего через внешний терминал, обычное дело много раз за день),
+// монета никогда не появится в балансе САМА и остаётся невидимой, пока её не найдут вручную.
+//
+// MEXC не отдаёт REST-эндпоинт "все сделки по всем парам" (см. комментарий у finresLoadRealizedCore) —
+// зато отдаёт приватный WebSocket-канал, который присылает СОБЫТИЕ по КАЖДОЙ сделке аккаунта сразу по
+// ВСЕМ парам (без символа в названии канала, в отличие от публичных потоков). Ловим эти события только
+// чтобы УЗНАТЬ, что такой символ вообще существует в истории (rememberSymbol — тот же механизм, что и
+// у ручного поиска) — саму историю цен/объёмов всё равно тянет обычный REST-путь через
+// finresLoadRealizedCore, он и так отдаёт ПОЛНУЮ историю по символу, а не только то, что произошло,
+// пока это WS-соединение было открыто.
+//
+// Честное ограничение (то же самое "не обманываем" правило, что и у остальной статистики): это
+// работает только ВПЕРЁД, с момента как этот поток впервые подключился. Сделки, совершённые раньше
+// (в том числе до появления этой функции) или пока приложение было полностью закрыто, автоматически
+// не найдутся — для них по-прежнему нужен разовый ручной поиск на вкладке "Сделки".
+let privateDealsWs = null;
+let privateListenKey = null;
+let privateListenKeyKeepaliveTimer = null;
+let privateDealsReconnectAttempts = 0;
+let privateDealsReconnectTimer = null;
+
+async function obtainListenKey() {
+  const data = await mexcSignedRequest('/api/v3/userDataStream', {}, null, 'POST');
+  if (!data || !data.listenKey) throw new Error('MEXC не вернул listenKey: ' + JSON.stringify(data));
+  return data.listenKey;
+}
+
+// MEXC: "Doing a PUT on a listenKey will extend its validity for 60 minutes... recommended every 30
+// minutes" — держим с запасом.
+async function keepAliveListenKey() {
+  if (!privateListenKey) return;
+  try {
+    await mexcSignedRequest('/api/v3/userDataStream', { listenKey: privateListenKey }, null, 'PUT');
+  } catch (e) {
+    logW('Finrez', 'не удалось продлить listenKey приватного потока сделок: ' + e.message);
+  }
+}
+
+// Best-effort, не блокирует отключение аккаунта, если MEXC не ответит вовремя — listenKey и так
+// сам протухнет через 60 минут без keepalive.
+function closeListenKeyBestEffort() {
+  if (!privateListenKey) return;
+  mexcSignedRequest('/api/v3/userDataStream', { listenKey: privateListenKey }, null, 'DELETE').catch(function () {});
+}
+
+function openPrivateDealsWs() {
+  if (!privateListenKey) return;
+  if (privateDealsWs && (privateDealsWs.readyState === 0 || privateDealsWs.readyState === 1)) return;
+  let sock;
+  try {
+    sock = new WebSocket(MEXC_WS + '?listenKey=' + encodeURIComponent(privateListenKey));
+    sock.binaryType = 'arraybuffer';
+  } catch (e) {
+    scheduleReconnectPrivateDeals();
+    return;
+  }
+  privateDealsWs = sock;
+  sock.onopen = function () {
+    privateDealsReconnectAttempts = 0;
+    try { sock.send(JSON.stringify({ method: 'SUBSCRIPTION', params: ['spot@private.deals.v3.api.pb'] })); } catch (e) {}
+    logI('Finrez', 'приватный поток сделок подключён — новые монеты для Финреза теперь обнаруживаются автоматически');
+  };
+  sock.onmessage = function (ev) {
+    if (typeof ev.data === 'string') return; // ack подписки/PONG — не несёт данных о сделке
+    const obj = decodeProtoFrame(ev.data);
+    if (!obj || !obj.privateDeals || !obj.symbol) return;
+    handlePrivateDeal(obj.symbol, obj.privateDeals);
+  };
+  sock.onclose = function () {
+    if (privateDealsWs === sock) privateDealsWs = null;
+    if (accountConnected) scheduleReconnectPrivateDeals();
+  };
+  sock.onerror = function () { try { sock.close(); } catch (e) {} };
+}
+
+function scheduleReconnectPrivateDeals() {
+  if (!accountConnected) return;
+  privateDealsReconnectAttempts++;
+  const delay = Math.min(60000, 3000 * Math.pow(1.5, privateDealsReconnectAttempts - 1));
+  if (privateDealsReconnectTimer) clearTimeout(privateDealsReconnectTimer);
+  privateDealsReconnectTimer = setTimeout(function () {
+    // Если соединение долго не удавалось восстановить, старый listenKey мог протухнуть (живёт 60 минут
+    // без keepalive/подключения) — на всякий случай запрашиваем новый с нуля, а не ломимся тем же самым.
+    if (privateDealsReconnectAttempts > 5) { startPrivateDealsStream(); return; }
+    openPrivateDealsWs();
+  }, delay);
+}
+
+async function startPrivateDealsStream() {
+  stopPrivateDealsStream(); // на случай повторного вызова (например, смена ключа без полного disconnect)
+  try {
+    privateListenKey = await obtainListenKey();
+  } catch (e) {
+    logW('Finrez', 'не удалось открыть приватный поток сделок — автообнаружение новых монет работать не будет, ' +
+      'но ручной поиск на вкладке "Сделки" по-прежнему работает как раньше: ' + e.message);
+    return;
+  }
+  openPrivateDealsWs();
+  privateListenKeyKeepaliveTimer = setInterval(keepAliveListenKey, 30 * 60 * 1000);
+}
+
+function stopPrivateDealsStream() {
+  if (privateListenKeyKeepaliveTimer) { clearInterval(privateListenKeyKeepaliveTimer); privateListenKeyKeepaliveTimer = null; }
+  if (privateDealsReconnectTimer) { clearTimeout(privateDealsReconnectTimer); privateDealsReconnectTimer = null; }
+  if (privateDealsWs) { try { privateDealsWs.close(); } catch (e) {} privateDealsWs = null; }
+  closeListenKeyBestEffort();
+  privateListenKey = null;
+  privateDealsReconnectAttempts = 0;
+}
+
+// Единственная реальная "полезная нагрузка" всего модуля выше — см. общий комментарий у него.
+// Сам объект deal (price/quantity/tradeType/...) не используется для чисел, только для лога:
+// реальные цифры для PnL всё равно идут через REST myTrades по этому же символу.
+function handlePrivateDeal(symbol, deal) {
+  if (!isUsdtSpot(symbol)) return; // не наш профиль пар (не USDT-спот) — не пытаемся угадать asset
+  const asset = symbol.replace(/USDT$/, '');
+  rememberSymbol(asset, symbol);
+  logI('Finrez', 'сделка (приватный поток): ' + asset + '/USDT — ' + (deal.tradeType === 1 ? 'BUY' : 'SELL') + ' ' + deal.quantity + ' по ' + deal.price);
 }
 
 function setAccountStatus(state, msg) {
@@ -5464,6 +5614,7 @@ async function connectMexcAccount(silent) {
     renderAccountBalances(data && data.balances);
     setAccountStatus('connected');
     startBalanceAutoRefresh();
+    startPrivateDealsStream(); // автообнаружение новых монет для Финреза, см. её комментарий выше
     if (currentCoin) loadMyOrdersForCoin(currentCoin);
   } catch (e) {
     accountConnected = false;
@@ -5473,9 +5624,15 @@ async function connectMexcAccount(silent) {
 }
 
 function disconnectMexcAccount() {
+  // Порядок важен: accountConnected=false СНАЧАЛА — иначе onclose у privateDealsWs (сработает
+  // внутри stopPrivateDealsStream() ниже) увидит ещё "подключено" и сам попробует переподключиться
+  // сразу после того, как мы его намеренно закрыли. А сами ключи очищаем ПОСЛЕ stopPrivateDealsStream(),
+  // т.к. closeListenKeyBestEffort() внутри нужно подписать ещё действующим mexcApiSecret — иначе
+  // DELETE уйдёт с невалидной подписью и MEXC-листенкей провисит лишний час до истечения по таймауту.
+  accountConnected = false;
+  stopPrivateDealsStream();
   mexcApiKey = '';
   mexcApiSecret = '';
-  accountConnected = false;
   stopBalanceAutoRefresh();
   persistRemove('mexc_api_key');
   persistRemove('mexc_api_secret');
