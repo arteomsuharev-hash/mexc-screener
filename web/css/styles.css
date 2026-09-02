@@ -554,6 +554,11 @@ body {
 }
 .profile-strategy-card:hover { border-color: var(--blue); background: var(--bg-hover); transform: translateY(-1px); }
 .profile-strategy-card.active { border-color: var(--blue); background: rgba(30,128,255,.07); box-shadow: inset 0 0 0 1px var(--blue), 0 0 22px -8px rgba(30,128,255,.45); }
+/* Паттерны без ground truth (например fakeLiquidity — эвристика, не подтверждённый факт по
+   публичному стакану MEXC) — приглушённый янтарный тон вместо синего, чтобы визуально не выглядеть
+   как обычный подтверждённый сигнал даже до прочтения текста карточки. */
+.pattern-card.pattern-card-heuristic { border-color: rgba(255,159,10,.35); background: rgba(255,159,10,.04); }
+.pattern-card.pattern-card-heuristic:hover { border-color: var(--orange); background: rgba(255,159,10,.08); }
 .profile-strategy-card .card-icon {
   width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center;
   background: rgba(30,128,255,.12); color: var(--blue); font-size: 17px; flex-shrink: 0;
