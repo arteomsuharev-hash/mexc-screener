@@ -6156,6 +6156,24 @@ window.__injectFakePatternEvent = function (partial) {
 
 window.__tableHoverFreeze = function () { return tableHoverFreezeSymbol; };
 
+// Диагностика "Финрез не показывает историю сделок" из консоли разработчика — без этого хука
+// внутреннее состояние (knownSymbols, lastBalanceState и т.д.) недоступно снаружи, т.к. весь app.js
+// выполняется в одном top-level IIFE. Показывает: какие именно монеты сейчас в балансе, что именно
+// "запомнено" как когда-либо торговавшееся (knownSymbols — переживает продажу в ноль, но НЕ появляется
+// само по себе, если монету никогда не искали вручную на вкладке "Сделки" и её сейчас нет в балансе),
+// и, самое главное, какой РЕАЛЬНЫЙ ответ MEXC получен по каждому запрошенному символу — сколько
+// сделок и была ли ошибка (например "Invalid symbol" — валюта на споте под таким тикером не торгуется).
+window.__finresDebug = async function () {
+  const data = await finresLoadRealizedCore();
+  return {
+    priced: (lastBalanceState && lastBalanceState.priced || []).map(function (r) { return { asset: r.asset, usdtValue: r.usdtValue }; }),
+    knownSymbols: knownSymbols,
+    totalRealizedTrades: data.trades.length,
+    tradesPerSymbol: Object.keys(data.bySymbol).reduce(function (acc, k) { acc[k] = data.bySymbol[k].length; return acc; }, {}),
+    error: data.error
+  };
+};
+
 // Ручная проверка резервного хранилища (см. persistSet/nlStorageGet/hydrateFromNativeStorageIfNeeded
 // выше) из консоли разработчика desktop-приложения, не дожидаясь реальной пересборки .exe:
 // await __nativeStorageSelfTest() — пишет тестовое значение через native-мост, тут же читает его
