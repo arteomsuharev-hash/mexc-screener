@@ -251,7 +251,42 @@ const I18N_EN = {
   'Реализованных сделок пока нет — статистика появится после первой закрытой позиции.':
     'No realized trades yet — statistics will appear after the first closed position.',
   'Реализованных сделок пока нет ни по одной известной монете. Если нужная монета уже полностью продана — найдите её через поиск выше, чтобы добавить в журнал.':
-    'No realized trades yet for any known coin. If a coin you need has already been fully sold, find it via the search above to add it to the journal.'
+    'No realized trades yet for any known coin. If a coin you need has already been fully sold, find it via the search above to add it to the journal.',
+  // --- Стратегии (STRATEGY_DEFS.label/.short — используются в strategyHintText на скринере) ---
+  'Алгоритмы': 'Algorithms', 'Неэффективности': 'Inefficiencies', 'Пробой плотностей': 'Density breakout',
+  'Равномерный оборот на всех окнах при сдержанном движении цены — признак маркет-мейкера/бота.':
+    'Steady turnover across all windows with restrained price movement — a sign of a market-maker/bot.',
+  'Резкое движение цены БЕЗ подтверждающего объёма — расхождение цены и оборота.':
+    'A sharp price move WITHOUT confirming volume — a divergence between price and turnover.',
+  'Затишье, затем резкий всплеск объёма выше обычного темпа суток + цена пошла и не откатилась мгновенно.':
+    'A lull, then a sharp volume spike above the usual daily pace + price moved and didn\'t instantly retrace.',
+  // --- Детекторы паттернов (DETECTOR_DEFS.label) ---
+  'Идентичные размеры сделок': 'Identical trade sizes', 'Идентичные интервалы': 'Identical intervals',
+  'Всплеск без продолжения': 'Burst with no follow-through', 'Цикличность': 'Cyclicity',
+  'Повторяющаяся последовательность': 'Repeating sequence', 'Лесенка': 'Ladder', 'Ёршик': 'Sawtooth',
+  'Дисбаланс стакана': 'Order book imbalance', 'Поглощение плотности': 'Density absorption',
+  'Возможная фейковая ликвидность': 'Possible fake liquidity', 'Истощение импульса': 'Momentum exhaustion',
+  'Повторная реакция на зону': 'Repeated zone reaction',
+  // --- Периоды (FINRES_PERIODS/BALANCE_PERIODS.label — пилюли периодов в Финрезе) ---
+  '1Д': '1D', '1Н': '1W', '1М': '1M', 'Всё': 'All', '7Д': '7D', '30Д': '30D', '90Д': '90D',
+  'День': 'Day', 'Неделя': 'Week', 'Месяц': 'Month', 'с начала наблюдения': 'since tracking began',
+  // --- Финрез: карточки статистики Обзора, лог паттернов, валидация ---
+  'Общий PnL': 'Total PnL', 'Прибыль': 'Profit', 'Убытки': 'Loss', 'Винрейт': 'Win rate',
+  'сделок': 'trades', 'сделок, винрейт': 'trades, win rate', 'нет сделок': 'no trades', 'за': 'for',
+  'Заработано по монетам за': 'Earned by coin for', 'просадка ≥20 п.п.': 'drop ≥20 pts', 'стабильно': 'stable',
+  'с назад': 'ago',
+  // --- Паттерны: статус watchlist + плитки диагностики ---
+  'Глубокий анализ:': 'Deep analysis:', 'монет': 'coins', 'подключается': 'connecting',
+  'соединений:': 'connections:', 'сделок обработано:': 'trades ingested:', 'обновлений стакана:': 'order-book updates:',
+  'Основной поток': 'Main stream', 'МОЛЧИТ/ОБРЫВ': 'SILENT/DROPPED', 'Watchlist': 'Watchlist',
+  'WS-соединений (Tier 2)': 'WS connections (Tier 2)', 'Подключений всего': 'Total connections',
+  'Сделок обработано': 'Trades ingested', 'Обновлений стакана': 'Order-book updates',
+  'Активных паттернов': 'Active patterns', 'В истории': 'In history', 'В cooldown': 'In cooldown',
+  // --- Финрез: hero-панель портфеля ---
+  'Экспорт': 'Export', 'Общая стоимость портфеля': 'Total portfolio value',
+  'Обновить данные Финреза сейчас, не дожидаясь автообновления': 'Refresh Finance data now, without waiting for auto-refresh',
+  'Копим историю для графика — загляните сюда попозже': 'Building up history for the chart — check back later',
+  'Обновлено': 'Updated'
 };
 
 // --- Protobuf schema (inlined, subset of MEXC's official .proto files) ---
@@ -3150,7 +3185,7 @@ function renderDetectorFilterRow() {
     const on = !disabledDetectorKeys.has(key);
     const catCls = def.category === 'heuristic-lowconf' ? ' cat-heuristic' : '';
     return '<span class="detector-chip ' + (on ? 'on' : 'off') + catCls + '" data-detector="' + key + '">' +
-      '<span class="chip-dot"></span>' + def.label + '</span>';
+      '<span class="chip-dot"></span>' + t(def.label) + '</span>';
   }).join('');
   row.querySelectorAll('.detector-chip[data-detector]').forEach(function (chip) {
     chip.addEventListener('click', function () { toggleDetectorEnabled(this.dataset.detector); });
@@ -3210,13 +3245,13 @@ setInterval(runPatternDetectors, PATTERN_DETECT_INTERVAL_MS);
 function watchlistStatusText() {
   const size = watchlist.size;
   const pending = watchlistPending.size;
-  return 'Глубокий анализ: ' + size + '/' + WATCHLIST_SIZE + ' монет' + (pending ? ' (+' + pending + ' подключается)' : '') +
-    ' · соединений: ' + (size * 2) + ' · сделок обработано: ' + tier2Health.tradesIngested +
-    ' · обновлений стакана: ' + tier2Health.depthPushesIngested;
+  return t('Глубокий анализ:') + ' ' + size + '/' + WATCHLIST_SIZE + ' ' + t('монет') + (pending ? ' (+' + pending + ' ' + t('подключается') + ')' : '') +
+    ' · ' + t('соединений:') + ' ' + (size * 2) + ' · ' + t('сделок обработано:') + ' ' + tier2Health.tradesIngested +
+    ' · ' + t('обновлений стакана:') + ' ' + tier2Health.depthPushesIngested;
 }
 
 function patternStatCard(label, valueHtml, cls) {
-  return '<div class="finres-stat-card"><div class="finres-stat-label">' + label + '</div>' +
+  return '<div class="finres-stat-card"><div class="finres-stat-label">' + t(label) + '</div>' +
     '<div class="finres-stat-value' + (cls ? ' ' + cls : '') + '">' + valueHtml + '</div></div>';
 }
 
@@ -3267,7 +3302,7 @@ function patternCardHtml(ev) {
     '<h4>' + ev.symbol.replace(/</g, '&lt;') + '<span class="card-count">' + ev.confidencePct + '%</span></h4></div>' +
     '<div style="display:flex;gap:6px;align-items:center;margin:6px 0 8px;flex-wrap:wrap;">' +
     '<span class="signal-badge ' + dirCls + '">' + ev.direction + '</span>' +
-    '<span style="font-size:11px;color:var(--text-muted);">' + def.label + ' · ' + ago + 'с назад</span>' +
+    '<span style="font-size:11px;color:var(--text-muted);">' + t(def.label) + ' · ' + ago + t('с назад') + '</span>' +
     (ev.isHeuristic ? '<span style="font-size:10px;color:var(--orange);border:1px solid rgba(255,159,10,.4);border-radius:4px;padding:1px 6px;">ЭВРИСТИКА</span>' : '') +
     '</div>' +
     '<p>' + explainPatternEvent(ev) + '</p>' +
@@ -3287,7 +3322,7 @@ function updatePatternsPage() {
     const wsAgeS = Math.round((Date.now() - lastMiniTickerAt) / 1000);
     const wsOk = ws && ws.readyState === 1 && wsAgeS < 30;
     healthGrid.innerHTML =
-      patternStatCard('Основной поток', wsOk ? 'LIVE' : 'МОЛЧИТ/ОБРЫВ', wsOk ? 'up' : 'down') +
+      patternStatCard('Основной поток', wsOk ? 'LIVE' : t('МОЛЧИТ/ОБРЫВ'), wsOk ? 'up' : 'down') +
       patternStatCard('Watchlist', watchlist.size + '/' + WATCHLIST_SIZE) +
       patternStatCard('WS-соединений (Tier 2)', watchlist.size * 2) +
       patternStatCard('Подключений всего', tier2Health.connectionAttempts) +
@@ -3343,10 +3378,10 @@ function updatePatternValidationPanel() {
     const recPct = r.split.recent.rate != null ? Math.round(r.split.recent.rate * 100) + '%' : '—';
     const recCls = r.split.degraded ? 'down' : (r.split.recent.rate != null && r.split.reference.rate != null && r.split.recent.rate >= r.split.reference.rate ? 'up' : '');
     return '<tr>' +
-      '<td>' + r.label + '</td>' +
+      '<td>' + t(r.label) + '</td>' +
       '<td>' + refPct + ' <span style="color:var(--text-muted);font-size:10px;">(n=' + r.split.reference.sampleSize + ')</span></td>' +
       '<td class="' + recCls + '">' + recPct + ' <span style="color:var(--text-muted);font-size:10px;">(n=' + r.split.recent.sampleSize + ')</span></td>' +
-      '<td>' + (r.split.degraded ? '<span style="color:var(--orange);">⚠ просадка ≥20 п.п.</span>' : (r.split.reference.sampleSize >= PATTERN_VALIDATION_MIN_SAMPLE && r.split.recent.sampleSize >= PATTERN_VALIDATION_MIN_SAMPLE ? '<span style="color:var(--green);">стабильно</span>' : '—')) + '</td>' +
+      '<td>' + (r.split.degraded ? '<span style="color:var(--orange);">⚠ ' + t('просадка ≥20 п.п.') + '</span>' : (r.split.reference.sampleSize >= PATTERN_VALIDATION_MIN_SAMPLE && r.split.recent.sampleSize >= PATTERN_VALIDATION_MIN_SAMPLE ? '<span style="color:var(--green);">' + t('стабильно') + '</span>' : '—')) + '</td>' +
       '</tr>';
   }).join('');
 }
@@ -3504,7 +3539,7 @@ function updateStrategyHintBar() {
   bar.classList.toggle('visible', !!def);
   if (!def) return;
   document.getElementById('strategyHintBadge').textContent = def.badge;
-  document.getElementById('strategyHintText').textContent = def.label + ': ' + def.short;
+  document.getElementById('strategyHintText').textContent = t(def.label) + ': ' + t(def.short);
 }
 
 function applyProfile(name) {
@@ -4185,7 +4220,7 @@ function computeBalanceDelta(hist, currentTotal, periodKey) {
   const abs = currentTotal - ref.v;
   const pct = abs / ref.v * 100;
   const fullPeriod = period.ms == null || ref.t <= (Date.now() - period.ms);
-  return { abs: abs, pct: pct, period: fullPeriod ? period.label : 'с начала наблюдения' };
+  return { abs: abs, pct: pct, period: fullPeriod ? t(period.label) : t('с начала наблюдения') };
 }
 
 // "Заработано" по каждой сейчас удерживаемой монете за период: текущая USDT-стоимость минус
@@ -4948,9 +4983,9 @@ function buildBalanceStatsGridHtml(trades, assetCount, dustCount) {
     const icon = cls === 'up' ? 'ri-arrow-up-line' : (cls === 'down' ? 'ri-arrow-down-line' : 'ri-subtract-line');
     const valueHtml = hasTrades
       ? '<span class="stat-tile-pct">' + (agg.pnl >= 0 ? '+' : '-') + fmtUsd(Math.abs(agg.pnl)).slice(1) + '</span>' +
-        '<span class="stat-tile-abs">' + agg.count + ' сделок, винрейт ' + agg.winRate.toFixed(0) + '%</span>'
-      : '<span class="stat-tile-abs muted">нет сделок</span>';
-    return '<div class="stat-tile ' + cls + '"><div class="stat-tile-label"><i class="' + icon + '"></i>' + d.label + '</div>' +
+        '<span class="stat-tile-abs">' + agg.count + ' ' + t('сделок, винрейт') + ' ' + agg.winRate.toFixed(0) + '%</span>'
+      : '<span class="stat-tile-abs muted">' + t('нет сделок') + '</span>';
+    return '<div class="stat-tile ' + cls + '"><div class="stat-tile-label"><i class="' + icon + '"></i>' + t(d.label) + '</div>' +
       '<div class="stat-tile-value">' + valueHtml + '</div></div>';
   }).join('');
   const assetsTile = '<div class="stat-tile neutral"><div class="stat-tile-label"><i class="ri-coins-line"></i>Активы</div>' +
@@ -5169,7 +5204,7 @@ function renderFinresOverviewContent(el, data, animate) {
   const agg = finresAggregate(filtered);
 
   const periodPillsHtml = Object.keys(FINRES_PERIODS).map(function (key) {
-    return '<button type="button" class="finres-period-pill' + (key === finresPeriod ? ' active' : '') + '" data-finres-period="' + key + '">' + FINRES_PERIODS[key].label + '</button>';
+    return '<button type="button" class="finres-period-pill' + (key === finresPeriod ? ' active' : '') + '" data-finres-period="' + key + '">' + t(FINRES_PERIODS[key].label) + '</button>';
   }).join('');
 
   function statCard(label, valueHtml, cls, subHtml) {
@@ -5179,12 +5214,12 @@ function renderFinresOverviewContent(el, data, animate) {
   }
   const pnlCls = agg.pnl >= 0 ? 'up' : 'down';
   const statsHtml =
-    statCard('Общий PnL', (agg.pnl >= 0 ? '+' : '-') + fmtUsd(Math.abs(agg.pnl)).slice(1), pnlCls,
+    statCard(t('Общий PnL'), (agg.pnl >= 0 ? '+' : '-') + fmtUsd(Math.abs(agg.pnl)).slice(1), pnlCls,
       agg.pct !== 0 ? (agg.pct >= 0 ? '+' : '') + agg.pct.toFixed(2) + '%' : null) +
-    statCard('Прибыль', '+' + fmtUsd(agg.profit).slice(1), 'up', agg.winCount + ' сделок') +
-    statCard('Убытки', (agg.loss <= 0 ? '-' : '') + fmtUsd(Math.abs(agg.loss)).slice(1), 'down', agg.lossCount + ' сделок') +
-    statCard('Сделки', String(agg.count), null, 'за ' + FINRES_PERIODS[finresPeriod].label.toLowerCase()) +
-    statCard('Винрейт', agg.winRate.toFixed(2) + '%', agg.winRate >= 50 ? 'up' : 'down', agg.winCount + '/' + agg.count);
+    statCard(t('Прибыль'), '+' + fmtUsd(agg.profit).slice(1), 'up', agg.winCount + ' ' + t('сделок')) +
+    statCard(t('Убытки'), (agg.loss <= 0 ? '-' : '') + fmtUsd(Math.abs(agg.loss)).slice(1), 'down', agg.lossCount + ' ' + t('сделок')) +
+    statCard(t('Сделки'), String(agg.count), null, t('за') + ' ' + t(FINRES_PERIODS[finresPeriod].label).toLowerCase()) +
+    statCard(t('Винрейт'), agg.winRate.toFixed(2) + '%', agg.winRate >= 50 ? 'up' : 'down', agg.winCount + '/' + agg.count);
 
   // Кумулятивный PnL — переиспользуем drawPnlChart (та же линия+градиент, что у графика стоимости
   // портфеля в "Настройки аккаунта"), просто с накопительной суммой реализованных сделок вместо
@@ -5199,10 +5234,10 @@ function renderFinresOverviewContent(el, data, animate) {
 
   el.innerHTML =
     '<div class="finres-tab-body' + (animate ? ' finres-anim-in' : '') + '">' +
-    '<div class="finres-head"><h2>Обзор</h2>' +
+    '<div class="finres-head"><h2>' + t('Обзор') + '</h2>' +
       '<div class="finres-head-right">' +
         '<div class="finres-period-pills">' + periodPillsHtml + '</div>' +
-        '<button type="button" class="finres-export-btn" id="finresExportBtn"><i class="ri-download-2-line"></i> Экспорт</button>' +
+        '<button type="button" class="finres-export-btn" id="finresExportBtn"><i class="ri-download-2-line"></i> ' + t('Экспорт') + '</button>' +
       '</div>' +
     '</div>' +
     finresStaleErrorBannerHtml(data) +
@@ -5268,7 +5303,7 @@ function buildFinresPeriodTableHtml(allTrades) {
     const agg = finresAggregate(finresFilterByPeriod(allTrades, r.key));
     const pnlCls = agg.pnl >= 0 ? 'up' : 'down';
     return '<tr>' +
-      '<td class="finres-period-name">' + r.label + '</td>' +
+      '<td class="finres-period-name">' + t(r.label) + '</td>' +
       '<td class="' + pnlCls + '">' + (agg.pnl >= 0 ? '+' : '-') + fmtUsd(Math.abs(agg.pnl)).slice(1) + '</td>' +
       '<td class="' + pnlCls + '">' + (agg.pct >= 0 ? '+' : '') + agg.pct.toFixed(2) + '%</td>' +
       '<td class="up">+' + fmtUsd(agg.profit).slice(1) + '</td>' +
@@ -5360,7 +5395,7 @@ function renderFinresPnlTab(el) {
     return;
   }
   const periodPillsHtml = Object.keys(BALANCE_PERIODS).map(function (key) {
-    return '<span class="balance-period-pill' + (key === finresPnlPeriod ? ' active' : '') + '" data-period="' + key + '">' + BALANCE_PERIODS[key].label + '</span>';
+    return '<span class="balance-period-pill' + (key === finresPnlPeriod ? ' active' : '') + '" data-period="' + key + '">' + t(BALANCE_PERIODS[key].label) + '</span>';
   }).join('');
 
   // Если сделки уже загружены в этой сессии (переключились на другую вкладку и обратно) — рисуем
@@ -6113,7 +6148,7 @@ function renderFinresHero() {
   const total = lastBalanceState.total, hist = lastBalanceState.hist, priced = lastBalanceState.priced;
 
   const periodPillsHtml = Object.keys(BALANCE_PERIODS).map(function (key) {
-    return '<span class="balance-period-pill' + (key === balancePeriod ? ' active' : '') + '" data-period="' + key + '">' + BALANCE_PERIODS[key].label + '</span>';
+    return '<span class="balance-period-pill' + (key === balancePeriod ? ' active' : '') + '" data-period="' + key + '">' + t(BALANCE_PERIODS[key].label) + '</span>';
   }).join('');
   // 1Д/1Н/1М-плитки — по реализованным сделкам (finresRealized), не по снимкам портфеля (см. её же
   // комментарий у buildBalanceStatsGridHtml). Если сделки ещё не грузились в этой сессии — рисуем из
@@ -6126,9 +6161,9 @@ function renderFinresHero() {
     '<div class="balance-hero">' +
       '<div class="balance-hero-main">' +
         '<div class="balance-hero-toprow">' +
-          '<div class="balance-hero-label">Общая стоимость портфеля</div>' +
-          '<button type="button" class="finres-refresh-btn" id="finresRefreshBtn" title="Обновить данные Финреза сейчас, не дожидаясь автообновления">' +
-            '<i class="ri-refresh-line"></i><span>Обновить</span>' +
+          '<div class="balance-hero-label">' + t('Общая стоимость портфеля') + '</div>' +
+          '<button type="button" class="finres-refresh-btn" id="finresRefreshBtn" title="' + t('Обновить данные Финреза сейчас, не дожидаясь автообновления') + '">' +
+            '<i class="ri-refresh-line"></i><span>' + t('Обновить') + '</span>' +
           '</button>' +
         '</div>' +
         '<div class="balance-hero-value">' + fmtUsd(total) + '</div>' +
@@ -6190,7 +6225,7 @@ function markFinresUpdatedNow() {
   finresLastUpdatedAt = Date.now();
   const el = document.getElementById('finresLastUpdated');
   if (el) {
-    el.textContent = 'Обновлено ' + new Date(finresLastUpdatedAt).toTimeString().slice(0, 8);
+    el.textContent = t('Обновлено') + ' ' + new Date(finresLastUpdatedAt).toTimeString().slice(0, 8);
     el.classList.remove('stale');
   }
 }
@@ -6241,8 +6276,8 @@ function updateFinresHeroPeriodView() {
   const deltaHtml = delta
     ? '<div class="balance-hero-delta ' + deltaClass + '"><i class="' + deltaIcon + '"></i>' +
       (delta.abs >= 0 ? '+' : '') + delta.pct.toFixed(2) + '% (' + (delta.abs >= 0 ? '+' : '-') + fmtUsd(Math.abs(delta.abs)).slice(1) + ')' +
-      '<span class="delta-note">за ' + delta.period + '</span></div>'
-    : '<div class="balance-hero-delta flat"><span class="delta-note">Копим историю для графика — загляните сюда попозже</span></div>';
+      '<span class="delta-note">' + t('за') + ' ' + delta.period + '</span></div>'
+    : '<div class="balance-hero-delta flat"><span class="delta-note">' + t('Копим историю для графика — загляните сюда попозже') + '</span></div>';
   const deltaEl = document.getElementById('balanceDeltaContainer');
   if (deltaEl) deltaEl.innerHTML = deltaHtml;
 
@@ -6303,7 +6338,7 @@ function buildBalanceEarnCardsHtml(earnings, period, histLen) {
   if (!earnings.length) {
     return '<div class="balance-earnings-empty">За выбранный период заметных изменений по монетам не найдено' + (histLen < 2 ? ' — копим историю.' : '.') + '</div>';
   }
-  return '<div class="balance-earnings-title">Заработано по монетам за ' + period.label + '</div>' +
+  return '<div class="balance-earnings-title">' + t('Заработано по монетам за') + ' ' + t(period.label) + '</div>' +
     '<div class="balance-earn-list">' +
     earnings.map(function (e) {
       const cls = e.earned > 0.005 ? 'up' : (e.earned < -0.005 ? 'down' : 'flat');
@@ -7367,7 +7402,7 @@ function renderJournalTfPills() {
   const el = document.getElementById('journalTfPills');
   if (!el || !journalChartState) return;
   el.innerHTML = JOURNAL_TF_OPTIONS.map(function (o) {
-    return '<button type="button" class="journal-tf-pill' + (o.key === journalChartState.tf ? ' active' : '') + '" data-tf="' + o.key + '">' + o.label + '</button>';
+    return '<button type="button" class="journal-tf-pill' + (o.key === journalChartState.tf ? ' active' : '') + '" data-tf="' + o.key + '">' + t(o.label) + '</button>';
   }).join('');
 }
 let journalTfPillsWired = false;
