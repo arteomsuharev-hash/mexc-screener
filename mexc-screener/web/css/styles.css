@@ -944,7 +944,8 @@ body {
   flex: 1; position: relative; min-width: 0; border-right: 1px solid var(--border-color);
   background: radial-gradient(120% 100% at 15% 0%, #17202e 0%, #131722 55%, #0f131a 100%);
 }
-#journalChartCanvas { width: 100%; height: 100%; display: block; }
+#journalChartCanvas { width: 100%; height: 100%; display: block; cursor: grab; }
+#journalChartCanvas.panning { cursor: grabbing; }
 .journal-chart-empty {
   position: absolute; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column;
   gap: 8px; color: var(--text-muted); font-size: 13px; text-align: center; padding: 20px;

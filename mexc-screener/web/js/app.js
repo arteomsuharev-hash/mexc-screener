@@ -3852,6 +3852,11 @@ function wirePnlChartCrosshair(canvas, tooltipEl) {
 // монете + треугольные маркеры входа (зелёный, снизу от свечи) и выхода (красный, сверху) в точках
 // реальных сделок аккаунта. Цветовая палитра свечей — та же, что и у основного "своего графика"
 // (#26A69A/#EF5350, см. round5.md), маркеры — акцентные --green/--red приложения.
+// Раунд "маркеры сливаются в кашу + график должен быть живой и масштабируемый как в TradingView":
+// собственное окно зума/пана (journalChartState.view), НЕ завязанное на глобальный ownChartView
+// главного "своего графика" скринера — своя, изолированная реализация той же техники (см.
+// wireJournalChartInteractions/drawCandleChart выше по файлу), чтобы не трогать уже рабочий
+// основной график ради модалки журнала.
 function drawJournalChart(canvas, candles, trades) {
   if (!canvas || !candles || !candles.length) return;
   const dpr = window.devicePixelRatio || 1;
@@ -3864,22 +3869,40 @@ function drawJournalChart(canvas, candles, trades) {
   const padLeft = 8, padRight = 58, padTop = 20, padBottom = 22;
   const plotW = Math.max(10, w - padLeft - padRight), plotH = Math.max(10, h - padTop - padBottom);
 
-  let min = Math.min.apply(null, candles.map(function (c) { return c.l; }));
-  let max = Math.max.apply(null, candles.map(function (c) { return c.h; }));
-  // Небольшой запас сверху/снизу, чтобы маркеры входа/выхода (рисуются чуть за пределами хая/лоу
-  // свечи) не обрезались о край холста.
-  const pricePad = (max - min) * 0.16 || (max * 0.01) || 1;
+  const n = candles.length;
+  const intervalMs = n > 1 ? (candles[1].t - candles[0].t) : 60000;
+
+  // --- окно зума/пана ---
+  const stateView = (journalChartState && journalChartState.view) || {};
+  let visibleCount = Math.round(stateView.visibleCount || n);
+  visibleCount = Math.max(15, Math.min(n, visibleCount));
+  const maxOffset = Math.max(0, n - visibleCount);
+  let offset = Math.round(stateView.offset || 0);
+  offset = Math.max(0, Math.min(maxOffset, offset));
+  if (journalChartState) journalChartState.view = { visibleCount: visibleCount, offset: offset };
+
+  const startIdx = n - visibleCount - offset;
+  const endIdx = n - offset;
+  const slice = candles.slice(startIdx, endIdx);
+  if (!slice.length) return;
+
+  let min = Math.min.apply(null, slice.map(function (c) { return c.l; }));
+  let max = Math.max.apply(null, slice.map(function (c) { return c.h; }));
+  const pricePad = (max - min) * 0.12 || (max * 0.01) || 1;
   min -= pricePad; max += pricePad;
 
-  const n = candles.length;
-  const slot = plotW / n;
+  const slot = plotW / visibleCount;
   const bodyW = Math.max(1.5, Math.min(slot * 0.62, 9));
+  const firstT = candles[startIdx].t;
 
-  function xOf(i) { return padLeft + i * slot + slot / 2; }
+  function xOfTime(t) { return padLeft + ((t - firstT) / intervalMs) * slot + slot / 2; }
+  function timeOfX(x) { return firstT + ((x - padLeft - slot / 2) / slot) * intervalMs; }
   function yOf(v) { return padTop + plotH - ((v - min) / (max - min)) * plotH; }
+  function priceOfY(y) { return min + ((padTop + plotH - y) / plotH) * (max - min); }
 
-  // Более стильная сетка: тонкая линия + подложка под ценовую подпись (а не голый текст поверх
-  // свечей) — читается увереннее и меньше "спорит" визуально с самим графиком.
+  // Метаданные окна — читает wireJournalChartInteractions ниже для колеса мыши/панорамы.
+  canvas.__journalChart = { xOfTime: xOfTime, timeOfX: timeOfX, priceOfY: priceOfY, plotW: plotW, plotH: plotH, padLeft: padLeft, slot: slot, intervalMs: intervalMs };
+
   ctx.font = '9px var(--font-mono, monospace)';
   ctx.textBaseline = 'middle';
   [max - pricePad, (min + max) / 2, min + pricePad].forEach(function (v) {
@@ -3894,8 +3917,8 @@ function drawJournalChart(canvas, candles, trades) {
     ctx.fillText(label, padLeft + plotW + 5, y);
   });
 
-  candles.forEach(function (c, i) {
-    const x = xOf(i);
+  slice.forEach(function (c) {
+    const x = xOfTime(c.t);
     const up = c.c >= c.o;
     const color = up ? '#26A69A' : '#EF5350';
     ctx.strokeStyle = color;
@@ -3903,8 +3926,6 @@ function drawJournalChart(canvas, candles, trades) {
     ctx.beginPath(); ctx.moveTo(x, yOf(c.h)); ctx.lineTo(x, yOf(c.l)); ctx.stroke();
     const openY = yOf(c.o), closeY = yOf(c.c);
     const top = Math.min(openY, closeY), bh = Math.max(1, Math.abs(closeY - openY));
-    // Лёгкий вертикальный градиент вместо плошного заливки тела свечи — небольшой "глянец", не меняет
-    // читаемость (тот же оттенок сверху донизу, просто чуть светлее у верхнего края).
     const bodyGrad = ctx.createLinearGradient(0, top, 0, top + bh);
     bodyGrad.addColorStop(0, up ? '#2FBFAF' : '#FF6B7A');
     bodyGrad.addColorStop(1, color);
@@ -3912,19 +3933,16 @@ function drawJournalChart(canvas, candles, trades) {
     ctx.fillRect(x - bodyW / 2, top, bodyW, bh);
   });
 
-  const tfMs = candles.length > 1 ? (candles[1].t - candles[0].t) : 60000;
-  // Раунд "маркеры сливаются в кашу на плотном скальпинге": прошлая версия рисовала КАЖДУЮ сделку
-  // отдельным крупным маркером с сильным свечением, смещённым от хая/лоу свечи (не от реальной цены
-  // исполнения) — на активном скальпинге, где по одной свече проходит несколько сделок подряд, это
-  // превращалось в нечитаемое пятно, а маркер вообще не показывал настоящую цену входа/выхода.
-  // Теперь: (1) сделки одной стороны на одной свече группируются в ОДИН маркер по средней цене
-  // исполнения, с "×N" рядом, если их больше одной; (2) маркер стоит РОВНО на цене исполнения
-  // (yOf(price)), а не со смещением от хая/лоу; (3) маленький, с едва заметным свечением вместо
-  // яркого блюра; (4) короткая пунктирная линия-уровень цены — тот же приём, что у TradingView.
+  // Маркеры входа/выхода — простая двухштриховая "галочка" (без заливки, без свечения): по фидбеку
+  // "должна быть просто красная и зелёная чайка" — минималистичный шеврон ^ (вход) / v (выход) точно
+  // на цене исполнения. Сделки одной стороны на одной свече по-прежнему группируются в один маркер
+  // по средней цене (иначе на плотном скальпинге несколько маркеров подряд опять сливались бы) —
+  // с "×N" рядом, если сделок в кластере больше одной. Считаются только сделки в ТЕКУЩЕМ видимом окне.
   const tradeGroups = {};
   (trades || []).forEach(function (t) {
-    let idx = Math.floor((t.time - candles[0].t) / tfMs);
-    idx = Math.max(0, Math.min(candles.length - 1, idx));
+    let idx = Math.floor((t.time - candles[0].t) / intervalMs);
+    idx = Math.max(0, Math.min(n - 1, idx));
+    if (idx < startIdx || idx >= endIdx) return;
     const key = idx + '_' + (t.buy ? 'b' : 's');
     if (!tradeGroups[key]) tradeGroups[key] = { idx: idx, buy: t.buy, sumPrice: 0, count: 0 };
     tradeGroups[key].sumPrice += t.price;
@@ -3932,30 +3950,18 @@ function drawJournalChart(canvas, candles, trades) {
   });
   Object.keys(tradeGroups).forEach(function (key) {
     const g = tradeGroups[key];
-    const x = xOf(g.idx);
+    const x = xOfTime(candles[g.idx].t);
     const y = yOf(g.sumPrice / g.count);
     const color = g.buy ? '#00C076' : '#F84960';
 
     ctx.save();
     ctx.strokeStyle = color;
-    ctx.globalAlpha = 0.45;
-    ctx.setLineDash([2.5, 2.5]);
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(x + 6, y); ctx.lineTo(Math.min(padLeft + plotW, x + 30), y); ctx.stroke();
-    ctx.restore();
-
-    ctx.save();
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 3;
+    ctx.lineWidth = 1.75;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     ctx.beginPath();
-    if (g.buy) { ctx.moveTo(x, y - 6); ctx.lineTo(x - 4.5, y + 3); ctx.lineTo(x + 4.5, y + 3); }
-    else { ctx.moveTo(x, y + 6); ctx.lineTo(x - 4.5, y - 3); ctx.lineTo(x + 4.5, y - 3); }
-    ctx.closePath();
-    ctx.fillStyle = color;
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(255,255,255,.65)';
+    if (g.buy) { ctx.moveTo(x - 5, y + 5); ctx.lineTo(x, y); ctx.lineTo(x + 5, y + 5); }
+    else { ctx.moveTo(x - 5, y - 5); ctx.lineTo(x, y); ctx.lineTo(x + 5, y - 5); }
     ctx.stroke();
     ctx.restore();
 
@@ -3964,24 +3970,87 @@ function drawJournalChart(canvas, candles, trades) {
       ctx.fillStyle = color;
       ctx.textBaseline = 'middle';
       ctx.textAlign = 'left';
-      ctx.fillText('×' + g.count, x + 7, g.buy ? y - 5 : y + 5);
-      ctx.textAlign = 'left';
+      ctx.fillText('×' + g.count, x + 7, y);
     }
   });
+  ctx.textAlign = 'left';
 
   ctx.fillStyle = 'rgba(255,255,255,.35)';
   ctx.font = '9px var(--font-mono, monospace)';
   ctx.textBaseline = 'alphabetic';
-  [0, Math.floor(n / 2), n - 1].forEach(function (i) {
-    const c = candles[i];
+  const sn = slice.length;
+  [0, Math.floor(sn / 2), sn - 1].forEach(function (i) {
+    const c = slice[i];
     if (!c) return;
     const d = new Date(c.t);
     const label = String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0') + ' ' +
       String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
-    ctx.textAlign = i === 0 ? 'left' : (i === n - 1 ? 'right' : 'center');
-    ctx.fillText(label, xOf(i), h - 6);
+    ctx.textAlign = i === 0 ? 'left' : (i === sn - 1 ? 'right' : 'center');
+    ctx.fillText(label, xOfTime(c.t), h - 6);
   });
   ctx.textAlign = 'left';
+}
+
+// Колесо мыши (зум к позиции курсора) + зажать-и-тащить (панорама) на графике журнала сделок —
+// та же техника, что у wireOwnChartInteractions выше по файлу, но с собственным, изолированным
+// состоянием (journalChartState.view / journalPanDrag), чтобы не трогать глобальный ownChartView
+// главного графика скринера. Слушатели вешаются один раз на canvas (idempotent).
+let journalPanDrag = null;
+function wireJournalChartInteractions(canvas) {
+  if (!canvas || canvas.__journalWired) return;
+  canvas.__journalWired = true;
+
+  function redraw() {
+    if (journalChartState) drawJournalChart(canvas, journalChartState.candles, journalChartState.trades);
+  }
+
+  canvas.addEventListener('wheel', function (ev) {
+    const chart = canvas.__journalChart;
+    if (!journalChartState || !chart) return;
+    ev.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = ev.clientX - rect.left;
+    const timeAtCursor = chart.timeOfX(mouseX);
+    const factor = ev.deltaY > 0 ? 1.15 : (1 / 1.15);
+    const candles = journalChartState.candles;
+    const n = candles.length;
+    const view = journalChartState.view || { visibleCount: n, offset: 0 };
+    let newVisible = Math.round(view.visibleCount * factor);
+    newVisible = Math.max(15, Math.min(n, newVisible));
+    const newSlot = chart.plotW / newVisible;
+    const idxInWindow = (mouseX - chart.padLeft) / newSlot;
+    const globalIdxAtCursor = (timeAtCursor - candles[0].t) / chart.intervalMs;
+    let newStartIdx = Math.round(globalIdxAtCursor - idxInWindow);
+    newStartIdx = Math.max(0, Math.min(n - newVisible, newStartIdx));
+    journalChartState.view = { visibleCount: newVisible, offset: n - newVisible - newStartIdx };
+    redraw();
+  }, { passive: false });
+
+  canvas.addEventListener('mousedown', function (ev) {
+    if (ev.button !== 0 || !canvas.__journalChart) return;
+    const rect = canvas.getBoundingClientRect();
+    journalPanDrag = { startX: ev.clientX - rect.left, startOffset: (journalChartState && journalChartState.view && journalChartState.view.offset) || 0 };
+    canvas.classList.add('panning');
+  });
+
+  window.addEventListener('mousemove', function (ev) {
+    if (!journalPanDrag || !journalChartState) return;
+    const chart = canvas.__journalChart;
+    if (!chart) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = ev.clientX - rect.left;
+    const deltaCandles = (x - journalPanDrag.startX) / chart.slot;
+    const n = journalChartState.candles.length;
+    const visibleCount = (journalChartState.view && journalChartState.view.visibleCount) || n;
+    const maxOffset = Math.max(0, n - visibleCount);
+    const newOffset = Math.max(0, Math.min(maxOffset, journalPanDrag.startOffset + deltaCandles));
+    journalChartState.view = { visibleCount: visibleCount, offset: newOffset };
+    redraw();
+  });
+
+  window.addEventListener('mouseup', function () {
+    if (journalPanDrag) { journalPanDrag = null; canvas.classList.remove('panning'); }
+  });
 }
 
 function drawDonutChart(canvas, segments) {
@@ -6225,6 +6294,61 @@ window.addEventListener('resize', function () {
 
 // Открывает модалку "Журнал сделок" для одной монеты из баланса: тянет реальную историю сделок
 // (подписанный /api/v3/myTrades) + свечи под неё и рисует BUY/SELL точки прямо на графике.
+// Список сделок справа от графика в модалке журнала — вынесено отдельно от openJournalForAsset,
+// чтобы им же мог пользоваться "живой" автообновляющий тик (startJournalLiveRefresh ниже) без
+// повторения разметки.
+function renderJournalTradesList(trades) {
+  const listEl = document.getElementById('journalTradesList');
+  if (!listEl) return;
+  listEl.innerHTML = trades.slice().reverse().map(function (t, i) {
+    const d = new Date(t.time);
+    const timeStr = String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0') + ' ' +
+      String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    const side = t.buy ? 'buy' : 'sell';
+    return '<div class="journal-trade-row ' + side + '" style="--row-i:' + Math.min(i, 20) + '">' +
+      '<div><span class="journal-trade-side ' + side + '"><i class="ri-arrow-' + (t.buy ? 'up' : 'down') + '-line"></i>' + (t.buy ? 'ВХОД (BUY)' : 'ВЫХОД (SELL)') + '</span>' +
+      '<div class="journal-trade-time">' + timeStr + '</div></div>' +
+      '<div style="text-align:right"><div>' + fmtPrice(t.price) + '</div><div class="journal-trade-time">' + fmtNum(t.qty, 4) + '</div></div>' +
+      '</div>';
+  }).join('');
+}
+
+// "График должен быть живой и двигаться" — периодически (не через WS, REST klines/myTrades того же
+// пути, что и первая загрузка) подтягивает свежие свечи и сделки, пока модалка открыта, и
+// перерисовывает график/список. Текущий зум/пан (journalChartState.view) НЕ сбрасывается — тот же
+// принцип, что уже используется в startOwnChartAutoRefresh для главного графика скринера (offset
+// считается от конца массива, поэтому "смотрю на последние N свечей" естественно продолжает
+// показывать самые новые данные и после дозагрузки, а зафиксированный на истории просмотр остаётся
+// на тех же по счёту от конца свечах).
+let journalRefreshTimer = null;
+function startJournalLiveRefresh(asset, raw) {
+  stopJournalLiveRefresh();
+  journalRefreshTimer = setInterval(async function () {
+    const overlay = document.getElementById('journalModal');
+    if (!overlay || !overlay.classList.contains('active') || !journalChartState) { stopJournalLiveRefresh(); return; }
+    try {
+      const trades = await fetchMyTrades(raw, 500);
+      if (!trades.length) return;
+      const backMs = Date.now() - trades[0].time;
+      const tf = pickJournalTf(backMs);
+      const candles = await fetchKlines(raw, tf, 1000);
+      if (!candles.length || !journalChartState) return;
+      journalChartState.candles = candles;
+      journalChartState.trades = trades;
+      const canvas = document.getElementById('journalChartCanvas');
+      if (canvas) drawJournalChart(canvas, candles, trades);
+      renderJournalTradesList(trades);
+    } catch (e) {
+      // Тихо пропускаем — уже показанные график/список остаются на месте, следующий тик попробует
+      // снова; не хотим перекрывать рабочую модалку баннером ошибки из-за одного неудачного тика.
+      logD('Journal', asset + ': живое обновление не удалось (' + e.message + '), пробуем на следующем тике');
+    }
+  }, 8000);
+}
+function stopJournalLiveRefresh() {
+  if (journalRefreshTimer) { clearInterval(journalRefreshTimer); journalRefreshTimer = null; }
+}
+
 async function openJournalForAsset(asset, raw) {
   const overlay = document.getElementById('journalModal');
   const titleEl = document.getElementById('journalModalTitle');
@@ -6234,6 +6358,7 @@ async function openJournalForAsset(asset, raw) {
   if (!overlay || !canvas) return;
 
   journalChartState = null;
+  stopJournalLiveRefresh();
   overlay.classList.add('active');
   titleEl.innerHTML = '<i class="ri-file-list-3-line"></i> ' + asset + '/USDT — журнал сделок';
   listEl.innerHTML = '';
@@ -6258,19 +6383,10 @@ async function openJournalForAsset(asset, raw) {
     }
     emptyEl.style.display = 'none';
     journalChartState = { candles: candles, trades: trades };
+    wireJournalChartInteractions(canvas);
     drawJournalChart(canvas, candles, trades);
-
-    listEl.innerHTML = trades.slice().reverse().map(function (t, i) {
-      const d = new Date(t.time);
-      const timeStr = String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0') + ' ' +
-        String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
-      const side = t.buy ? 'buy' : 'sell';
-      return '<div class="journal-trade-row ' + side + '" style="--row-i:' + Math.min(i, 20) + '">' +
-        '<div><span class="journal-trade-side ' + side + '"><i class="ri-arrow-' + (t.buy ? 'up' : 'down') + '-line"></i>' + (t.buy ? 'ВХОД (BUY)' : 'ВЫХОД (SELL)') + '</span>' +
-        '<div class="journal-trade-time">' + timeStr + '</div></div>' +
-        '<div style="text-align:right"><div>' + fmtPrice(t.price) + '</div><div class="journal-trade-time">' + fmtNum(t.qty, 4) + '</div></div>' +
-        '</div>';
-    }).join('');
+    renderJournalTradesList(trades);
+    startJournalLiveRefresh(asset, raw);
   } catch (e) {
     emptyEl.style.display = 'flex';
     emptyEl.innerHTML = '<i class="ri-error-warning-line"></i> ' + (e.message || 'Ошибка загрузки сделок');
@@ -6279,6 +6395,7 @@ async function openJournalForAsset(asset, raw) {
 
 function closeJournalModal() {
   document.getElementById('journalModal').classList.remove('active');
+  stopJournalLiveRefresh();
   journalChartState = null;
 }
 document.getElementById('journalModalClose').addEventListener('click', closeJournalModal);
@@ -6593,7 +6710,10 @@ window.__testJournalChart = function () {
     { time: candles[251].t + 20000, buy: false, price: candles[251].c, qty: 30 },
     { time: candles[252].t, buy: true, price: candles[252].c, qty: 40 }
   ];
+  journalChartState = { candles: candles, trades: trades };
+  wireJournalChartInteractions(canvas);
   drawJournalChart(canvas, candles, trades);
+  renderJournalTradesList(trades);
 };
 
 console.log('MEXC Screener запущен (MEXC Spot WS v3, protobuf)');
