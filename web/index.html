@@ -234,11 +234,26 @@
                   <button type="button" class="ochart-tool" data-charttype="line" title="Линия"><i class="ri-line-chart-line"></i></button>
                   <button type="button" class="ochart-tool" data-charttype="area" title="Область"><i class="ri-funds-line"></i></button>
                 </div>
-                <button type="button" class="ochart-pill" id="ochartMaToggle" title="Скользящие средние MA(7) / MA(25)"><i class="ri-pulse-line"></i><span>MA 7/25</span></button>
+                <div class="ochart-indicators-wrap">
+                  <button type="button" class="ochart-pill" id="ochartIndicatorsBtn" title="Индикаторы"><i class="ri-eye-line"></i><span>Индикаторы</span></button>
+                  <div class="ochart-indicators-panel" id="ochartIndicatorsPanel">
+                    <div class="ochart-ind-row" data-ind="volume">
+                      <button type="button" class="ochart-ind-eye active" title="Показать/скрыть"><i class="ri-eye-line"></i></button>
+                      <span>Объём</span>
+                    </div>
+                    <div class="ochart-ind-row" data-ind="ma">
+                      <button type="button" class="ochart-ind-eye" title="Показать/скрыть"><i class="ri-eye-off-line"></i></button>
+                      <span>MA 7 / 25</span>
+                    </div>
+                  </div>
+                </div>
                 <span class="ochart-hint" id="ochartHint">Колесо мыши — масштаб, зажать и тащить — панорама</span>
                 <div class="ochart-topbar-right">
+                  <button type="button" class="ochart-tool" id="ochartScreenshot" title="Сохранить скриншот графика"><i class="ri-camera-line"></i></button>
+                  <button type="button" class="ochart-tool" id="ochartFullscreen" title="Полноэкранный режим"><i class="ri-fullscreen-line"></i></button>
+                  <span class="ochart-sep"></span>
                   <button type="button" class="ochart-tool" id="ochartClear" title="Очистить все построения"><i class="ri-delete-bin-line"></i></button>
-                  <button type="button" class="ochart-tool" id="ochartResetView" title="Сбросить масштаб"><i class="ri-fullscreen-line"></i></button>
+                  <button type="button" class="ochart-tool" id="ochartResetView" title="Сбросить масштаб"><i class="ri-crop-2-line"></i></button>
                 </div>
               </div>
               <div class="ochart-body">

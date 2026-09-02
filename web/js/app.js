@@ -177,6 +177,7 @@ let ownChartLoadedRaw = null;    // raw-символ, для которого с
 let ownChartLoadedTF = null;     // ТФ, для которого подобран текущий ownChartView (сбрасываем зум при смене ТФ)
 let ownChartType = 'candles';    // 'candles' | 'line' | 'area'
 let ownChartShowMA = false;      // скользящие средние MA(7)/MA(25) поверх цены
+let ownChartShowVolume = true;   // панель объёма снизу — переключается из панели "Индикаторы" (глазок)
 const OWN_CHART_DRAWINGS_KEY = 'mexc_chart_drawings';
 
 function num(v) {
@@ -1213,8 +1214,8 @@ function drawCandleChart(canvas, candles) {
 
   const padRight = 58, padTop = 10, padBottom = 20;
   const plotW = w - padRight, plotHTotal = h - padTop - padBottom;
-  const volumeH = Math.round(plotHTotal * 0.16);
-  const paneGap = 6;
+  const volumeH = ownChartShowVolume ? Math.round(plotHTotal * 0.16) : 0;
+  const paneGap = ownChartShowVolume ? 6 : 0;
   const plotH = plotHTotal - volumeH - paneGap;
   const volTop = padTop + plotH + paneGap;
 
@@ -1290,15 +1291,17 @@ function drawCandleChart(canvas, candles) {
   }
   ctx.textAlign = 'left';
 
-  // --- объём (панель снизу) ---
+  // --- объём (панель снизу, если включена в панели "Индикаторы") ---
   const bodyW = Math.max(1, Math.min(9, slot * 0.62));
-  slice.forEach(function (k, i) {
-    const x = i * slot + slot / 2;
-    const up = k.c >= k.o;
-    ctx.fillStyle = up ? 'rgba(38,166,154,.45)' : 'rgba(239,83,80,.45)';
-    const vy = volYOf(k.v);
-    ctx.fillRect(x - bodyW / 2, vy, bodyW, (volTop + volumeH) - vy);
-  });
+  if (ownChartShowVolume) {
+    slice.forEach(function (k, i) {
+      const x = i * slot + slot / 2;
+      const up = k.c >= k.o;
+      ctx.fillStyle = up ? 'rgba(38,166,154,.45)' : 'rgba(239,83,80,.45)';
+      const vy = volYOf(k.v);
+      ctx.fillRect(x - bodyW / 2, vy, bodyW, (volTop + volumeH) - vy);
+    });
+  }
 
   // --- цена: свечи / линия / область ---
   if (ownChartType === 'candles') {
@@ -6423,12 +6426,86 @@ document.querySelectorAll('.ochart-tool[data-charttype]').forEach(function (btn)
     if (ownChartCandles) drawCandleChart(document.getElementById('ownCandleChart'), ownChartCandles);
   });
 });
-const ochartMaToggleEl = document.getElementById('ochartMaToggle');
-if (ochartMaToggleEl) {
-  ochartMaToggleEl.addEventListener('click', function () {
-    ownChartShowMA = !ownChartShowMA;
-    ochartMaToggleEl.classList.toggle('active', ownChartShowMA);
-    if (ownChartCandles) drawCandleChart(document.getElementById('ownCandleChart'), ownChartCandles);
+// Панель "Индикаторы" — переключаемые индикаторы с глазками (объём/MA), тот же принцип, что у
+// TradingView-легенды индикаторов, вместо одной жёстко зашитой кнопки-таблетки MA.
+const ochartIndicatorsBtnEl = document.getElementById('ochartIndicatorsBtn');
+const ochartIndicatorsPanelEl = document.getElementById('ochartIndicatorsPanel');
+if (ochartIndicatorsBtnEl && ochartIndicatorsPanelEl) {
+  ochartIndicatorsBtnEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    ochartIndicatorsPanelEl.classList.toggle('show');
+  });
+  document.addEventListener('click', function (e) {
+    if (!ochartIndicatorsPanelEl.classList.contains('show')) return;
+    if (ochartIndicatorsPanelEl.contains(e.target) || e.target === ochartIndicatorsBtnEl) return;
+    ochartIndicatorsPanelEl.classList.remove('show');
+  });
+  function syncIndRow(row, on) {
+    row.classList.toggle('ind-off', !on);
+    const eyeBtn = row.querySelector('.ochart-ind-eye');
+    const eyeIcon = eyeBtn.querySelector('i');
+    eyeBtn.classList.toggle('active', on);
+    eyeIcon.className = on ? 'ri-eye-line' : 'ri-eye-off-line';
+  }
+  ochartIndicatorsPanelEl.querySelectorAll('.ochart-ind-row').forEach(function (row) {
+    row.addEventListener('click', function () {
+      const ind = row.getAttribute('data-ind');
+      if (ind === 'volume') { ownChartShowVolume = !ownChartShowVolume; syncIndRow(row, ownChartShowVolume); }
+      else if (ind === 'ma') { ownChartShowMA = !ownChartShowMA; syncIndRow(row, ownChartShowMA); }
+      if (ownChartCandles) drawCandleChart(document.getElementById('ownCandleChart'), ownChartCandles);
+    });
+  });
+}
+// Скриншот графика — экспорт текущего вида канваса в PNG (тот же Blob+ObjectURL+<a download>
+// приём, что и у экспорта CSV в Финрез, просто для картинки).
+const ochartScreenshotBtnEl = document.getElementById('ochartScreenshot');
+if (ochartScreenshotBtnEl) {
+  ochartScreenshotBtnEl.addEventListener('click', function () {
+    const srcCanvas = document.getElementById('ownCandleChart');
+    if (!srcCanvas || !ownChartCandles) { showAppToast('Нет данных для скриншота'); return; }
+    const out = document.createElement('canvas');
+    out.width = srcCanvas.width; out.height = srcCanvas.height;
+    const octx = out.getContext('2d');
+    octx.fillStyle = '#131722';
+    octx.fillRect(0, 0, out.width, out.height);
+    octx.drawImage(srcCanvas, 0, 0);
+    out.toBlob(function (blob) {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const sym = currentCoin ? currentCoin.symbol : 'chart';
+      a.href = url;
+      a.download = 'mexc-' + sym + '-' + Date.now() + '.png';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      showAppToast('Скриншот графика сохранён');
+    }, 'image/png');
+  });
+}
+// Полноэкранный режим для "своего графика" — нативный Fullscreen API на весь контейнер
+// (топбар + вертикальная панель инструментов + холст), не только на канвас.
+const ochartFullscreenBtnEl = document.getElementById('ochartFullscreen');
+if (ochartFullscreenBtnEl) {
+  ochartFullscreenBtnEl.addEventListener('click', function () {
+    const container = document.getElementById('ownChartContainer');
+    if (!container) return;
+    if (!document.fullscreenElement) {
+      container.requestFullscreen().catch(function () { showAppToast('Не удалось включить полноэкранный режим'); });
+    } else {
+      document.exitFullscreen().catch(function () {});
+    }
+  });
+  document.addEventListener('fullscreenchange', function () {
+    const container = document.getElementById('ownChartContainer');
+    const isFs = document.fullscreenElement === container;
+    ochartFullscreenBtnEl.classList.toggle('active', isFs);
+    ochartFullscreenBtnEl.querySelector('i').className = isFs ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line';
+    ochartFullscreenBtnEl.title = isFs ? 'Выйти из полноэкранного режима' : 'Полноэкранный режим';
+    setTimeout(function () {
+      if (ownChartCandles) drawCandleChart(document.getElementById('ownCandleChart'), ownChartCandles);
+    }, 60);
   });
 }
 const ochartLiveBtnEl = document.getElementById('ochartLiveBtn');
