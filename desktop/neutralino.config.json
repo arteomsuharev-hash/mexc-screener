@@ -18,7 +18,7 @@
       "minWidth": 1100,
       "minHeight": 650,
       "icon": "/resources/icon.png",
-      "enableInspector": false,
+      "enableInspector": true,
       "borderless": false
     }
   },
