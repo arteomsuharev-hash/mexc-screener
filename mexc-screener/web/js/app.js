@@ -107,6 +107,11 @@ let searchQuery = '';
 let sortField = 'vol24';
 let sortAsc = false;
 let viewMode = 'list';
+// Пока курсор наведён на строку таблицы/карточку сетки — держим ПОРЯДОК монет неизменным (значения
+// в ячейках по-прежнему обновляются живьём), чтобы монета, которую пользователь разглядывает, не
+// "уезжала" из-под курсора от постоянной пересортировки по объёму/цене. См. applySortOnly() и
+// делегированные mouseover/mouseout на #tableBody/#gridView в конце файла.
+let tableHoverFreezeSymbol = null;
 let ws = null;
 let wsReconnectAttempts = 0;
 let lastMiniTickerAt = 0; // для watchdog'а "сокет открыт, но молчит" — см. connectWs()
@@ -304,7 +309,11 @@ const STRATEGY_DEFS = {
       return c.vol24 >= STRATEGY_MIN_LIQUID_VOL24 && c.vol24 < s.vol24Liquid * 3 && c.vol5s >= s.vol5sSpike && burstRatio(c) < s.burstSpike;
     },
     score: function (c) {
-      return (c.vol5s / Math.sqrt(Math.max(c.vol24, 1000))) / (1 + burstRatio(c));
+      // *1000 — чисто косметический масштаб: сырое значение обычно лежит в районе 0.0001-0.01,
+      // и бейдж в таблице (toFixed(1)) показывал "0.0" абсолютно у всех строк, не давая никакой
+      // информации для сравнения монет глазами. На порядок сортировки и на match() (какие монеты
+      // вообще проходят в стратегию) множитель не влияет — это разные, независимые вещи.
+      return (c.vol5s / Math.sqrt(Math.max(c.vol24, 1000))) / (1 + burstRatio(c)) * 1000;
     }
   },
   density: {
@@ -609,10 +618,12 @@ function applySortOnly() {
     const def = STRATEGY_DEFS[activeStrategy];
     allCoins.forEach(function (c) { c.__score = def.score(c, strategyStats); });
     if (!strategyManualSort) {
+      if (tableHoverFreezeSymbol) return; // курсор на строке — значения выше уже обновили, порядок не трогаем
       allCoins.sort(function (a, b) { return b.__score - a.__score; });
       return;
     }
   }
+  if (tableHoverFreezeSymbol) return;
   allCoins.sort(function (a, b) {
     let va = a[sortField], vb = b[sortField];
     // Внутри стратегии колонки "Сигнал" как таковой нет (в этом режиме её заменяет score-бейдж) —
@@ -776,6 +787,46 @@ function renderTable() {
 
   updateProfilesPage();
 }
+
+// Один раз на статичных контейнерах (не на строках — те пересоздаются каждый рендер) — делегированное
+// наведение, включает/выключает tableHoverFreezeSymbol (см. её объявление и использование в applySortOnly).
+// mouseover/mouseout (а не mouseenter/mouseleave) специально — те не всплывают, делегирование через
+// closest() работает только с всплывающими событиями.
+(function wireTableHoverFreeze() {
+  function onOver(e) {
+    const row = e.target.closest('tr[data-symbol], .grid-card[data-symbol]');
+    if (row) tableHoverFreezeSymbol = row.dataset.symbol;
+  }
+  function onOut(e) {
+    const row = e.target.closest('tr[data-symbol], .grid-card[data-symbol]');
+    if (!row) return;
+    // Если ушли на дочерний элемент той же строки — ещё не покинули её, курсор всё ещё внутри.
+    if (row.contains(e.relatedTarget)) return;
+    if (tableHoverFreezeSymbol === row.dataset.symbol) tableHoverFreezeSymbol = null;
+  }
+  const tbody = document.getElementById('tableBody');
+  const grid = document.getElementById('gridView');
+  if (tbody) { tbody.addEventListener('mouseover', onOver); tbody.addEventListener('mouseout', onOut); }
+  if (grid) { grid.addEventListener('mouseover', onOver); grid.addEventListener('mouseout', onOut); }
+})();
+
+// Клик по карточке паттерна (стр. «Паттерны») — открыть график + стакан этой монеты на «Скринере».
+// Делегирование на статичном #patternsGrid, а не на самих карточках — те пересоздаются каждый прогон
+// детекторов (раз в PATTERN_DETECT_INTERVAL_MS), навешивать заново незачем.
+function openCoinFromPattern(symbol) {
+  const coin = coinMap.get(symbol);
+  if (!coin) return;
+  switchPage('screener');
+  selectCoin(symbol, true);
+}
+(function wirePatternCardClick() {
+  const grid = document.getElementById('patternsGrid');
+  if (!grid) return;
+  grid.addEventListener('click', function (e) {
+    const card = e.target.closest('.pattern-card[data-symbol]');
+    if (card) openCoinFromPattern(card.dataset.symbol);
+  });
+})();
 
 function selectCoin(symbol, forceChart) {
   const coin = coinMap.get(symbol);
@@ -1637,6 +1688,50 @@ function activityScore(c) {
   return Math.max(0, Math.min(100, Math.round(volScore + moveScore + shortScore)));
 }
 
+// Компактный стакан (bid/ask лесенка) — только для монет из watchlist Tier 2 (см. страницу
+// «Паттерны»), у которых реально есть подписка на канал стакана (tier2Depth). Для остального
+// рынка данных физически нет (см. её же плашку про глубокий анализ) — честно показываем заглушку
+// с объяснением, а не пустую панель без причины.
+function renderOrderBookPanel(c) {
+  const miniEl = document.getElementById('orderbookMini');
+  const unavailEl = document.getElementById('orderbookUnavailable');
+  const rowsEl = document.getElementById('orderbookRows');
+  const ageEl = document.getElementById('orderbookAge');
+  if (!miniEl || !unavailEl || !rowsEl || !ageEl) return;
+
+  const snapshots = tier2Depth.get(c.symbol);
+  const snap = snapshots && snapshots.length ? snapshots[snapshots.length - 1] : null;
+  if (!snap) {
+    miniEl.style.display = 'none';
+    unavailEl.style.display = 'flex';
+    return;
+  }
+  unavailEl.style.display = 'none';
+  miniEl.style.display = 'block';
+  ageEl.textContent = Math.max(0, Math.round((Date.now() - snap.t) / 1000)) + 'с назад';
+
+  const LEVELS = 6;
+  const asks = (snap.asks || []).slice(0, LEVELS);
+  const bids = (snap.bids || []).slice(0, LEVELS);
+  let maxQty = 1e-9;
+  asks.forEach(function (x) { if (x.q > maxQty) maxQty = x.q; });
+  bids.forEach(function (x) { if (x.q > maxQty) maxQty = x.q; });
+
+  function rowHtml(item, cls) {
+    const pct = Math.min(100, (item.q / maxQty) * 100);
+    return '<div class="ob-row ' + cls + '"><div class="ob-depth-bar" style="width:' + pct.toFixed(0) + '%"></div>' +
+      '<span class="ob-price">' + fmtPrice(item.p) + '</span><span class="ob-qty">' + fmtNum(item.q) + '</span></div>';
+  }
+  const asksHtml = asks.slice().reverse().map(function (x) { return rowHtml(x, 'ob-ask'); }).join('');
+  const bidsHtml = bids.map(function (x) { return rowHtml(x, 'ob-bid'); }).join('');
+  const bestAsk = asks.length ? asks[0].p : null;
+  const bestBid = bids.length ? bids[0].p : null;
+  const spreadHtml = (bestAsk != null && bestBid != null && bestBid > 0)
+    ? '<div class="ob-spread-row">Спред ' + fmtPrice(bestAsk - bestBid) + ' (' + ((bestAsk - bestBid) / bestBid * 100).toFixed(3) + '%)</div>'
+    : '';
+  rowsEl.innerHTML = asksHtml + spreadHtml + bidsHtml;
+}
+
 function updateInfoPanel() {
   if (!currentCoin) return;
   const c = coinMap.get(currentCoin.symbol) || currentCoin;
@@ -1656,6 +1751,7 @@ function updateInfoPanel() {
   document.getElementById('infoVol24').textContent = fmtNum(c.vol24);
   document.getElementById('infoVol5').textContent = fmtNum(c.vol5);
   document.getElementById('infoHL').textContent = fmtPrice(c.high) + ' / ' + fmtPrice(c.low);
+  renderOrderBookPanel(c);
 
   const score = activityScore(c);
   document.getElementById('gaugeValue').textContent = score;
@@ -2614,7 +2710,7 @@ function patternCardHtml(ev) {
   if (ev.volumeUsd != null) details.push('$' + Math.round(ev.volumeUsd).toLocaleString('ru-RU'));
   const ago = Math.max(0, Math.round((Date.now() - ev.detectedAt) / 1000));
   const heuristicCls = ev.isHeuristic ? ' pattern-card-heuristic' : '';
-  return '<div class="profile-strategy-card pattern-card' + heuristicCls + '">' +
+  return '<div class="profile-strategy-card pattern-card' + heuristicCls + '" data-symbol="' + ev.symbol.replace(/"/g, '&quot;') + '" title="Открыть график и стакан ' + ev.symbol.replace(/"/g, '&quot;') + '">' +
     '<div class="card-top"><span class="card-icon"><i class="ri-radar-2-line"></i></span>' +
     '<h4>' + ev.symbol.replace(/</g, '&lt;') + '<span class="card-count">' + ev.confidencePct + '%</span></h4></div>' +
     '<div style="display:flex;gap:6px;align-items:center;margin:6px 0 8px;flex-wrap:wrap;">' +
@@ -2968,7 +3064,11 @@ function updateCoinAnalysisBar(c) {
   const badgeEl = document.getElementById('coinAnalysisBadge');
   if (badgeEl) badgeEl.textContent = def.badge + (matched ? ' ✓ совпадает' : ' — не совпадает');
   const textEl = document.getElementById('coinAnalysisText');
-  if (textEl) textEl.textContent = explainCoinForStrategy(c, activeStrategy, s);
+  if (textEl) {
+    const explanation = explainCoinForStrategy(c, activeStrategy, s);
+    textEl.textContent = explanation;
+    textEl.title = explanation; // полный текст по наведению — сама плашка теперь однострочная (см. CSS), чтобы не отъедать высоту у графика
+  }
 }
 
 // ============================================
@@ -5861,6 +5961,8 @@ window.__injectFakePatternEvent = function (partial) {
   updatePatternsPage();
   return ev;
 };
+
+window.__tableHoverFreeze = function () { return tableHoverFreezeSymbol; };
 
 console.log('MEXC Screener запущен (MEXC Spot WS v3, protobuf)');
 
