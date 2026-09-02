@@ -332,7 +332,13 @@
           открытая монета/избранное) — не по всему рынку. Монеты вне watchlist здесь не появятся,
           какими бы интересными они ни выглядели на вкладке «Скринер».
         </div>
+        <h4 style="font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:18px 0 10px;">Детекторы <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);">(отключённые не считаются и не расходуют бюджет вычислений)</span></h4>
+        <div class="detector-filter-row" id="detectorFilterRow"></div>
         <div class="finres-stats-grid" id="patternsHealthGrid" style="margin-top:18px;"></div>
+        <div class="pattern-log-panel" id="patternLogPanel" style="display:none;">
+          <div class="pattern-log-title">Последние события (предупреждения/ошибки)</div>
+          <div class="pattern-log-list" id="patternLogList"></div>
+        </div>
         <h4 style="font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:24px 0 10px;">Обнаруженные паттерны</h4>
         <div class="profile-grid" id="patternsGrid"></div>
 
