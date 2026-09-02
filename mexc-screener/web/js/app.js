@@ -6200,13 +6200,13 @@ async function openJournalForAsset(asset, raw) {
     journalChartState = { candles: candles, trades: trades };
     drawJournalChart(canvas, candles, trades);
 
-    listEl.innerHTML = trades.slice().reverse().map(function (t) {
+    listEl.innerHTML = trades.slice().reverse().map(function (t, i) {
       const d = new Date(t.time);
       const timeStr = String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0') + ' ' +
         String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
       const side = t.buy ? 'buy' : 'sell';
-      return '<div class="journal-trade-row ' + side + '">' +
-        '<div><span class="journal-trade-side ' + side + '">' + (t.buy ? 'ВХОД (BUY)' : 'ВЫХОД (SELL)') + '</span>' +
+      return '<div class="journal-trade-row ' + side + '" style="--row-i:' + Math.min(i, 20) + '">' +
+        '<div><span class="journal-trade-side ' + side + '"><i class="ri-arrow-' + (t.buy ? 'up' : 'down') + '-line"></i>' + (t.buy ? 'ВХОД (BUY)' : 'ВЫХОД (SELL)') + '</span>' +
         '<div class="journal-trade-time">' + timeStr + '</div></div>' +
         '<div style="text-align:right"><div>' + fmtPrice(t.price) + '</div><div class="journal-trade-time">' + fmtNum(t.qty, 4) + '</div></div>' +
         '</div>';
