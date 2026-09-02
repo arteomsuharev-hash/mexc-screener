@@ -263,6 +263,13 @@
         </div>
         <div class="right-panel">
           <div class="trades-panel">
+            <div class="orderbook-mini" id="orderbookMini" style="display:none;">
+              <div class="panel-title"><span>Стакан</span><span id="orderbookAge"></span></div>
+              <div class="orderbook-rows" id="orderbookRows"></div>
+            </div>
+            <div class="orderbook-unavailable" id="orderbookUnavailable" style="display:none;">
+              <i class="ri-stack-line"></i> Стакан недоступен — монета не в списке глубокого анализа (см. «Паттерны»)
+            </div>
             <div class="panel-title"><span>Последние сделки</span><span id="tradesCount">0</span></div>
             <div class="trades-list" id="tradesList"></div>
           </div>
