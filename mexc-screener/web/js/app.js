@@ -3913,34 +3913,60 @@ function drawJournalChart(canvas, candles, trades) {
   });
 
   const tfMs = candles.length > 1 ? (candles[1].t - candles[0].t) : 60000;
-  // Маркеры входа/выхода — крупнее прежних, с мягким свечением своего цвета (shadowBlur) и белой
-  // окантовкой тела — по фидбеку "сделать стильнее/современнее", чтобы точки сразу бросались в глаза
-  // на фоне свечей, а не терялись рядом с ними.
+  // Раунд "маркеры сливаются в кашу на плотном скальпинге": прошлая версия рисовала КАЖДУЮ сделку
+  // отдельным крупным маркером с сильным свечением, смещённым от хая/лоу свечи (не от реальной цены
+  // исполнения) — на активном скальпинге, где по одной свече проходит несколько сделок подряд, это
+  // превращалось в нечитаемое пятно, а маркер вообще не показывал настоящую цену входа/выхода.
+  // Теперь: (1) сделки одной стороны на одной свече группируются в ОДИН маркер по средней цене
+  // исполнения, с "×N" рядом, если их больше одной; (2) маркер стоит РОВНО на цене исполнения
+  // (yOf(price)), а не со смещением от хая/лоу; (3) маленький, с едва заметным свечением вместо
+  // яркого блюра; (4) короткая пунктирная линия-уровень цены — тот же приём, что у TradingView.
+  const tradeGroups = {};
   (trades || []).forEach(function (t) {
     let idx = Math.floor((t.time - candles[0].t) / tfMs);
     idx = Math.max(0, Math.min(candles.length - 1, idx));
-    const c = candles[idx];
-    const x = xOf(idx);
-    const color = t.buy ? '#00C076' : '#F84960';
+    const key = idx + '_' + (t.buy ? 'b' : 's');
+    if (!tradeGroups[key]) tradeGroups[key] = { idx: idx, buy: t.buy, sumPrice: 0, count: 0 };
+    tradeGroups[key].sumPrice += t.price;
+    tradeGroups[key].count++;
+  });
+  Object.keys(tradeGroups).forEach(function (key) {
+    const g = tradeGroups[key];
+    const x = xOf(g.idx);
+    const y = yOf(g.sumPrice / g.count);
+    const color = g.buy ? '#00C076' : '#F84960';
+
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.45;
+    ctx.setLineDash([2.5, 2.5]);
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x + 6, y); ctx.lineTo(Math.min(padLeft + plotW, x + 30), y); ctx.stroke();
+    ctx.restore();
+
     ctx.save();
     ctx.shadowColor = color;
-    ctx.shadowBlur = 8;
+    ctx.shadowBlur = 3;
     ctx.beginPath();
-    if (t.buy) {
-      const y = yOf(c.l) + 16;
-      ctx.moveTo(x, y - 10); ctx.lineTo(x - 7, y + 4); ctx.lineTo(x + 7, y + 4);
-    } else {
-      const y = yOf(c.h) - 16;
-      ctx.moveTo(x, y + 10); ctx.lineTo(x - 7, y - 4); ctx.lineTo(x + 7, y - 4);
-    }
+    if (g.buy) { ctx.moveTo(x, y - 6); ctx.lineTo(x - 4.5, y + 3); ctx.lineTo(x + 4.5, y + 3); }
+    else { ctx.moveTo(x, y + 6); ctx.lineTo(x - 4.5, y - 3); ctx.lineTo(x + 4.5, y - 3); }
     ctx.closePath();
     ctx.fillStyle = color;
     ctx.fill();
     ctx.shadowBlur = 0;
-    ctx.lineWidth = 1.25;
-    ctx.strokeStyle = 'rgba(255,255,255,.55)';
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,255,255,.65)';
     ctx.stroke();
     ctx.restore();
+
+    if (g.count > 1) {
+      ctx.font = '700 9px var(--font-mono, monospace)';
+      ctx.fillStyle = color;
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'left';
+      ctx.fillText('×' + g.count, x + 7, g.buy ? y - 5 : y + 5);
+      ctx.textAlign = 'left';
+    }
   });
 
   ctx.fillStyle = 'rgba(255,255,255,.35)';
@@ -6557,7 +6583,15 @@ window.__testJournalChart = function () {
     { time: candles[80].t, buy: true, price: candles[80].c, qty: 100 },
     { time: candles[95].t, buy: false, price: candles[95].c, qty: 100 },
     { time: candles[150].t, buy: true, price: candles[150].c, qty: 200 },
-    { time: candles[210].t, buy: false, price: candles[210].c, qty: 200 }
+    { time: candles[210].t, buy: false, price: candles[210].c, qty: 200 },
+    // Плотный скальпинг-кластер (несколько сделок на соседних свечах подряд) — та самая ситуация,
+    // где раньше маркеры сливались в кашу (репорт пользователя на реальном BONER/USDT).
+    { time: candles[250].t, buy: true, price: candles[250].c * 0.999, qty: 50 },
+    { time: candles[250].t + 10000, buy: true, price: candles[250].c * 1.001, qty: 60 },
+    { time: candles[251].t, buy: false, price: candles[251].c * 1.002, qty: 50 },
+    { time: candles[251].t + 10000, buy: false, price: candles[251].c * 0.998, qty: 30 },
+    { time: candles[251].t + 20000, buy: false, price: candles[251].c, qty: 30 },
+    { time: candles[252].t, buy: true, price: candles[252].c, qty: 40 }
   ];
   drawJournalChart(canvas, candles, trades);
 };
