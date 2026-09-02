@@ -893,29 +893,37 @@ body {
 .journal-chip {
   display: flex; align-items: center; gap: 7px; padding: 7px 13px 7px 8px; border-radius: 20px;
   border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-secondary);
-  cursor: pointer; font-size: 12px; font-weight: 600; transition: border-color .15s, color .15s, background .15s, transform .12s;
+  cursor: pointer; font-size: 12px; font-weight: 600; transition: border-color .15s, color .15s, background .15s, transform .12s, box-shadow .15s;
 }
-.journal-chip:hover { border-color: var(--blue); color: #fff; background: rgba(30,128,255,.08); transform: translateY(-1px); }
+.journal-chip:hover { border-color: var(--blue); color: #fff; background: rgba(30,128,255,.08); transform: translateY(-1px) scale(1.03); box-shadow: 0 4px 14px -8px rgba(30,128,255,.5); }
 .journal-chip-avatar {
   width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
   font-size: 8.5px; font-weight: 700; color: #fff; flex-shrink: 0;
 }
+/* Умеренная анимация появления при открытии (было: мгновенный display:none→flex без перехода) —
+   .modal-overlay сама не анимируется (общая для нескольких модалок), лёгкий fade+scale именно на
+   содержимом .journal-modal, включается через .modal-overlay.active (родитель уже активен к моменту
+   рендера содержимого). */
+@keyframes journalModalIn { from { opacity: 0; transform: scale(.97) translateY(6px); } to { opacity: 1; transform: none; } }
+.journal-modal { animation: journalModalIn .22s cubic-bezier(.16,1,.3,1) both; }
 .journal-modal {
-  background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px;
+  background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px;
   width: 920px; max-width: 94vw; height: 78vh; max-height: 720px; display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 24px 60px -20px rgba(0,0,0,.6);
 }
 .journal-modal-header {
   display: flex; align-items: center; justify-content: space-between; padding: 14px 18px;
   border-bottom: 1px solid var(--border-color); flex-shrink: 0;
+  background: linear-gradient(180deg, rgba(30,128,255,.06), transparent);
 }
 .journal-modal-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; }
 .journal-modal-title i { color: var(--blue); }
 .journal-modal-close {
   width: 28px; height: 28px; border-radius: 7px; border: 1px solid var(--border-color); background: transparent;
   color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center;
-  transition: background .15s, color .15s;
+  transition: background .15s, color .15s, transform .15s;
 }
-.journal-modal-close:hover { background: var(--bg-hover); color: #fff; }
+.journal-modal-close:hover { background: rgba(248,73,96,.12); color: var(--red); border-color: rgba(248,73,96,.3); transform: rotate(90deg); }
 .journal-modal-body { flex: 1; display: flex; min-height: 0; }
 .journal-chart-wrap { flex: 1; position: relative; min-width: 0; background: #131722; border-right: 1px solid var(--border-color); }
 #journalChartCanvas { width: 100%; height: 100%; display: block; }
@@ -923,13 +931,20 @@ body {
   position: absolute; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column;
   gap: 8px; color: var(--text-muted); font-size: 13px; text-align: center; padding: 20px;
 }
-.journal-trades-list { width: 260px; flex-shrink: 0; overflow-y: auto; padding: 10px; }
+.journal-trades-list { width: 270px; flex-shrink: 0; overflow-y: auto; padding: 10px; background: var(--bg-secondary); }
+@keyframes journalRowIn { from { opacity: 0; transform: translateX(6px); } to { opacity: 1; transform: none; } }
 .journal-trade-row {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 9px;
-  border-radius: 7px; font-size: 11.5px; font-family: var(--font-mono); margin-bottom: 5px; border-left: 3px solid transparent;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px;
+  border-radius: 8px; font-size: 11.5px; font-family: var(--font-mono); margin-bottom: 5px; border-left: 3px solid transparent;
+  border: 1px solid transparent; border-left-width: 3px; transition: transform .12s ease, border-color .12s ease, background .12s ease;
+  animation: journalRowIn .28s cubic-bezier(.16,1,.3,1) both; animation-delay: calc(var(--row-i, 0) * 18ms);
 }
-.journal-trade-row.buy { border-left-color: var(--green); background: rgba(0,192,118,.06); }
-.journal-trade-row.sell { border-left-color: var(--red); background: rgba(248,73,96,.06); }
+.journal-trade-row:hover { transform: translateX(-2px); border-color: rgba(255,255,255,.14); }
+.journal-trade-row.buy { border-left-color: var(--green); background: rgba(0,192,118,.07); }
+.journal-trade-row.buy:hover { background: rgba(0,192,118,.12); }
+.journal-trade-row.sell { border-left-color: var(--red); background: rgba(248,73,96,.07); }
+.journal-trade-row.sell:hover { background: rgba(248,73,96,.12); }
+.journal-trade-side { display: inline-flex; align-items: center; gap: 4px; }
 .journal-trade-side.buy { color: var(--green); font-weight: 700; }
 .journal-trade-side.sell { color: var(--red); font-weight: 700; }
 .journal-trade-time { color: var(--text-muted); font-size: 10px; margin-top: 2px; }
