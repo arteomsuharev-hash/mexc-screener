@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MEXC Screener</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<!-- HTML разметка без изменений -->
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="logo">
+      <div class="logo-icon" title="MEXC">
+        <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path fill="#FFFFFF" d="M6.5 40V8h8.2L24 24.6 33.3 8H41.5v32h-7.4V19.2L25.4 36.4h-2.8L13.9 19.2V40H6.5z"/>
+        </svg>
+      </div>
+      <div class="logo-text">
+        <div class="logo-title">MEXC SCREENER</div>
+        <div class="logo-sub">SPOT MARKET</div>
+      </div>
+    </div>
+    <nav class="nav">
+      <div class="nav-section">Платформа</div>
+      <a class="nav-item active" data-page="screener"><i class="ri-dashboard-line"></i><span>Скринер</span></a>
+      <a class="nav-item" data-page="favorites"><i class="ri-star-line"></i><span>Избранное</span><span class="nav-badge" id="navFavBadge">0</span></a>
+      <a class="nav-item" data-page="alerts"><i class="ri-notification-3-line"></i><span>Оповещения</span><span class="nav-badge" id="navAlertBadge">0</span></a>
+      <a class="nav-item" data-page="analytics"><i class="ri-bar-chart-box-line"></i><span>Аналитика</span></a>
+      <div class="nav-section">Аккаунт</div>
+      <a class="nav-item" data-page="account"><i class="ri-key-2-line"></i><span>Настройки аккаунта</span><span class="nav-dot" id="navAccountDot" title="Не подключено"></span></a>
+      <a class="nav-item" data-page="finres"><i class="ri-funds-line"></i><span>Финрез</span></a>
+      <div class="nav-section">Система</div>
+      <a class="nav-item" data-page="profiles"><i class="ri-user-line"></i><span>Профили</span></a>
+      <a class="nav-item" data-page="settings"><i class="ri-settings-3-line"></i><span>Настройки</span></a>
+      <a class="nav-item" data-action="download-app" id="downloadAppNav"><i class="ri-download-2-line"></i><span>Скачать приложение</span></a>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="conn-pill" id="sidebarConn"><span class="dot"></span><span id="sidebarConnText">Нет связи</span></div>
+      <div class="sidebar-action" id="langToggle"><i class="ri-global-line"></i><span>RU</span></div>
+      <div class="sidebar-action" id="themeToggle">
+        <i class="ri-moon-line"></i><span>Тёмная тема</span>
+        <div class="toggle-switch active" id="themeSwitch"></div>
+      </div>
+      <div class="sidebar-action" id="collapseBtn"><i class="ri-arrow-left-s-line"></i><span>Свернуть меню</span></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="topbar-left">
+        <div class="status-badge off" id="connectionStatus"><span class="status-dot"></span><span id="statusText">ПОДКЛЮЧЕНИЕ...</span></div>
+        <div class="topbar-metrics">
+          <div class="metric"><div class="metric-label">Пары USDT</div><div class="metric-value" id="metricCoins">0</div></div>
+          <div class="metric"><div class="metric-label">Показано</div><div class="metric-value" id="metricShown">0</div></div>
+          <div class="metric"><div class="metric-label">Сделок</div><div class="metric-value" id="metricTrades">0</div></div>
+          <div class="metric"><div class="metric-label">Время работы</div><div class="metric-value" id="metricUptime">00:00:00</div></div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div class="time-display" id="clock">--:--:--</div>
+      </div>
+    </div>
+
+    <div class="page active" id="page-screener">
+      <div class="filter-bar">
+        <div class="filter-group">
+          <span class="filter-label">Объём 24ч</span>
+          <select class="filter-select" id="filterVol24Op"><option value=">=" selected>&ge;</option><option value=">">&gt;</option><option value="<=">&le;</option><option value="<">&lt;</option></select>
+          <input class="filter-input wide" id="filterVol24" value="100000" placeholder="USDT">
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">Объём 5с</span>
+          <select class="filter-select" id="filterVol5Op"><option value=">=" selected>&ge;</option><option value=">">&gt;</option><option value="<=">&le;</option><option value="<">&lt;</option></select>
+          <input class="filter-input" id="filterVol5" value="" placeholder="любой">
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">Волат. 5с %</span>
+          <select class="filter-select" id="filterVol5sOp"><option value=">=" selected>&ge;</option><option value=">">&gt;</option><option value="<=">&le;</option><option value="<">&lt;</option></select>
+          <input class="filter-input" id="filterVol5s" value="" placeholder="любая">
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">Волат. 30с %</span>
+          <select class="filter-select" id="filterVol30sOp"><option value=">=" selected>&ge;</option><option value=">">&gt;</option><option value="<=">&le;</option><option value="<">&lt;</option></select>
+          <input class="filter-input" id="filterVol30s" value="" placeholder="любая">
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">Изм. 24ч %</span>
+          <select class="filter-select" id="filterChgOp"><option value=">=" selected>&ge;</option><option value=">">&gt;</option><option value="<=">&le;</option><option value="<">&lt;</option></select>
+          <input class="filter-input" id="filterChg" value="" placeholder="любое">
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">Цена</span>
+          <input class="filter-input" id="filterPriceFrom" value="" placeholder="от" style="width:80px">
+          <span class="filter-label">—</span>
+          <input class="filter-input" id="filterPriceTo" value="" placeholder="до" style="width:80px">
+        </div>
+        <label class="filter-live"><input type="checkbox" id="liveFilters" checked> Живые</label>
+        <span class="filter-count" id="filterCount">0 / 0</span>
+        <button class="filter-btn" id="resetFilters"><i class="ri-refresh-line"></i> Сбросить</button>
+        <button class="filter-btn primary" id="applyFilters"><i class="ri-filter-3-line"></i> Применить</button>
+        <button class="filter-btn" id="refreshData"><i class="ri-refresh-line"></i> Обновить</button>
+      </div>
+
+      <div class="content" id="screenerContent">
+        <div class="table-toolbar">
+          <div class="toolbar-left">
+            <select class="profile-select" id="profileSelect">
+              <optgroup label="Стандарт">
+                <option value="custom">Профиль: CUSTOM</option>
+                <option value="balanced" selected>Профиль: BALANCED</option>
+                <option value="aggressive">Профиль: AGGRESSIVE</option>
+                <option value="conservative">Профиль: CONSERVATIVE</option>
+                <option value="movers">Профиль: MOVERS</option>
+              </optgroup>
+              <optgroup label="Стратегии">
+                <option value="algo">Стратегия: АЛГОРИТМЫ</option>
+                <option value="ineff">Стратегия: НЕЭФФЕКТИВНОСТИ</option>
+                <option value="density">Стратегия: ПРОБОЙ ПЛОТНОСТЕЙ</option>
+              </optgroup>
+            </select>
+            <div class="view-toggle">
+              <button class="view-btn active" id="viewList" title="Таблица"><i class="ri-list-check"></i></button>
+              <button class="view-btn" id="viewGrid" title="Сетка"><i class="ri-grid-fill"></i></button>
+            </div>
+          </div>
+          <div class="toolbar-right">
+            <div class="search-box"><i class="ri-search-line"></i><input id="searchInput" placeholder="Поиск: BTC, PEPE..."></div>
+            <button class="view-btn" id="settingsBtn"><i class="ri-settings-4-line"></i></button>
+          </div>
+        </div>
+        <div class="strategy-hint-bar" id="strategyHintBar">
+          <i class="ri-flashlight-line"></i>
+          <span class="strategy-hint-badge" id="strategyHintBadge">—</span>
+          <span class="strategy-hint-text" id="strategyHintText"></span>
+          <span class="strategy-hint-count" id="strategyHintCount"></span>
+        </div>
+        <div class="table-container">
+          <div class="loading-overlay" id="loadingIndicator">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Загрузка рынка MEXC...</div>
+          </div>
+          <table class="data-table" id="coinTable">
+            <thead>
+              <tr>
+                <th style="width:30px"><i class="ri-star-line"></i></th>
+                <th style="width:30px">#</th>
+                <th data-sort="symbol">Монета</th>
+                <th data-sort="price">Цена</th>
+                <th data-sort="change24">Изм. 24ч</th>
+                <th data-sort="vol24" class="sorted-desc">Объём 24ч</th>
+                <th data-sort="vol5">Объём 5с</th>
+                <th data-sort="vol5s">Волат. 5с</th>
+                <th data-sort="vol30s">Волат. 30с</th>
+                <th data-sort="vol60s">Волат. 60с</th>
+                <th data-sort="signal">Сигнал</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+          <div class="grid-view" id="gridView"></div>
+        </div>
+      </div>
+
+      <div class="bottom-panel">
+        <div class="coin-info">
+          <div class="coin-header">
+            <div class="coin-icon" id="infoCoinIcon" style="background:#F7931A">B</div>
+            <div><div class="coin-title" id="infoCoinName">—</div></div>
+            <div class="coin-sub">MEXC Spot</div>
+          </div>
+          <div class="coin-price" id="infoPrice">--</div>
+          <div class="coin-change" id="infoChange">--</div>
+          <div class="info-grid">
+            <div class="info-item"><div class="info-label">Объём 24ч</div><div class="info-value" id="infoVol24">--</div></div>
+            <div class="info-item"><div class="info-label">Объём 5с</div><div class="info-value" id="infoVol5">--</div></div>
+            <div class="info-item"><div class="info-label">Изм. 24ч</div><div class="info-value" id="infoChange24">--</div></div>
+            <div class="info-item"><div class="info-label">High / Low</div><div class="info-value" id="infoHL">--</div></div>
+          </div>
+          <div class="my-orders-block" id="myOrdersBlock" style="display:none;">
+            <div class="info-label" style="margin-bottom:6px;">Мои открытые ордера</div>
+            <div id="myOrdersList" style="font-size:12px;color:var(--text-secondary);">—</div>
+          </div>
+        </div>
+        <div class="chart-area">
+          <div class="chart-header">
+            <div class="timeframes">
+              <button class="tf-btn" data-tf="1">1м</button>
+              <button class="tf-btn active" data-tf="5">5м</button>
+              <button class="tf-btn" data-tf="15">15м</button>
+              <button class="tf-btn" data-tf="30">30м</button>
+              <button class="tf-btn" data-tf="60">1ч</button>
+              <button class="tf-btn" data-tf="240">4ч</button>
+              <button class="tf-btn" data-tf="D">1д</button>
+            </div>
+            <div id="chartPrice" style="font-family:var(--font-mono);font-size:13px;font-weight:600">--</div>
+            <a id="openOnMexcLink" href="#" target="_blank" rel="noopener" class="filter-btn" style="display:none;text-decoration:none;white-space:nowrap;">
+              Открыть на бирже <i class="ri-external-link-line"></i>
+            </a>
+            <button id="copyForVatagaBtn" type="button" class="filter-btn" title="Скопировать тикер для вставки в поиск Vataga.terminal" style="display:none;">
+              <i class="ri-file-copy-line"></i>
+            </button>
+          </div>
+          <div class="coin-analysis-bar" id="coinAnalysisBar">
+            <i class="ri-radar-line"></i>
+            <span class="coin-analysis-badge" id="coinAnalysisBadge">—</span>
+            <span class="coin-analysis-text" id="coinAnalysisText"></span>
+          </div>
+          <div class="density-levels-bar" id="densityLevelsBar">
+            <i class="ri-crosshair-line"></i>
+            <span class="density-levels-label">Плотность</span>
+            <span class="density-levels-zone" id="densityZoneText">—</span>
+            <span class="density-levels-break" id="densityBreakText">—</span>
+            <span class="density-levels-hint">эвристика по тикам, не данные стакана</span>
+          </div>
+          <div class="chart-container">
+            <div id="tv_chart_container"></div>
+            <div class="chart-placeholder" id="chartPlaceholder">
+              <i class="ri-line-chart-line"></i>
+              <span>Выберите монету для графика MEXC</span>
+            </div>
+            <div class="own-chart-container" id="ownChartContainer">
+              <div class="own-chart-topbar" id="ownChartToolbar">
+                <div class="ochart-segmented">
+                  <button type="button" class="ochart-tool active" data-charttype="candles" title="Свечи"><i class="ri-stock-line"></i></button>
+                  <button type="button" class="ochart-tool" data-charttype="line" title="Линия"><i class="ri-line-chart-line"></i></button>
+                  <button type="button" class="ochart-tool" data-charttype="area" title="Область"><i class="ri-funds-line"></i></button>
+                </div>
+                <button type="button" class="ochart-pill" id="ochartMaToggle" title="Скользящие средние MA(7) / MA(25)"><i class="ri-pulse-line"></i><span>MA 7/25</span></button>
+                <span class="ochart-hint" id="ochartHint">Колесо мыши — масштаб, зажать и тащить — панорама</span>
+                <div class="ochart-topbar-right">
+                  <button type="button" class="ochart-tool" id="ochartClear" title="Очистить все построения"><i class="ri-delete-bin-line"></i></button>
+                  <button type="button" class="ochart-tool" id="ochartResetView" title="Сбросить масштаб"><i class="ri-fullscreen-line"></i></button>
+                </div>
+              </div>
+              <div class="ochart-body">
+                <div class="ochart-vtoolbar" id="ochartVToolbar">
+                  <button type="button" class="ochart-tool active" data-tool="cursor" title="Курсор / панорама (зажмите и тащите)"><i class="ri-cursor-line"></i></button>
+                  <span class="ochart-vsep"></span>
+                  <button type="button" class="ochart-tool" data-tool="hline" title="Уровень (горизонтальная линия)"><i class="ri-subtract-line"></i></button>
+                  <button type="button" class="ochart-tool" data-tool="trend" title="Отрезок (трендовая линия между двумя точками)"><i class="ri-slideshow-line"></i></button>
+                  <button type="button" class="ochart-tool" data-tool="ray" title="Луч (бесконечен в одну сторону)"><i class="ri-arrow-right-up-line"></i></button>
+                  <button type="button" class="ochart-tool" data-tool="xline" title="Прямая (бесконечна в обе стороны)"><i class="ri-expand-diagonal-line"></i></button>
+                  <button type="button" class="ochart-tool" data-tool="ruler" title="Линейка (замер цены/времени)"><i class="ri-ruler-2-line"></i></button>
+                </div>
+                <div class="own-chart-canvas-wrap" id="ownChartCanvasWrap">
+                  <div class="ochart-watermark" id="ochartWatermark"></div>
+                  <canvas id="ownCandleChart"></canvas>
+                  <button type="button" class="ochart-live-btn" id="ochartLiveBtn"><i class="ri-play-circle-line"></i> К живым данным</button>
+                  <div class="own-chart-empty" id="ownChartEmpty"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="right-panel">
+          <div class="trades-panel">
+            <div class="panel-title"><span>Последние сделки</span><span id="tradesCount">0</span></div>
+            <div class="trades-list" id="tradesList"></div>
+          </div>
+          <div class="algo-panel">
+            <div class="gauge-container">
+              <svg width="140" height="80" viewBox="0 0 140 80">
+                <path class="gauge-bg" d="M 10 70 A 60 60 0 0 1 130 70"></path>
+                <path class="gauge-fill" id="gaugeFill" d="M 10 70 A 60 60 0 0 1 130 70" stroke-dasharray="0 188.5"></path>
+              </svg>
+              <div class="gauge-text"><div class="gauge-value" id="gaugeValue">--</div><div class="gauge-label">из 100</div></div>
+            </div>
+            <div class="algo-status" id="algoStatus"><i class="ri-loader-line"></i> Ожидание данных</div>
+            <button class="algo-fav" id="addFav"><i class="ri-star-line"></i> Добавить в избранное</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="page" id="page-favorites">
+      <div style="padding:16px 20px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; gap:12px;">
+        <h2 style="font-size:18px; font-weight:600;"><i class="ri-star-fill" style="color:var(--orange);"></i> Избранные монеты</h2>
+        <span style="color:var(--text-muted);font-size:12px;" id="favCount">0 монет</span>
+      </div>
+      <div style="flex:1; overflow-y:auto;"><div id="favoritesContainer"></div></div>
+    </div>
+
+    <div class="page" id="page-alerts">
+      <div style="padding:16px 20px; border-bottom:1px solid var(--border-color);">
+        <h2 style="font-size:18px; font-weight:600;">Оповещения по движению 24ч</h2>
+      </div>
+      <div class="alerts-list" id="alertsList"></div>
+    </div>
+
+    <div class="page" id="page-analytics">
+      <div class="analytics-grid">
+        <div class="analytics-card"><h3>Топ рост 24ч</h3><div id="topGainers"></div></div>
+        <div class="analytics-card"><h3>Топ падение 24ч</h3><div id="topLosers"></div></div>
+        <div class="analytics-card"><h3>Лидер по объёму</h3><div id="topVolume"></div></div>
+        <div class="analytics-card"><h3>Волатильность 60с</h3><div id="topVolat"></div></div>
+      </div>
+    </div>
+
+    <div class="page" id="page-profiles">
+      <div style="padding:32px 40px; max-width:920px;">
+        <h3 style="font-size:18px;color:var(--text-primary);margin-bottom:8px;">Профили</h3>
+        <p style="color:var(--text-secondary); font-size:13px; line-height:1.6; margin-bottom:18px;">
+          Профиль в панели скринера сразу меняет набор фильтров (или включает готовую стратегию отбора)
+          и сортировку таблицы. Нажмите карточку ниже, чтобы применить профиль и перейти в скринер —
+          то же самое делает выпадающий список «Профиль» над таблицей. Активный профиль подсвечен синим.
+        </p>
+
+        <div class="profile-nav-pills">
+          <span class="profile-nav-pill" data-scroll-to="profileSectionStandard"><i class="ri-list-settings-line"></i> Стандарт</span>
+          <span class="profile-nav-pill" data-scroll-to="profileSectionStrategy"><i class="ri-magic-line"></i> Стратегии отбора</span>
+        </div>
+
+        <h4 id="profileSectionStandard" style="font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:8px 0 10px;">1. Стандарт</h4>
+        <div class="profile-grid">
+          <div class="profile-strategy-card" data-profile="balanced">
+            <span class="card-active-badge"><i class="ri-checkbox-circle-fill"></i> АКТИВЕН</span>
+            <div class="card-top"><span class="card-icon"><i class="ri-scales-3-line"></i></span><h4>Balanced</h4></div>
+            <p>Базовый профиль: объём 24ч от 100K USDT, без жёстких ограничений по волатильности.</p>
+          </div>
+          <div class="profile-strategy-card" data-profile="conservative">
+            <span class="card-active-badge"><i class="ri-checkbox-circle-fill"></i> АКТИВЕН</span>
+            <div class="card-top"><span class="card-icon"><i class="ri-shield-check-line"></i></span><h4>Conservative</h4></div>
+            <p>Только крупные, ликвидные пары — объём 24ч от 5M USDT.</p>
+          </div>
+          <div class="profile-strategy-card" data-profile="aggressive">
+            <span class="card-active-badge"><i class="ri-checkbox-circle-fill"></i> АКТИВЕН</span>
+            <div class="card-top"><span class="card-icon"><i class="ri-fire-line"></i></span><h4>Aggressive</h4></div>
+            <p>Мелкая ликвидность (от 20K USDT) с заметной волатильностью за 5с — больше шума, больше кандидатов.</p>
+          </div>
+          <div class="profile-strategy-card" data-profile="movers">
+            <span class="card-active-badge"><i class="ri-checkbox-circle-fill"></i> АКТИВЕН</span>
+            <div class="card-top"><span class="card-icon"><i class="ri-rocket-2-line"></i></span><h4>Movers</h4></div>
+            <p>Пары с сильным движением за 24ч (от +5%) при объёме от 50K USDT.</p>
+          </div>
+        </div>
+
+        <h4 id="profileSectionStrategy" style="font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:24px 0 10px;">Стратегии отбора (адаптивные пороги под текущий рынок)</h4>
+        <div class="profile-grid">
+          <div class="profile-strategy-card" data-profile="algo">
+            <span class="card-active-badge"><i class="ri-checkbox-circle-fill"></i> АКТИВЕН</span>
+            <div class="card-top"><span class="card-icon"><i class="ri-robot-2-line"></i></span><h4>2. Алгоритмы <span class="card-count" id="cardCountAlgo">— монет</span></h4></div>
+            <p>Заметный непрерывный оборот при сдержанном движении цены («много сделок — мало хода») — похоже на работу маркет-мейкера или бота, а не на органическую торговлю людьми.</p>
+          </div>
+          <div class="profile-strategy-card" data-profile="ineff">
+            <span class="card-active-badge"><i class="ri-checkbox-circle-fill"></i> АКТИВЕН</span>
+            <div class="card-top"><span class="card-icon"><i class="ri-scales-3-line"></i></span><h4>3. Неэффективности <span class="card-count" id="cardCountIneff">— монет</span></h4></div>
+            <p>Резкий сдвиг цены за последние 5с на средней/тонкой ликвидности — вероятный локальный перекос цены, интересный для быстрой отработки.</p>
+          </div>
+          <div class="profile-strategy-card" data-profile="density">
+            <span class="card-active-badge"><i class="ri-checkbox-circle-fill"></i> АКТИВЕН</span>
+            <div class="card-top"><span class="card-icon"><i class="ri-crosshair-line"></i></span><h4>4. Пробой плотностей <span class="card-count" id="cardCountDensity">— монет</span></h4></div>
+            <p>Объём за последние 5с в разы выше обычного темпа суток («объём проедают») + цена уже пошла — прокси пробоя плотности/крупной заявки с последующим импульсом.</p>
+          </div>
+        </div>
+
+        <div class="profile-strategy-note">
+          <strong>Важно про стратегии.</strong> У скринера нет подписки на стакан (order book depth) по всем
+          парам рынка одновременно — это архитектурно невозможно для тысяч пар сразу (у MEXC лимит ~30
+          потоков на одно WebSocket-соединение). Поэтому «Алгоритмы», «Неэффективности» и особенно
+          «Пробой плотностей» — это эвристики на тиковых данных (цена, объём 24ч, объём/скорость оборота и
+          волатильность за последние 5–60с), а не точный анализ лимитных стен из стакана. Когда активна
+          стратегия «Пробой плотностей» и открыт график монеты, над графиком показывается панель «Плотность»
+          с приблизительной ценовой зоной затишья перед всплеском и уровнем, где он произошёл — это тоже
+          эвристика по тикам, а не разметка настоящих стен из стакана. Перед входом в сделку стакан конкретной
+          пары стоит проверить вручную — кнопка «Открыть в терминале» у графика ведёт на реальный терминал
+          MEXC с полным стаканом.
+        </div>
+      </div>
+    </div>
+
+    <div class="page" id="page-settings">
+      <div style="padding:16px 20px; border-bottom:1px solid var(--border-color);">
+        <h2 style="font-size:18px; font-weight:600;">Настройки</h2>
+      </div>
+      <div class="settings-container">
+        <div class="settings-group">
+          <div class="settings-group-title">Отображение</div>
+          <div class="setting-row">
+            <span class="setting-label">Обновление аналитики и оповещений (сек)</span>
+            <div class="setting-control">
+              <select id="updateInterval">
+                <option value="5">5 сек</option>
+                <option value="10" selected>10 сек</option>
+                <option value="30">30 сек</option>
+                <option value="60">60 сек</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">Максимум пар в таблице</span>
+            <div class="setting-control"><input type="number" id="maxPairs" value="400" min="20" max="2000"></div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">Порог оповещения |изм. 24ч| (%)</span>
+            <div class="setting-control"><input type="number" id="priceAlertThreshold" value="8" step="0.1"></div>
+          </div>
+        </div>
+        <div class="settings-group">
+          <div class="settings-group-title">Управление</div>
+          <div class="setting-row">
+            <span class="setting-label">Сохранить настройки</span>
+            <div class="setting-control"><button class="settings-btn" id="saveSettings">Сохранить</button></div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">Очистить избранное</span>
+            <div class="setting-control"><button class="settings-btn danger" id="clearData">Очистить</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="page" id="page-account">
+      <div style="padding:16px 20px; border-bottom:1px solid var(--border-color);">
+        <h2 style="font-size:18px; font-weight:600;">Настройки аккаунта</h2>
+      </div>
+      <div class="settings-container">
+        <div class="acct-security-note">
+          <strong>Как это работает и что важно знать.</strong> У скринера нет своего сервера — ключи, которые
+          вы введёте, хранятся только в этом браузере/приложении (localStorage) и уходят напрямую в API MEXC,
+          подписанные прямо здесь, на вашем устройстве, ни через какие сторонние сервисы. Это значит:
+          1) создайте в MEXC отдельный API-ключ с правами только «Чтение» (Read), без «Вывод средств» и по
+          возможности без «Торговля» — скринер их не запрашивает; 2) любой, у кого есть доступ к этому
+          браузеру/компьютеру, потенциально может увидеть сохранённый ключ — не используйте на чужих/общих
+          устройствах. Вход по API НЕ логинит вас на сайте mexc.com — кнопка «Открыть в терминале» у графика
+          просто открывает страницу пары в новой вкладке; если вы отдельно залогинены на mexc.com
+          в этом же браузере, она откроется уже в вашем личном терминале.
+        </div>
+
+        <div class="settings-group">
+          <div class="settings-group-title">Подключение по API-ключу</div>
+          <div class="setting-row">
+            <span class="setting-label">Статус</span>
+            <div class="setting-control">
+              <span class="status-badge off" id="acctStatusBadge" style="position:static;"><span class="status-dot"></span><span id="acctStatusText">Не подключено</span></span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">API Key</span>
+            <div class="setting-control">
+              <input type="text" id="acctApiKey" class="acct-wide-input" placeholder="mx0v..." autocomplete="off" spellcheck="false">
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">Secret Key</span>
+            <div class="setting-control">
+              <div class="acct-input-wrap">
+                <input type="password" id="acctApiSecret" class="acct-wide-input" placeholder="••••••••••••••••" autocomplete="off" spellcheck="false">
+                <i class="ri-eye-line acct-toggle-eye" id="acctToggleEye"></i>
+              </div>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">Управление</span>
+            <div class="setting-control">
+              <button class="settings-btn" id="acctConnectBtn">Подключить</button>
+              <button class="settings-btn secondary" id="acctDisconnectBtn">Отключить</button>
+            </div>
+          </div>
+          <div class="setting-row" style="align-items:flex-start; flex-wrap:wrap;">
+            <span class="setting-label">Диагностика</span>
+            <div class="setting-control" style="flex-direction:column; align-items:flex-start; gap:8px; max-width:520px;">
+              <button class="settings-btn secondary" id="acctDiagBtn">Проверить подключение</button>
+              <pre id="acctDiagOutput" style="display:none; margin:0; font-size:11px; line-height:1.7; white-space:pre-wrap; word-break:break-word; background:var(--bg-primary); border:1px solid var(--border-color); border-radius:6px; padding:10px 12px; width:100%; color:var(--text-secondary); font-family:var(--font-mono);"></pre>
+            </div>
+          </div>
+          <div class="setting-row" id="acctWebOnlyNote" style="display:none; border-bottom:none;">
+            <span style="font-size:11.5px; color:var(--text-muted); line-height:1.5;">
+              <i class="ri-information-line"></i> Вы открыли веб-версию: некоторые биржи, включая MEXC, могут
+              не разрешать браузеру напрямую обращаться к приватному API (политика CORS на стороне биржи) —
+              тогда подключение выдаст ошибку сети. В desktop-приложении («Скачать приложение» в панели слева)
+              этот же запрос идёт в обход браузера и не подвержен этому ограничению.
+            </span>
+          </div>
+        </div>
+
+        <div class="acct-finres-note">
+          <i class="ri-funds-line"></i>
+          <div class="acct-finres-note-mid">
+            <div class="acct-finres-note-title">Баланс и аналитика — на странице «Финрез»</div>
+            <div class="acct-finres-note-text">После подключения ключа портфель, P&amp;L, календарь, риски и журнал сделок с точками входа/выхода отображаются там.</div>
+          </div>
+          <button type="button" class="settings-btn" id="acctGoFinresBtn"><i class="ri-arrow-right-line"></i> Открыть Финрез</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="page" id="page-finres">
+      <div class="finres-hero-bar" id="finresHeroBar"></div>
+      <div class="finres-layout">
+        <div class="finres-subnav">
+          <div class="finres-subnav-title">Аналитика</div>
+          <button type="button" class="finres-tab active" data-finres-tab="overview"><i class="ri-line-chart-line"></i><span>Обзор</span></button>
+          <button type="button" class="finres-tab" data-finres-tab="pnl"><i class="ri-calendar-2-line"></i><span>P&amp;L</span></button>
+          <button type="button" class="finres-tab" data-finres-tab="trades"><i class="ri-exchange-line"></i><span>Сделки</span></button>
+          <button type="button" class="finres-tab" data-finres-tab="risk"><i class="ri-shield-flash-line"></i><span>Риски</span></button>
+          <button type="button" class="finres-tab" data-finres-tab="assets"><i class="ri-pie-chart-2-line"></i><span>Активы</span></button>
+        </div>
+        <div class="finres-content" id="finresContent"></div>
+      </div>
+    </div>
+
+    <div class="bottom-bar">
+      <div class="bottom-bar-left">
+        <span class="status-item">Сервер: <span id="serverTime">--:--:--</span></span>
+        <span class="status-item">Обновлено: <span id="lastUpdate">—</span></span>
+        <span class="status-item">Источник: <span id="dataSource">MEXC</span></span>
+      </div>
+      <div class="bottom-bar-right">
+        <span class="status-item" id="dataStatus">Поток: ожидание</span>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <div class="modal-title" id="modalTitle">Информация</div>
+    <div class="modal-text" id="modalText"></div>
+    <button class="modal-btn" id="modalBtn">OK</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="journalModal">
+  <div class="journal-modal">
+    <div class="journal-modal-header">
+      <div class="journal-modal-title" id="journalModalTitle"><i class="ri-file-list-3-line"></i> Журнал сделок</div>
+      <button type="button" class="journal-modal-close" id="journalModalClose"><i class="ri-close-line"></i></button>
+    </div>
+    <div class="journal-modal-body">
+      <div class="journal-chart-wrap" id="journalChartWrap">
+        <canvas id="journalChartCanvas"></canvas>
+        <div class="journal-chart-empty" id="journalChartEmpty"></div>
+      </div>
+      <div class="journal-trades-list" id="journalTradesList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- protobufjs: MEXC's public v3 WebSocket market streams are Protobuf-only (spot@public.miniTickers.v3.api.pb),
+     the plain JSON channel names from the old wss://wbs.mexc.com/ws endpoint were retired 2025-08-04. -->
+<script src="https://cdn.jsdelivr.net/npm/protobufjs@8.8.0/dist/protobuf.min.js"></script>
+<script src="js/core-utils.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+{
+  "applicationId": "com.mexcscreener.app",
+  "version": "1.0.0",
+  "defaultMode": "window",
+  "port": 57821,
+  "documentRoot": "/resources/",
+  "url": "/",
+  "enableServer": true,
+  "enableNativeAPI": true,
+  "tokenSecurity": "none",
+  "logging": { "enabled": true, "writeToLogFile": false },
+  "nativeAllowList": ["app.*", "os.*", "window.*", "events.*", "filesystem.*"],
+  "modes": {
+    "window": {
+      "title": "MEXC Screener",
+      "width": 1600,
+      "height": 950,
+      "minWidth": 1100,
+      "minHeight": 650,
+      "icon": "/resources/icon.png",
+      "enableInspector": false,
+      "borderless": false
+    }
+  },
+  "cli": {
+    "binaryName": "mexc-screener",
+    "resourcesPath": "/resources/",
+    "extensionsPath": "/extensions/",
+    "clientLibrary": "/resources/js/neutralino.js",
+    "binaryVersion": "6.8.0",
+    "clientVersion": "6.8.0"
+  }
+}

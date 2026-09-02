@@ -1,0 +1,8 @@
+desktop/dist/
+desktop/resources/index.html
+desktop/resources/css/
+desktop/resources/js/app.js
+desktop/resources/js/core-utils.js
+MEXC-Screener-Windows.zip
+.DS_Store
+node_modules/
