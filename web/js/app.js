@@ -22,8 +22,8 @@ const APP_VERSION = (typeof window.NL_APPVERSION === 'string' && window.NL_APPVE
 // ЗАПОЛНИТЕ после создания GitHub-репозитория и первого релиза (см. docs/updates.md) — до этого
 // кнопка "Проверить обновления" будет честно показывать понятную ошибку, а не тихо молчать или
 // стучаться в несуществующий адрес.
-const UPDATE_REPO_OWNER = 'YOUR_GITHUB_USERNAME';
-const UPDATE_REPO_NAME = 'YOUR_REPO_NAME';
+const UPDATE_REPO_OWNER = 'arteomsuharev-hash';
+const UPDATE_REPO_NAME = 'mexc-screener';
 const UPDATE_REPO_CONFIGURED = UPDATE_REPO_OWNER !== 'YOUR_GITHUB_USERNAME' && UPDATE_REPO_NAME !== 'YOUR_REPO_NAME';
 const UPDATE_API_URL = 'https://api.github.com/repos/' + UPDATE_REPO_OWNER + '/' + UPDATE_REPO_NAME + '/releases/latest';
 
