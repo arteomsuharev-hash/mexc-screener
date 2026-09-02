@@ -272,8 +272,21 @@ body {
 .finres-stat-card {
   border: 1px solid var(--border-color); border-radius: 11px; padding: 15px 16px; background: var(--bg-secondary);
   transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+  animation: statTileIn .38s cubic-bezier(.16,1,.3,1) both;
 }
+.finres-stats-grid.no-anim .finres-stat-card { animation: none; }
+.finres-stat-card:nth-child(1) { animation-delay: 0ms; }
+.finres-stat-card:nth-child(2) { animation-delay: 45ms; }
+.finres-stat-card:nth-child(3) { animation-delay: 90ms; }
+.finres-stat-card:nth-child(4) { animation-delay: 135ms; }
+.finres-stat-card:nth-child(5) { animation-delay: 180ms; }
+.finres-stat-card:nth-child(6) { animation-delay: 225ms; }
 .finres-stat-card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,.16); box-shadow: 0 8px 22px -14px rgba(0,0,0,.5); }
+/* Умеренная подсветка карточки по знаку показателя — та же идея, что у .stat-tile на "Настройки аккаунта" */
+.finres-stat-card.up { border-color: rgba(0,192,118,.3); box-shadow: 0 0 18px -12px rgba(0,192,118,.55); }
+.finres-stat-card.up:hover { border-color: rgba(0,192,118,.5); box-shadow: 0 8px 24px -14px rgba(0,192,118,.4); }
+.finres-stat-card.down { border-color: rgba(248,73,96,.3); box-shadow: 0 0 18px -12px rgba(248,73,96,.55); }
+.finres-stat-card.down:hover { border-color: rgba(248,73,96,.5); box-shadow: 0 8px 24px -14px rgba(248,73,96,.4); }
 .finres-stat-label { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; }
 .finres-stat-value { font-size: 21px; font-weight: 700; font-family: var(--font-mono); color: var(--text-primary); line-height: 1.1; }
 .finres-stat-value.up { color: var(--green); }
@@ -352,6 +365,13 @@ body {
   color: var(--orange); font-size: 12px; line-height: 1.4;
 }
 .finres-stale-banner i { font-size: 15px; flex-shrink: 0; }
+
+.finres-warn-banner {
+  display: flex; align-items: center; gap: 8px; padding: 9px 14px; margin-bottom: 14px;
+  background: rgba(248,73,96,.08); border: 1px solid rgba(248,73,96,.3); border-radius: 8px;
+  color: var(--red); font-size: 12px; line-height: 1.4;
+}
+.finres-warn-banner i { font-size: 15px; flex-shrink: 0; }
 
 .topbar {
   height: var(--header-height); background: var(--bg-secondary);

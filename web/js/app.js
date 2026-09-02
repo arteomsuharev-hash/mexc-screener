@@ -4000,7 +4000,7 @@ function renderFinresOverviewContent(el, data, animate) {
   }).join('');
 
   function statCard(label, valueHtml, cls, subHtml) {
-    return '<div class="finres-stat-card"><div class="finres-stat-label">' + label + '</div>' +
+    return '<div class="finres-stat-card' + (cls ? ' ' + cls : '') + '"><div class="finres-stat-label">' + label + '</div>' +
       '<div class="finres-stat-value' + (cls ? ' ' + cls : '') + '">' + valueHtml + '</div>' +
       (subHtml ? '<div class="finres-stat-sub ' + (cls || 'muted') + '">' + subHtml + '</div>' : '') + '</div>';
   }
@@ -4033,7 +4033,7 @@ function renderFinresOverviewContent(el, data, animate) {
       '</div>' +
     '</div>' +
     finresStaleErrorBannerHtml(data) +
-    '<div class="finres-stats-grid">' + statsHtml + '</div>' +
+    '<div class="finres-stats-grid' + (animate ? '' : ' no-anim') + '">' + statsHtml + '</div>' +
     '<div class="finres-chart-row">' +
       '<div class="finres-card">' +
         '<div class="finres-card-head"><span class="finres-card-title">Динамика PnL</span>' +
@@ -4130,13 +4130,15 @@ function finresStatPlaceholder(n) {
 // Компактная строка из 6 показателей по РЕАЛИЗОВАННЫМ сделкам (Общий/Средний PnL, Лучший/Худший
 // день, Profit Factor, Винрейт) над календарём вкладки "P&L" — использует тот же кэш
 // finresLoadRealized(), что и "Обзор", без дублирующих запросов к MEXC.
-function renderFinresPnlStats() {
+function renderFinresPnlStats(animate) {
+  animate = animate !== false;
   finresLoadRealized(false).then(function (data) {
     if (finresTab !== 'pnl') return;
     const grid = document.getElementById('finresPnlStatsGrid');
     if (!grid) return;
+    grid.classList.toggle('no-anim', !animate);
     function statCard(label, valueHtml, cls, subHtml) {
-      return '<div class="finres-stat-card"><div class="finres-stat-label">' + label + '</div>' +
+      return '<div class="finres-stat-card' + (cls ? ' ' + cls : '') + '"><div class="finres-stat-label">' + label + '</div>' +
         '<div class="finres-stat-value' + (cls ? ' ' + cls : '') + '">' + valueHtml + '</div>' +
         (subHtml ? '<div class="finres-stat-sub ' + (cls || 'muted') + '">' + subHtml + '</div>' : '') + '</div>';
     }
@@ -4666,7 +4668,7 @@ function computeFinresTradeStats(trades) {
 // первая строка (концентрация портфеля, не требует сделок) отрисовывается мгновенно, а эта — following.
 function renderFinresRiskTradeStatsHtml(data, loading) {
   function statCard(label, valueHtml, cls, subHtml) {
-    return '<div class="finres-stat-card"><div class="finres-stat-label">' + label + '</div>' +
+    return '<div class="finres-stat-card' + (cls ? ' ' + cls : '') + '"><div class="finres-stat-label">' + label + '</div>' +
       '<div class="finres-stat-value' + (cls ? ' ' + cls : '') + '">' + valueHtml + '</div>' +
       (subHtml ? '<div class="finres-stat-sub ' + (cls || 'muted') + '">' + subHtml + '</div>' : '') + '</div>';
   }
@@ -4693,7 +4695,7 @@ function renderFinresRiskTradeStatsHtml(data, loading) {
 // finresLoadRealized(), т.к. openPositions считается там же по реальной истории /api/v3/myTrades.
 function renderFinresOpenRiskHtml(data, loading) {
   function statCard(label, valueHtml, cls, subHtml) {
-    return '<div class="finres-stat-card"><div class="finres-stat-label">' + label + '</div>' +
+    return '<div class="finres-stat-card' + (cls ? ' ' + cls : '') + '"><div class="finres-stat-label">' + label + '</div>' +
       '<div class="finres-stat-value' + (cls ? ' ' + cls : '') + '">' + valueHtml + '</div>' +
       (subHtml ? '<div class="finres-stat-sub ' + (cls || 'muted') + '">' + subHtml + '</div>' : '') + '</div>';
   }
@@ -4726,7 +4728,7 @@ function renderFinresRiskTab(el, animate) {
   const dd = computeFinresMaxDrawdown(hist);
 
   function statCard(label, valueHtml, cls, subHtml) {
-    return '<div class="finres-stat-card"><div class="finres-stat-label">' + label + '</div>' +
+    return '<div class="finres-stat-card' + (cls ? ' ' + cls : '') + '"><div class="finres-stat-label">' + label + '</div>' +
       '<div class="finres-stat-value' + (cls ? ' ' + cls : '') + '">' + valueHtml + '</div>' +
       (subHtml ? '<div class="finres-stat-sub ' + (cls || 'muted') + '">' + subHtml + '</div>' : '') + '</div>';
   }
@@ -4739,7 +4741,7 @@ function renderFinresRiskTab(el, animate) {
     statCard('Активов в портфеле', String(priced.length), null, 'учтено в общей стоимости');
 
   const warnHtml = conc.top1 && conc.top1Pct >= 50
-    ? '<div class="finres-empty" style="margin-top:0;margin-bottom:14px"><i class="ri-alert-line"></i> Высокая концентрация: ' + conc.top1.asset + ' занимает ' + conc.top1Pct.toFixed(1) + '% портфеля — просадка по этой монете сильно повлияет на весь баланс.</div>'
+    ? '<div class="finres-warn-banner"><i class="ri-alert-line"></i> Высокая концентрация: ' + conc.top1.asset + ' занимает ' + conc.top1Pct.toFixed(1) + '% портфеля — просадка по этой монете сильно повлияет на весь баланс.</div>'
     : '';
 
   const topRowsHtml = priced.slice(0, 10).map(function (r) {
@@ -4760,12 +4762,12 @@ function renderFinresRiskTab(el, animate) {
     '<div class="finres-tab-body' + (animate ? ' finres-anim-in' : '') + '">' +
     '<div class="finres-head"><h2>Риски</h2></div>' +
     '<div class="finres-card-title" style="margin-bottom:10px">Концентрация портфеля</div>' +
-    '<div class="finres-stats-grid">' + statsHtml + '</div>' +
+    '<div class="finres-stats-grid' + (animate ? '' : ' no-anim') + '">' + statsHtml + '</div>' +
     warnHtml +
     '<div class="finres-card-title" style="margin:18px 0 10px">Показатели по сделкам</div>' +
-    '<div class="finres-stats-grid" id="finresRiskTradeStats">' + renderFinresRiskTradeStatsHtml(null, true) + '</div>' +
+    '<div class="finres-stats-grid' + (animate ? '' : ' no-anim') + '" id="finresRiskTradeStats">' + renderFinresRiskTradeStatsHtml(null, true) + '</div>' +
     '<div class="finres-card-title" style="margin:18px 0 10px">Открытые позиции</div>' +
-    '<div class="finres-stats-grid" id="finresOpenRiskStats">' + renderFinresOpenRiskHtml(null, true) + '</div>' +
+    '<div class="finres-stats-grid' + (animate ? '' : ' no-anim') + '" id="finresOpenRiskStats">' + renderFinresOpenRiskHtml(null, true) + '</div>' +
     '<div class="finres-table-card" style="margin-top:18px"><div class="finres-table-title">Концентрация по активам (топ-10)</div>' +
     '<div class="balance-asset-list no-anim">' + (topRowsHtml || '<div class="balance-earnings-empty">Нет ценообразованных активов.</div>') + '</div></div>' +
     '</div>';
@@ -5046,7 +5048,7 @@ function lightRefreshFinresContent() {
   } else if (finresTab === 'pnl') {
     renderBalanceCalendar(false);
     renderFinresPnlEarnings();
-    renderFinresPnlStats();
+    renderFinresPnlStats(false);
   } else if (finresTab === 'trades') {
     finresLoadRealized(false).then(function (data) {
       if (finresTab !== 'trades') return;
@@ -5305,6 +5307,7 @@ async function finresLoadRealizedCore() {
 let finresLoadPromise = null;
 
 async function finresLoadRealized(force) {
+  if (__designTestMode) return finresRealized;
   if (finresLoadPromise) return finresLoadPromise;
   if (!force && finresRealized && !finresRealized.loading && (Date.now() - finresRealized.loadedAt) < 60000) return finresRealized;
   // Пока грузим — не стираем уже показанные данные в пустоту (раньше именно так и делали), а просто
@@ -5430,9 +5433,15 @@ function disconnectMexcAccount() {
   if (block) block.style.display = 'none';
 }
 
+// Только для __fakeFinresLogin (ручная проверка дизайна без реального API-ключа) — реальные сетевые
+// попытки с пустым секретом просто сыпали бы ошибками HMAC и затирали тестовые данные. В обычной
+// работе всегда false, ни на что не влияет.
+let __designTestMode = false;
+
 let balanceRefreshInFlight = false;
 let balanceRefreshFailStreak = 0;
 function refreshAccountBalancesIfConnected() {
+  if (__designTestMode) return Promise.resolve();
   if (!accountConnected || balanceRefreshInFlight) return Promise.resolve(); // не копим параллельные запросы, если предыдущий ещё не ответил
   balanceRefreshInFlight = true;
   // return — чтобы вызывающий код (например, кнопка «Обновить» в Финрезе) мог дождаться реального
@@ -6033,6 +6042,56 @@ window.__injectFakePatternEvent = function (partial) {
 };
 
 window.__tableHoverFreeze = function () { return tableHoverFreezeSymbol; };
+
+// Только для ручной проверки дизайна страницы «Финрез» без реального подключённого аккаунта (нет
+// смысла просить настоящий API-ключ ради вёрстки) — подставляет правдоподобные тестовые баланс и
+// историю сделок (по РЕАЛЬНЫМ живым ценам монет, которые уже есть в coinMap) и переключает на
+// страницу «Финрез». НЕ вызывается production-кодом, ничего не сохраняет между сессиями.
+window.__fakeFinresLogin = function () {
+  __designTestMode = true;
+  accountConnected = true;
+  setAccountStatus('connected');
+
+  const assets = [
+    { asset: 'BTC', qty: 0.15 }, { asset: 'ETH', qty: 2.4 }, { asset: 'SOL', qty: 18 },
+    { asset: 'XRP', qty: 500 }, { asset: 'DOGE', qty: 12000 }, { asset: 'USDT', qty: 850 }
+  ];
+  renderAccountBalances(assets.map(function (a) { return { asset: a.asset, free: String(a.qty), locked: '0' }; }));
+
+  if (lastBalanceState) {
+    const now = Date.now();
+    const hist = [];
+    let v = lastBalanceState.total * 0.82;
+    for (let i = 30; i >= 1; i--) {
+      v *= (1 + (Math.random() - 0.45) * 0.03);
+      hist.push({ t: now - i * 24 * 3600 * 1000, v: Math.max(v, 100), a: {} });
+    }
+    hist.push({ t: now, v: lastBalanceState.total, a: {} });
+    lastBalanceState.hist = hist;
+  }
+
+  const symbols = ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE'];
+  const trades = [];
+  const now2 = Date.now();
+  for (let i = 0; i < 140; i++) {
+    const daysAgo = Math.floor(Math.random() * 60);
+    const t = now2 - daysAgo * 24 * 3600 * 1000 - Math.floor(Math.random() * 24 * 3600 * 1000);
+    const asset = symbols[Math.floor(Math.random() * symbols.length)];
+    const win = Math.random() > 0.42;
+    const cost = 50 + Math.random() * 950;
+    const pnl = win ? cost * (0.02 + Math.random() * 0.15) : -cost * (0.01 + Math.random() * 0.10);
+    trades.push({ time: t, asset: asset, pnl: pnl, price: 1, qty: 1, cost: cost });
+  }
+  trades.sort(function (a, b) { return a.time - b.time; });
+  const openPositions = [
+    { asset: 'ETH', qty: 0.8, avgCost: 2200, currentPrice: mexcUsdtPrice('ETH') || 2380, costBasis: 1760, value: 1904, unrealizedPnl: 144, unrealizedPct: 8.18 },
+    { asset: 'SOL', qty: 10, avgCost: 105, currentPrice: mexcUsdtPrice('SOL') || 98, costBasis: 1050, value: 980, unrealizedPnl: -70, unrealizedPct: -6.67 }
+  ];
+  finresRealized = { trades: trades, bySymbol: {}, openPositions: openPositions, loadedAt: Date.now(), loading: false, error: null };
+
+  switchPage('finres');
+  console.log('[fake] Финрез: total=' + (lastBalanceState ? lastBalanceState.total.toFixed(2) : '?') + ', trades=' + trades.length);
+};
 
 console.log('MEXC Screener запущен (MEXC Spot WS v3, protobuf)');
 
