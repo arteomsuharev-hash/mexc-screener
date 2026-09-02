@@ -27,6 +27,233 @@ const UPDATE_REPO_NAME = 'mexc-screener';
 const UPDATE_REPO_CONFIGURED = UPDATE_REPO_OWNER !== 'YOUR_GITHUB_USERNAME' && UPDATE_REPO_NAME !== 'YOUR_REPO_NAME';
 const UPDATE_API_URL = 'https://api.github.com/repos/' + UPDATE_REPO_OWNER + '/' + UPDATE_REPO_NAME + '/releases/latest';
 
+// ============================================
+// Локализация (RU/EN) — переключатель "RU"/"EN" в подвале сайдбара (langToggle).
+// Русский — язык исходного кода (все строковые литералы в HTML/JS написаны на нём), поэтому здесь
+// только словарь EN-переводов по ключу — точному русскому тексту (или, для многострочных абзацев,
+// стабильному ключу из data-i18n-key — сравнивать textContent длинных абзацев на равенство ненадёжно
+// из-за пробелов/переносов строк в самой разметке). t() возвращает перевод, если язык = en и он
+// есть в словаре, иначе — исходный текст без изменений (безопасный fallback, а не пустая строка).
+const I18N_LANG_KEY = 'mexc_lang';
+let currentLang = 'ru';
+try { currentLang = localStorage.getItem(I18N_LANG_KEY) === 'en' ? 'en' : 'ru'; } catch (e) {}
+
+function t(text) {
+  if (currentLang !== 'en' || !text) return text;
+  return I18N_EN[text] || text;
+}
+
+// Многострочные абзацы (data-i18n-key) хранят готовый HTML (с <strong> и т.п. — те же теги, что и в
+// исходной разметке), а не голый текст — применяются через innerHTML, не textContent.
+const I18N_EN_BLOCKS = {
+  'patterns-watchlist-note':
+    '<strong>About deep analysis.</strong> Unlike "Profiles" (a ticker-based heuristic across the ' +
+    'whole market at once), pattern detectors work on real trades and the order book of specific ' +
+    'coins — but that means a separate WS connection PER COIN, and thousands of them can\'t ' +
+    'physically be open at once. So deep analysis only runs on a bounded, constantly-updated ' +
+    'watchlist (by default up to the 20 most active coins right now + the open coin/favorites) — not ' +
+    'the whole market. Coins outside the watchlist won\'t appear here, no matter how interesting they ' +
+    'look on the "Screener" tab.',
+  'patterns-validation-note':
+    'Honest overfitting protection (there\'s no historical tick/order-book archive to backtest against — ' +
+    'see README): compares a detector\'s win rate on "old" (closed more than 24h ago) vs. "fresh" ' +
+    '(closed more recently) signals, counting only outcomes that have ALREADY RESOLVED (≥2 minutes ' +
+    'since detection). A noticeable drop is a reason not to trust that detector blindly right now.',
+  'profiles-strategy-note':
+    '<strong>About the strategies.</strong> The screener has no order-book-depth subscription across every ' +
+    'market pair at once — that\'s architecturally impossible for thousands of pairs simultaneously ' +
+    '(MEXC caps ~30 streams per WebSocket connection). So "Algorithms", "Inefficiencies" and especially ' +
+    '"Density Breakout" are heuristics on tick data (price, 24h volume, turnover volume/speed, and ' +
+    'volatility over the last 5–60s), not a precise read of real limit-order walls. When the "Density ' +
+    'Breakout" strategy is active and a coin\'s chart is open, a "Density" panel appears above the chart ' +
+    'showing an approximate calm price zone before the spike and the level where it happened — that\'s ' +
+    'also a tick-based heuristic, not a map of real order-book walls. Before entering a trade, check that ' +
+    'pair\'s real order book manually — the "Open in terminal" button by the chart links to the real MEXC ' +
+    'terminal with the full order book.',
+  'acct-security-note':
+    '<strong>How this works and what matters.</strong> The screener has no server of its own — the keys you ' +
+    'enter are stored only in this browser/app (localStorage) and go straight to the MEXC API, signed ' +
+    'right here on your device, never through any third-party service. This means: 1) create a separate ' +
+    'API key in MEXC with Read-only permissions, without Withdraw and ideally without Trade — the ' +
+    'screener never requests those; 2) anyone with access to this browser/computer could potentially see ' +
+    'the saved key — don\'t use it on shared/public devices. Signing in via API does NOT log you into ' +
+    'mexc.com — the "Open in terminal" button by the chart just opens that pair\'s page in a new tab; if ' +
+    'you\'re separately logged into mexc.com in this same browser, it\'ll open in your own terminal.',
+  'acct-weblonly-note':
+    'You\'re using the web version: some exchanges, including MEXC, may not allow the browser to call ' +
+    'their private API directly (a CORS policy on the exchange\'s side) — the connection would then fail ' +
+    'with a network error. In the desktop app this same request bypasses the browser and isn\'t subject ' +
+    'to that restriction.',
+  'acct-finres-note-text':
+    'Once a key is connected, your portfolio, P&amp;L, calendar, risk and a trade journal with entry/exit ' +
+    'points show up there.'
+};
+
+function applyStaticI18n() {
+  document.documentElement.lang = currentLang;
+  document.querySelectorAll('[data-i18n-key]').forEach(function (el) {
+    const key = el.getAttribute('data-i18n-key');
+    if (!el.dataset.i18nSrcHtml) el.dataset.i18nSrcHtml = el.innerHTML;
+    el.innerHTML = (currentLang === 'en' && I18N_EN_BLOCKS[key]) ? I18N_EN_BLOCKS[key] : el.dataset.i18nSrcHtml;
+  });
+  document.querySelectorAll('[data-i18n]:not([data-i18n-key])').forEach(function (el) {
+    // Пробелы нормализуем (несколько пробелов/переносов строк из отступов разметки -> один пробел) —
+    // иначе многострочный текст в HTML (с отступами) не совпадёт по ключу со словарной строкой,
+    // набранной в JS одной строкой без переносов.
+    if (!el.dataset.i18nSrc) el.dataset.i18nSrc = el.textContent.trim().replace(/\s+/g, ' ');
+    el.textContent = t(el.dataset.i18nSrc);
+  });
+  document.querySelectorAll('[data-i18n-title]').forEach(function (el) {
+    if (!el.dataset.i18nTitleSrc) el.dataset.i18nTitleSrc = el.getAttribute('title') || '';
+    el.setAttribute('title', t(el.dataset.i18nTitleSrc));
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(function (el) {
+    if (!el.dataset.i18nPhSrc) el.dataset.i18nPhSrc = el.getAttribute('placeholder') || '';
+    el.setAttribute('placeholder', t(el.dataset.i18nPhSrc));
+  });
+  document.querySelectorAll('[data-i18n-label]').forEach(function (el) {
+    if (!el.dataset.i18nLabelSrc) el.dataset.i18nLabelSrc = el.getAttribute('label') || '';
+    el.setAttribute('label', t(el.dataset.i18nLabelSrc));
+  });
+  // data-i18n-prefix="Исходный текст: " — переводит только ВЕДУЩИЙ текстовый узел элемента, не
+  // трогая дочерние элементы (например "Сервер: <span id=...>12:34:56</span>" — вложенный span с
+  // живым значением остаётся нетронутым, меняется только текст "Сервер: " перед ним).
+  document.querySelectorAll('[data-i18n-prefix]').forEach(function (el) {
+    const src = el.getAttribute('data-i18n-prefix');
+    const firstNode = el.firstChild;
+    if (firstNode && firstNode.nodeType === Node.TEXT_NODE) firstNode.nodeValue = t(src);
+  });
+}
+
+const I18N_EN = {
+  // --- Сайдбар ---
+  'Платформа': 'Platform', 'Скринер': 'Screener', 'Избранное': 'Favorites', 'Оповещения': 'Alerts',
+  'Аналитика': 'Analytics', 'Аккаунт': 'Account', 'Настройки аккаунта': 'Account settings',
+  'Не подключено': 'Not connected', 'Финрез': 'Finance', 'Система': 'System', 'Паттерны': 'Patterns',
+  'Профили': 'Profiles', 'Настройки': 'Settings', 'Нет связи': 'No connection', 'Тёмная тема': 'Dark theme',
+  'Свернуть меню': 'Collapse menu',
+  // --- Топбар ---
+  'ПОДКЛЮЧЕНИЕ...': 'CONNECTING...', 'Пары USDT': 'USDT pairs', 'Показано': 'Shown', 'Сделок': 'Trades',
+  'Время работы': 'Uptime',
+  // --- Фильтры ---
+  'Объём 24ч': '24h Volume', 'Объём 5с': '5s Volume', 'Волат. 5с %': '5s Volat. %', 'Волат. 30с %': '30s Volat. %',
+  'Изм. 24ч %': '24h Chg %', 'Цена': 'Price', 'любой': 'any', 'любая': 'any', 'любое': 'any', 'от': 'from', 'до': 'to',
+  'Живые': 'Live', 'Сбросить': 'Reset', 'Применить': 'Apply', 'Обновить': 'Refresh',
+  // --- Профиль/стратегия select ---
+  'Профиль: CUSTOM': 'Profile: CUSTOM', 'Профиль: BALANCED': 'Profile: BALANCED',
+  'Профиль: AGGRESSIVE': 'Profile: AGGRESSIVE', 'Профиль: CONSERVATIVE': 'Profile: CONSERVATIVE',
+  'Профиль: MOVERS': 'Profile: MOVERS', 'Стратегия: АЛГОРИТМЫ': 'Strategy: ALGORITHMS',
+  'Стратегия: НЕЭФФЕКТИВНОСТИ': 'Strategy: INEFFICIENCIES', 'Стратегия: ПРОБОЙ ПЛОТНОСТЕЙ': 'Strategy: DENSITY BREAKOUT',
+  'Стандарт': 'Standard', 'Стратегии': 'Strategies',
+  'Таблица': 'Table', 'Сетка': 'Grid', 'Поиск: BTC, PEPE...': 'Search: BTC, PEPE...',
+  'Загрузка рынка MEXC...': 'Loading MEXC market...',
+  // --- Таблица ---
+  'Монета': 'Coin', 'Изм. 24ч': '24h Chg', 'Волат. 5с': '5s Volat.', 'Волат. 30с': '30s Volat.',
+  'Волат. 60с': '60s Volat.', 'Сигнал': 'Signal',
+  // --- Инфо-панель монеты ---
+  'Мои открытые ордера': 'My open orders',
+  // --- Таймфреймы ---
+  '1м': '1m', '5м': '5m', '15м': '15m', '30м': '30m', '1ч': '1h', '4ч': '4h', '1д': '1D',
+  // --- График ---
+  'Открыть на бирже': 'Open on exchange',
+  'Скопировать тикер для вставки в поиск Vataga.terminal': 'Copy ticker to paste into Vataga.terminal search',
+  'Переключить между TradingView и своим графиком (по своим данным MEXC)': 'Switch between TradingView and the built-in chart (own MEXC data)',
+  'Свой график': 'Built-in chart', 'Плотность': 'Density', 'эвристика по тикам, не данные стакана': 'tick-based heuristic, not order-book data',
+  'Выберите монету для графика MEXC': 'Select a coin for the MEXC chart',
+  'Свечи': 'Candles', 'Линия': 'Line', 'Область': 'Area', 'Индикаторы': 'Indicators',
+  'Показать/скрыть': 'Show/hide', 'Объём': 'Volume',
+  'Колесо мыши — масштаб, зажать и тащить — панорама': 'Mouse wheel — zoom, click and drag — pan',
+  'Настройки графика (индикаторы)': 'Chart settings (indicators)', 'Сохранить скриншот графика': 'Save chart screenshot',
+  'Полноэкранный режим': 'Fullscreen', 'Очистить все построения': 'Clear all drawings', 'Сбросить масштаб': 'Reset zoom',
+  'Курсор / панорама (зажмите и тащите)': 'Cursor / pan (click and drag)', 'Уровень (горизонтальная линия)': 'Level (horizontal line)',
+  'Отрезок (трендовая линия между двумя точками)': 'Segment (trendline between two points)',
+  'Луч (бесконечен в одну сторону)': 'Ray (infinite in one direction)',
+  'Прямая (бесконечна в обе стороны)': 'Line (infinite both directions)', 'Линейка (замер цены/времени)': 'Ruler (measure price/time)',
+  'К живым данным': 'Jump to live',
+  // --- Правая панель ---
+  'Стакан': 'Order book', 'Стакан недоступен — монета не в списке глубокого анализа (см. «Паттерны»)': 'Order book unavailable — coin isn\'t in the deep-analysis watchlist (see "Patterns")',
+  'Последние сделки': 'Recent trades', 'из 100': 'of 100', 'Ожидание данных': 'Waiting for data',
+  'Добавить в избранное': 'Add to favorites',
+  // --- Избранное/Оповещения/Аналитика ---
+  'Избранные монеты': 'Favorite coins', 'Оповещения по движению 24ч': '24h move alerts',
+  'Топ рост 24ч': 'Top 24h gainers', 'Топ падение 24ч': 'Top 24h losers', 'Лидер по объёму': 'Volume leader',
+  'Волатильность 60с': '60s volatility',
+  // --- Паттерны ---
+  'Наполняется...': 'Filling...', 'Детекторы': 'Detectors',
+  '(отключённые не считаются и не расходуют бюджет вычислений)': '(disabled ones don\'t count and don\'t spend compute budget)',
+  'Последние события (предупреждения/ошибки)': 'Recent events (warnings/errors)', 'Обнаруженные паттерны': 'Detected patterns',
+  'Валидация детекторов': 'Detector validation', 'Детектор': 'Detector', 'Винрейт (старые)': 'Win rate (old)',
+  'Винрейт (свежие)': 'Win rate (fresh)', 'Статус': 'Status',
+  // --- Профили ---
+  'Профиль в панели скринера сразу меняет набор фильтров (или включает готовую стратегию отбора) и сортировку таблицы. Нажмите карточку ниже, чтобы применить профиль и перейти в скринер — то же самое делает выпадающий список «Профиль» над таблицей. Активный профиль подсвечен синим.':
+    'A profile in the screener panel instantly swaps the filter set (or turns on a ready-made selection strategy) and the table sort order. Click a card below to apply the profile and jump to the screener — the "Profile" dropdown above the table does the same thing. The active profile is highlighted in blue.',
+  'Стратегии отбора': 'Selection strategies', '1. Стандарт': '1. Standard', 'АКТИВЕН': 'ACTIVE',
+  'Базовый профиль: объём 24ч от 100K USDT, без жёстких ограничений по волатильности.': 'Base profile: 24h volume from 100K USDT, no hard volatility limits.',
+  'Только крупные, ликвидные пары — объём 24ч от 5M USDT.': 'Large, liquid pairs only — 24h volume from 5M USDT.',
+  'Мелкая ликвидность (от 20K USDT) с заметной волатильностью за 5с — больше шума, больше кандидатов.': 'Thin liquidity (from 20K USDT) with noticeable 5s volatility — more noise, more candidates.',
+  'Пары с сильным движением за 24ч (от +5%) при объёме от 50K USDT.': 'Pairs with a strong 24h move (from +5%) at volume from 50K USDT.',
+  'Стратегии отбора (адаптивные пороги под текущий рынок)': 'Selection strategies (thresholds adapt to the current market)',
+  '2. Алгоритмы': '2. Algorithms',
+  'Заметный непрерывный оборот при сдержанном движении цены («много сделок — мало хода») — похоже на работу маркет-мейкера или бота, а не на органическую торговлю людьми.':
+    'Noticeable continuous turnover with restrained price movement ("many trades, little move") — looks like a market-maker/bot rather than organic human trading.',
+  '3. Неэффективности': '3. Inefficiencies',
+  'Резкий сдвиг цены за последние 5с на средней/тонкой ликвидности — вероятный локальный перекос цены, интересный для быстрой отработки.':
+    'A sharp price move over the last 5s on medium/thin liquidity — a likely local price dislocation, interesting for a quick play.',
+  '4. Пробой плотностей': '4. Density breakout',
+  'Объём за последние 5с в разы выше обычного темпа суток («объём проедают») + цена уже пошла — прокси пробоя плотности/крупной заявки с последующим импульсом.':
+    '5s volume many times above the usual daily pace ("volume is being eaten through") + price already moving — a proxy for a density/large-order breakout followed by momentum.',
+  // --- Настройки ---
+  'Отображение': 'Display', 'Обновление аналитики и оповещений (сек)': 'Analytics & alerts refresh (sec)',
+  '5 сек': '5 sec', '10 сек': '10 sec', '30 сек': '30 sec', '60 сек': '60 sec',
+  'Максимум пар в таблице': 'Max pairs in table', 'Порог оповещения |изм. 24ч| (%)': 'Alert threshold |24h chg| (%)',
+  'Управление': 'Controls', 'Сохранить настройки': 'Save settings', 'Сохранить': 'Save',
+  'Очистить избранное': 'Clear favorites', 'Очистить': 'Clear', 'Обновления': 'Updates', 'Текущая версия': 'Current version',
+  'Проверьте, вышла ли новая версия': 'Check whether a new version is out', 'Проверить обновления': 'Check for updates',
+  'Скачать и установить': 'Download & install',
+  // --- Настройки аккаунта ---
+  'Подключение по API-ключу': 'API key connection', 'Статус': 'Status', 'Подключить': 'Connect',
+  'Отключить': 'Disconnect', 'Диагностика': 'Diagnostics', 'Проверить подключение': 'Test connection',
+  'Баланс и аналитика — на странице «Финрез»': 'Balance & analytics are on the "Finance" page',
+  'Открыть Финрез': 'Open Finance',
+  // --- Финрез ---
+  'Обзор': 'Overview', 'Сделки': 'Trades', 'Риски': 'Risk', 'Активы': 'Assets',
+  // --- Bottom bar ---
+  'Сервер: ': 'Server: ', 'Обновлено: ': 'Updated: ', 'Источник: ': 'Source: ', 'Поток: ожидание': 'Stream: waiting',
+  // --- Journal modal ---
+  'Журнал сделок': 'Trade journal', 'Отдалить': 'Zoom out', 'Приблизить': 'Zoom in',
+  'Колесо мыши — масштаб, зажать и тащить — панорама, тащить за шкалу цены/времени — растяжение':
+    'Mouse wheel — zoom, click and drag — pan, drag the price/time axis — stretch',
+  'Объём (VOLG)': 'Volume (VOLG)', 'Точки входа/выхода': 'Entry/exit points',
+  // --- Финрез: пустые состояния / загрузка (динамические строки, обёрнуты t() в местах вывода) ---
+  'Подключите API-ключ на странице «Настройки аккаунта», чтобы увидеть финансовый результат.':
+    'Connect an API key on the "Account settings" page to see your financial results.',
+  'Загрузка баланса...': 'Loading balance...',
+  'Загрузка истории сделок по монетам из баланса...': 'Loading trade history for balance coins...',
+  'Нет данных баланса — откройте вкладку "Настройки аккаунта" и дождитесь подключения.':
+    'No balance data — open the "Account settings" tab and wait for the connection.',
+  'Загрузка истории сделок...': 'Loading trade history...',
+  'Реализованных сделок пока нет — как только появятся закрытые позиции, здесь появится статистика по сериям и Profit Factor.':
+    'No realized trades yet — once closed positions appear, streak stats and Profit Factor will show up here.',
+  'Открытых позиций без учтённой продажи не найдено в загруженной истории сделок.':
+    'No open positions without a matching sale were found in the loaded trade history.',
+  'Пока нет ни одной закрытой позиции — только открытые входы без выхода здесь не показываются.':
+    'No closed positions yet — open entries without an exit aren\'t shown here.',
+  'активных': 'active',
+  'Watchlist ещё наполняется — паттерны появятся, когда накопится история сделок по отслеживаемым монетам.':
+    'The watchlist is still filling up — patterns will appear once there\'s enough trade history for the tracked coins.',
+  'Пока не найдено ни одного паттерна с достаточной уверенностью — это нормально, показываем только то, что реально выглядит неслучайным, а не любой шум.':
+    'No pattern with enough confidence found yet — that\'s normal, we only show what genuinely looks non-random, not just any noise.',
+  'Пока недостаточно закрытых сигналов (нужно дождаться истечения окна +2 минуты после детекции) — таблица наполнится по мере работы.':
+    'Not enough closed signals yet (need to wait out the +2 minute window after detection) — the table will fill in as it runs.',
+  'Не удалось загрузить часть истории сделок: ': 'Failed to load part of the trade history: ',
+  'Реализованных сделок пока нет. Как только по какой-то монете из баланса появится закрытая (проданная) позиция — здесь появится статистика.':
+    'No realized trades yet. Once a closed (sold) position appears for a coin in your balance, statistics will show up here.',
+  'Реализованных сделок пока нет — статистика появится после первой закрытой позиции.':
+    'No realized trades yet — statistics will appear after the first closed position.',
+  'Реализованных сделок пока нет ни по одной известной монете. Если нужная монета уже полностью продана — найдите её через поиск выше, чтобы добавить в журнал.':
+    'No realized trades yet for any known coin. If a coin you need has already been fully sold, find it via the search above to add it to the journal.'
+};
+
 // --- Protobuf schema (inlined, subset of MEXC's official .proto files) ---
 const MEXC_PROTO_SRC = [
   'syntax = "proto3";',
@@ -3077,11 +3304,11 @@ function updatePatternsPage() {
   // ТЗ #8/#9: "лучше 5 действительно интересных ситуаций, чем 100 слабых" — теперь, когда весь
   // движок (12 детекторов) собран, сужаем до буквально ~5, как и просили.
   const top = activePatternEvents.slice(0, 5);
-  if (countEl) countEl.textContent = activePatternEvents.length + ' активных';
+  if (countEl) countEl.textContent = activePatternEvents.length + ' ' + t('активных');
   if (grid) {
     if (!top.length) {
       grid.innerHTML = '<div class="finres-empty" style="grid-column:1/-1;"><i class="ri-radar-2-line"></i>' +
-        (watchlist.size === 0
+        t(watchlist.size === 0
           ? 'Watchlist ещё наполняется — паттерны появятся, когда накопится история сделок по отслеживаемым монетам.'
           : 'Пока не найдено ни одного паттерна с достаточной уверенностью — это нормально, показываем только то, что реально выглядит неслучайным, а не любой шум.') +
         '</div>';
@@ -3108,7 +3335,7 @@ function updatePatternValidationPanel() {
 
   if (!rows.length) {
     el.innerHTML = '<tr><td colspan="4" class="finres-empty" style="padding:20px;"><i class="ri-flask-line"></i>' +
-      'Пока недостаточно закрытых сигналов (нужно дождаться истечения окна +2 минуты после детекции) — таблица наполнится по мере работы.</td></tr>';
+      t('Пока недостаточно закрытых сигналов (нужно дождаться истечения окна +2 минуты после детекции) — таблица наполнится по мере работы.') + '</td></tr>';
     return;
   }
   el.innerHTML = rows.map(function (r) {
@@ -4876,11 +5103,11 @@ function renderFinresTab() {
   const el = document.getElementById('finresContent');
   if (!el) return;
   if (!accountConnected) {
-    el.innerHTML = '<div class="finres-empty"><i class="ri-key-2-line"></i>Подключите API-ключ на странице «Настройки аккаунта», чтобы увидеть финансовый результат.</div>';
+    el.innerHTML = '<div class="finres-empty"><i class="ri-key-2-line"></i>' + t('Подключите API-ключ на странице «Настройки аккаунта», чтобы увидеть финансовый результат.') + '</div>';
     return;
   }
   if (!lastBalanceState) {
-    el.innerHTML = '<div class="finres-empty"><i class="ri-loader-4-line spin-icon"></i>Загрузка баланса...</div>';
+    el.innerHTML = '<div class="finres-empty"><i class="ri-loader-4-line spin-icon"></i>' + t('Загрузка баланса...') + '</div>';
     return;
   }
   if (finresTab === 'overview') renderFinresOverview(el);
@@ -4915,7 +5142,7 @@ function renderFinresOverview(el, animate) {
   animate = animate !== false;
   const wasLoaded = finresRealized && !finresRealized.loading;
   if (!wasLoaded) {
-    el.innerHTML = '<div class="finres-empty"><i class="ri-loader-4-line spin-icon"></i>Загрузка истории сделок по монетам из баланса...</div>';
+    el.innerHTML = '<div class="finres-empty"><i class="ri-loader-4-line spin-icon"></i>' + t('Загрузка истории сделок по монетам из баланса...') + '</div>';
   }
   finresLoadRealized(false).then(function (data) {
     if (finresTab !== 'overview') return; // юзер уже переключился на другую вкладку
@@ -4929,11 +5156,11 @@ function renderFinresOverviewContent(el, data, animate) {
   if (!data.trades.length) {
     el.innerHTML =
       '<div class="finres-tab-body' + (animate ? ' finres-anim-in' : '') + '">' +
-      '<div class="finres-head"><h2>Обзор</h2></div>' +
+      '<div class="finres-head"><h2>' + t('Обзор') + '</h2></div>' +
       '<div class="finres-empty"><i class="ri-inbox-line"></i>' +
       (data.error
-        ? 'Не удалось загрузить часть истории сделок: ' + data.error
-        : 'Реализованных сделок пока нет. Как только по какой-то монете из баланса появится закрытая (проданная) позиция — здесь появится статистика.') +
+        ? t('Не удалось загрузить часть истории сделок: ') + data.error
+        : t('Реализованных сделок пока нет. Как только по какой-то монете из баланса появится закрытая (проданная) позиция — здесь появится статистика.')) +
       '</div></div>';
     return;
   }
@@ -5088,7 +5315,7 @@ function buildFinresPnlStatsHtml(data) {
   }
   if (!data || !data.trades.length) {
     return '<div class="finres-empty" style="grid-column:1/-1;padding:20px"><i class="ri-bar-chart-line"></i>' +
-      (data && data.error ? 'Не удалось загрузить часть истории сделок: ' + data.error : 'Реализованных сделок пока нет — статистика появится после первой закрытой позиции.') +
+      (data && data.error ? t('Не удалось загрузить часть истории сделок: ') + data.error : t('Реализованных сделок пока нет — статистика появится после первой закрытой позиции.')) +
       '</div>';
   }
   const filtered = finresFilterByPeriod(data.trades, FINRES_PNL_PERIOD_MAP[finresPnlPeriod] || 'all');
@@ -5129,7 +5356,7 @@ let finresPnlPeriod = 'day'; // day | week | month | all — свой перио
 
 function renderFinresPnlTab(el) {
   if (!lastBalanceState) {
-    el.innerHTML = '<div class="finres-tab-body finres-anim-in"><div class="finres-empty"><i class="ri-wallet-3-line"></i>Нет данных баланса — откройте вкладку "Настройки аккаунта" и дождитесь подключения.</div></div>';
+    el.innerHTML = '<div class="finres-tab-body finres-anim-in"><div class="finres-empty"><i class="ri-wallet-3-line"></i>' + t('Нет данных баланса — откройте вкладку "Настройки аккаунта" и дождитесь подключения.') + '</div></div>';
     return;
   }
   const periodPillsHtml = Object.keys(BALANCE_PERIODS).map(function (key) {
@@ -5240,7 +5467,7 @@ function buildJournalChipsHtml() {
 function renderFinresTradesTab(el, animate) {
   animate = animate !== false;
   if (!lastBalanceState) {
-    el.innerHTML = '<div class="finres-tab-body finres-anim-in"><div class="finres-empty"><i class="ri-wallet-3-line"></i>Нет данных баланса — откройте вкладку "Настройки аккаунта" и дождитесь подключения.</div></div>';
+    el.innerHTML = '<div class="finres-tab-body finres-anim-in"><div class="finres-empty"><i class="ri-wallet-3-line"></i>' + t('Нет данных баланса — откройте вкладку "Настройки аккаунта" и дождитесь подключения.') + '</div></div>';
     return;
   }
   const journalChipsHtml = buildJournalChipsHtml();
@@ -5261,7 +5488,7 @@ function renderFinresTradesTab(el, animate) {
       '<div class="balance-journal-subtitle">Из текущего баланса</div>' +
       '<div class="balance-journal-chips">' + (journalChipsHtml || '<span class="balance-journal-empty">Сейчас в балансе нет монет с известной USDT-парой — найдите нужную через поиск выше.</span>') + '</div>' +
     '</div>' +
-    '<div class="finres-table-card" id="finresTradesTableCard"><div class="finres-empty"><i class="ri-loader-4-line spin-icon"></i>Загрузка истории сделок...</div></div>' +
+    '<div class="finres-table-card" id="finresTradesTableCard"><div class="finres-empty"><i class="ri-loader-4-line spin-icon"></i>' + t('Загрузка истории сделок...') + '</div></div>' +
     '</div>';
 
   wireFinresCoinSearch();
@@ -5368,8 +5595,8 @@ function renderFinresTradesTable(data) {
   if (!data.trades.length) {
     card.innerHTML = '<div class="finres-empty"><i class="ri-inbox-line"></i>' +
       (data.error
-        ? 'Не удалось загрузить часть истории сделок: ' + data.error
-        : 'Реализованных сделок пока нет ни по одной известной монете. Если нужная монета уже полностью продана — найдите её через поиск выше, чтобы добавить в журнал.') +
+        ? t('Не удалось загрузить часть истории сделок: ') + data.error
+        : t('Реализованных сделок пока нет ни по одной известной монете. Если нужная монета уже полностью продана — найдите её через поиск выше, чтобы добавить в журнал.')) +
       '</div>';
     return;
   }
@@ -5472,7 +5699,7 @@ function renderFinresTradesTable(data) {
 function renderFinresAssetsTab(el, animate) {
   animate = animate !== false;
   if (!lastBalanceState) {
-    el.innerHTML = '<div class="finres-tab-body finres-anim-in"><div class="finres-empty"><i class="ri-wallet-3-line"></i>Нет данных баланса — откройте вкладку "Настройки аккаунта" и дождитесь подключения.</div></div>';
+    el.innerHTML = '<div class="finres-tab-body finres-anim-in"><div class="finres-empty"><i class="ri-wallet-3-line"></i>' + t('Нет данных баланса — откройте вкладку "Настройки аккаунта" и дождитесь подключения.') + '</div></div>';
     return;
   }
   const priced = lastBalanceState.priced, total = lastBalanceState.total, donutSegments = lastBalanceState.donutSegments || [];
@@ -5653,7 +5880,7 @@ function renderFinresRiskTradeStatsHtml(data, loading) {
   }
   const stats = data && data.trades.length ? computeFinresTradeStats(data.trades) : null;
   if (!stats) {
-    return '<div class="finres-empty" style="grid-column:1/-1;padding:24px"><i class="ri-bar-chart-line"></i>Реализованных сделок пока нет — как только появятся закрытые позиции, здесь появится статистика по сериям и Profit Factor.</div>';
+    return '<div class="finres-empty" style="grid-column:1/-1;padding:24px"><i class="ri-bar-chart-line"></i>' + t('Реализованных сделок пока нет — как только появятся закрытые позиции, здесь появится статистика по сериям и Profit Factor.') + '</div>';
   }
   const pf = stats.profitFactor === Infinity ? '∞' : stats.profitFactor.toFixed(2);
   const rr = stats.riskReward === Infinity ? '∞' : stats.riskReward.toFixed(2);
@@ -5681,7 +5908,7 @@ function renderFinresOpenRiskHtml(data, loading) {
   }
   const positions = (data && data.openPositions) || [];
   if (!positions.length) {
-    return '<div class="finres-empty" style="grid-column:1/-1;padding:24px"><i class="ri-shield-check-line"></i>Открытых позиций без учтённой продажи не найдено в загруженной истории сделок.</div>';
+    return '<div class="finres-empty" style="grid-column:1/-1;padding:24px"><i class="ri-shield-check-line"></i>' + t('Открытых позиций без учтённой продажи не найдено в загруженной истории сделок.') + '</div>';
   }
   const totalUnrealized = positions.reduce(function (s, p) { return s + p.unrealizedPnl; }, 0);
   const totalCost = positions.reduce(function (s, p) { return s + p.costBasis; }, 0);
@@ -5695,7 +5922,7 @@ function renderFinresOpenRiskHtml(data, loading) {
 function renderFinresRiskTab(el, animate) {
   animate = animate !== false;
   if (!lastBalanceState) {
-    el.innerHTML = '<div class="finres-tab-body finres-anim-in"><div class="finres-empty"><i class="ri-wallet-3-line"></i>Нет данных баланса — откройте вкладку "Настройки аккаунта" и дождитесь подключения.</div></div>';
+    el.innerHTML = '<div class="finres-tab-body finres-anim-in"><div class="finres-empty"><i class="ri-wallet-3-line"></i>' + t('Нет данных баланса — откройте вкладку "Настройки аккаунта" и дождитесь подключения.') + '</div></div>';
     return;
   }
   const priced = lastBalanceState.priced, total = lastBalanceState.total;
@@ -6740,9 +6967,31 @@ document.getElementById('themeToggle').addEventListener('click', function () {
 });
 
 document.getElementById('langToggle').addEventListener('click', function () {
-  const span = this.querySelector('span');
-  span.textContent = span.textContent === 'RU' ? 'EN' : 'RU';
+  currentLang = currentLang === 'en' ? 'ru' : 'en';
+  try { localStorage.setItem(I18N_LANG_KEY, currentLang); } catch (e) {}
+  document.getElementById('langToggleLabel').textContent = currentLang === 'en' ? 'EN' : 'RU';
+  applyStaticI18n();
+  refreshAllDynamicContent();
 });
+// Дозаписывает перевод в уже отрисованный ДИНАМИЧЕСКИЙ контент (innerHTML=... из JS, не статичная
+// разметка index.html — ту applyStaticI18n() выше уже покрывает) — большинство строк в нём обёрнуты
+// в t() прямо в месте формирования, поэтому просто перерисовываем то, что уже видно на экране;
+// каждая функция защищена try/catch — сбой в одной вкладке не должен мешать переводу остальных.
+function refreshAllDynamicContent() {
+  [
+    function () { renderTable(); },
+    function () { if (currentCoin) updateInfoPanel(); },
+    function () { updateFavoritesPage(); },
+    function () { updateAlerts(); },
+    function () { updateAnalytics(); },
+    function () { updatePatternsPage(); },
+    function () { updateProfilesPage(); },
+    function () {
+      const finresPageEl = document.getElementById('page-finres');
+      if (finresPageEl && finresPageEl.classList.contains('active')) renderFinresTab();
+    }
+  ].forEach(function (fn) { try { fn(); } catch (e) {} });
+}
 
 document.getElementById('resetFilters').addEventListener('click', function () {
   document.getElementById('profileSelect').value = 'balanced';
@@ -7035,7 +7284,7 @@ function renderJournalTradesList(pairs) {
   const listEl = document.getElementById('journalTradesList');
   if (!listEl) return;
   if (!pairs || !pairs.length) {
-    listEl.innerHTML = '<div class="finres-empty" style="padding:20px"><i class="ri-inbox-line"></i>Пока нет ни одной закрытой позиции — только открытые входы без выхода здесь не показываются.</div>';
+    listEl.innerHTML = '<div class="finres-empty" style="padding:20px"><i class="ri-inbox-line"></i>' + t('Пока нет ни одной закрытой позиции — только открытые входы без выхода здесь не показываются.') + '</div>';
     return;
   }
   const selIndex = journalChartState ? journalChartState.selectedPairIndex : -1;
@@ -7797,6 +8046,9 @@ window.__testOwnChart = function () {
   wireOwnChartInteractions(canvas);
   drawCandleChart(canvas, candles);
 };
+
+document.getElementById('langToggleLabel').textContent = currentLang === 'en' ? 'EN' : 'RU';
+applyStaticI18n();
 
 console.log('MEXC Screener запущен (MEXC Spot WS v3, protobuf)');
 
