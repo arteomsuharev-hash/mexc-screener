@@ -6907,7 +6907,12 @@ function centerJournalViewOnPair(candles, pair) {
   entryIdx = Math.max(0, Math.min(n - 1, entryIdx));
   exitIdx = Math.max(0, Math.min(n - 1, exitIdx));
   const lo = Math.min(entryIdx, exitIdx), hi = Math.max(entryIdx, exitIdx);
-  const pad = Math.max(10, Math.round((hi - lo) * 0.8));
+  // Пол растянут с 10 до 30 свечей по фидбеку "график открывается слишком приближенным" — у
+  // активного скальпера вход/выход часто попадают в одну-две соседние свечи (hi-lo≈0), и с полом в
+  // 10 видимое окно схлопывалось до ~21 свечи, визуально "впритык". 30 даёт ~61 свечу по умолчанию —
+  // тот же порядок, что у "своего графика" на главной странице (140), просто под масштаб детального
+  // разбора одной сделки, а не всей истории разом.
+  const pad = Math.max(30, Math.round((hi - lo) * 0.8));
   const startIdx = Math.max(0, lo - pad);
   const endIdx = Math.min(n, hi + pad + 1);
   const visibleCount = Math.max(6, Math.min(n, endIdx - startIdx));
