@@ -970,6 +970,93 @@
     };
   }
 
+  // standingWall: "стоящая плотность, которую скорее всего скоро пробьют" — В ОТЛИЧИЕ от
+  // absorption/fakeLiquidity выше (которые смотрят НАЗАД: уровень уже усох, паттерн уже случился),
+  // это ВПЕРЁД смотрящий сигнал — сама стена ещё стоит нетронутой в текущем снимке стакана, ищем её
+  // ДО пробоя, а не постфактум. Определение "стены": уровень цены среди 20 видимых уровней, размер
+  // которого заметно (minWallRatio раз) больше типичного (медианного) размера ОСТАЛЬНЫХ уровней той
+  // же стороны книги — то есть настоящий выброс, а не просто "самый большой из примерно одинаковых".
+  // "Скоро пробьют" — эвристика: считаем это правдоподобным только если (а) стена близко к текущей
+  // цене (maxDistancePct — иначе тестировать её "скоро" некому) и (б) цена ЗАМЕТНО приближалась к
+  // этому уровню на протяжении окна снимков (не разовый шум, устойчивый тренд сближения).
+  function detectStandingWall(depthSnapshots, opts) {
+    opts = opts || {};
+    const lookback = opts.lookback || 20;
+    const minSnapshots = opts.minSnapshots || 10;
+    const minWallRatio = opts.minWallRatio != null ? opts.minWallRatio : 3;
+    const maxDistancePct = opts.maxDistancePct != null ? opts.maxDistancePct : 1.5;
+    if (!depthSnapshots || depthSnapshots.length < minSnapshots) return null;
+    const recent = depthSnapshots.slice(-lookback);
+    const cur = recent[recent.length - 1];
+    if (!cur.bestBid || !cur.bestAsk) return null;
+    const midPrice = (cur.bestBid + cur.bestAsk) / 2;
+
+    function findWall(levels) {
+      if (!levels || levels.length < 4) return null;
+      let best = null;
+      for (let i = 0; i < levels.length; i++) {
+        const others = [];
+        for (let j = 0; j < levels.length; j++) { if (j !== i) others.push(levels[j].q); }
+        const med = median(others);
+        if (med <= 0) continue;
+        const ratio = levels[i].q / med;
+        if (!best || ratio > best.ratio) best = { p: levels[i].p, q: levels[i].q, ratio: ratio };
+      }
+      return best;
+    }
+
+    const bidWall = findWall(cur.bids);
+    const askWall = findWall(cur.asks);
+    const candidates = [];
+    if (bidWall && bidWall.ratio >= minWallRatio) {
+      const distPct = Math.abs(midPrice - bidWall.p) / midPrice * 100;
+      if (distPct <= maxDistancePct) candidates.push({ side: 'bid', wall: bidWall, distPct: distPct });
+    }
+    if (askWall && askWall.ratio >= minWallRatio) {
+      const distPct = Math.abs(askWall.p - midPrice) / midPrice * 100;
+      if (distPct <= maxDistancePct) candidates.push({ side: 'ask', wall: askWall, distPct: distPct });
+    }
+    if (!candidates.length) return null;
+    // Обе стороны могут одновременно иметь стену — берём ближайшую к цене (её раньше протестируют).
+    candidates.sort(function (a, b) { return a.distPct - b.distPct; });
+    const c = candidates[0];
+
+    // "Приближение": среднее расстояние цена<->стена во второй половине окна снимков заметно (>=10%)
+    // меньше, чем в первой половине — устойчивый тренд сближения, а не стена, которая просто давно
+    // стоит без дела на постоянном расстоянии (к такой "скоро" не относится).
+    const distSeries = [];
+    for (let i = 0; i < recent.length; i++) {
+      const s = recent[i];
+      if (s.bestBid && s.bestAsk) distSeries.push(Math.abs((s.bestBid + s.bestAsk) / 2 - c.wall.p));
+    }
+    if (distSeries.length < minSnapshots) return null;
+    const half = Math.floor(distSeries.length / 2);
+    const avg = function (arr) { return arr.reduce(function (a, b) { return a + b; }, 0) / arr.length; };
+    const firstAvg = avg(distSeries.slice(0, half));
+    const secondAvg = avg(distSeries.slice(half));
+    const approaching = firstAvg > 0 && secondAvg < firstAvg * 0.9;
+    if (!approaching) return null;
+
+    const wallVolumeUsd = c.wall.q * c.wall.p;
+    const factors = {
+      repeatability: Math.min(1, recent.length / lookback), stability: 0.7,
+      significance: Math.min(1, c.wall.ratio / 10), volume: Math.min(1, wallVolumeUsd / 20000),
+      deviation: Math.min(1, (maxDistancePct - c.distPct) / maxDistancePct), freshness: 1,
+      confirmation: 0, pastSuccess: 0
+    };
+    const score = scorePatternEvent(factors);
+    return {
+      detectorKey: 'standingWall',
+      // Стена на ASK (сопротивление выше цены) пробита вверх -> продолжение вверх (LONG). Стена на
+      // BID (поддержка ниже/у цены) пробита вниз -> продолжение вниз (SHORT). Тот же принцип
+      // "пробой продолжается в сторону пробоя", что и у тиковой версии STRATEGY_DEFS.density.
+      direction: c.side === 'ask' ? 'LONG' : 'SHORT',
+      side: c.side, priceLevel: c.wall.p, wallRatio: Math.round(c.wall.ratio * 10) / 10,
+      distancePct: Math.round(c.distPct * 100) / 100, volumeUsd: Math.round(wallVolumeUsd),
+      priceAtSignal: midPrice, scoreAtSignal: score, confidencePct: score, factors: factors
+    };
+  }
+
   // ============================================================================
   // История паттернов и отслеживание исхода БЕЗ LOOK-AHEAD BIAS (ТЗ #9). Ключевой принцип:
   // scoreAtSignal/confidencePct у события ЗАМОРОЖЕНЫ в момент детекции (уже так — детекторы выше
@@ -1110,6 +1197,7 @@
     detectFakeLiquidity: detectFakeLiquidity,
     detectExhaustion: detectExhaustion,
     detectZoneReturn: detectZoneReturn,
+    detectStandingWall: detectStandingWall,
     computeOutcomeMetrics: computeOutcomeMetrics,
     shouldOpenNewPatternSession: shouldOpenNewPatternSession,
     prunePatternHistory: prunePatternHistory,
