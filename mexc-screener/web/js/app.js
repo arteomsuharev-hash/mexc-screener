@@ -286,7 +286,48 @@ const I18N_EN = {
   'Экспорт': 'Export', 'Общая стоимость портфеля': 'Total portfolio value',
   'Обновить данные Финреза сейчас, не дожидаясь автообновления': 'Refresh Finance data now, without waiting for auto-refresh',
   'Копим историю для графика — загляните сюда попозже': 'Building up history for the chart — check back later',
-  'Обновлено': 'Updated'
+  'Обновлено': 'Updated',
+  // --- Финрез: Сделки (журнал позиций) ---
+  'Поток:': 'Stream:', 'мелких скрыто': 'small hidden', 'монет учтено': 'coins counted', 'Из текущего баланса': 'From current balance',
+  'Сейчас в балансе нет монет с известной USDT-парой — найдите нужную через поиск выше.':
+    'No coins with a known USDT pair in the balance right now — find the one you need via the search above.',
+  'Найти любую монету (в т.ч. полностью закрытые позиции)...': 'Find any coin (incl. fully closed positions)...',
+  'График входа/выхода по монете': 'Entry/exit chart by coin',
+  'Выберите монету — покажем сделки и точки входа/выхода на графике': 'Select a coin — we\'ll show trades and entry/exit points on the chart',
+  'Поиск по монете...': 'Search by coin...',
+  'сделка': 'trade', 'сделки': 'trades',
+  'Дата': 'Date', 'Время': 'Time', 'Монета': 'Coin', 'Цена входа': 'Entry price', 'Цена выхода': 'Exit price',
+  'Результат': 'Result', 'Показать ещё': 'Show more',
+  // --- Финрез: Риски ---
+  'Риски': 'Risk', 'Концентрация портфеля': 'Portfolio concentration', 'Крупнейший актив': 'Largest asset',
+  'портфеля': 'of portfolio', 'нет открытых позиций': 'no open positions',
+  'Топ-3 концентрация': 'Top-3 concentration', 'доля трёх крупнейших НЕ-стейблкоинов': 'share of the three largest non-stablecoins',
+  'В кэше (USDT/USDC…)': 'In cash (USDT/USDC…)', 'вне рынка': 'off the market',
+  'Активов в портфеле': 'Assets in portfolio', 'учтено в общей стоимости': 'counted in total value',
+  'Высокая концентрация:': 'High concentration:', 'занимает': 'makes up',
+  'портфеля — просадка по этой монете сильно повлияет на весь баланс.': 'of the portfolio — a drawdown in this coin will strongly affect the whole balance.',
+  'Показатели по сделкам': 'Trade metrics', 'Лучший день': 'Best day', 'по реализованному PnL': 'by realized PnL',
+  'Худший день': 'Worst day', 'Серии подряд': 'Streaks', 'макс. побед / макс. убытков': 'max wins / max losses',
+  'Просадка эквити': 'Equity drawdown', 'от пика P&L': 'from the P&L peak', 'ещё не выходили в плюс': 'hasn\'t gone positive yet',
+  'Открытые позиции': 'Open positions', 'Открытых позиций': 'Open positions', 'без учтённой продажи в истории': 'without a matching sale in history',
+  'Нереализованный PnL': 'Unrealized PnL', 'от вложенного': 'of invested amount', 'Самая рискованная': 'Riskiest',
+  'Концентрация по активам (топ-10)': 'Concentration by asset (top 10)', 'Нет ценообразованных активов.': 'No priced assets.',
+  // --- Финрез: Активы ---
+  'Общий баланс': 'Total balance', 'активов': 'assets', 'Доступно': 'Available', 'от портфеля': 'of portfolio',
+  'В ордерах': 'In orders', 'нет активных ордеров': 'no active orders', 'Изменение за 24ч': '24h change',
+  'копим историю': 'building up history', 'в ордерах:': 'in orders:',
+  'Без USDT-пары в скринере (не учтено в общей стоимости):': 'No USDT pair in the screener (not counted in total value):',
+  'Показать мелкие остатки (&lt;$1):': 'Show small balances (&lt;$1):', 'на': 'totaling',
+  'Скрыть мелкие остатки (&lt;$1) — как на самой бирже': 'Hide small balances (&lt;$1) — like on the exchange itself',
+  'Распределение портфеля': 'Portfolio distribution', 'Всего': 'Total', 'Список активов': 'Asset list',
+  // --- Финрез: P&L (карточки, таблица по периодам, календарь) ---
+  'Средний PnL': 'Average PnL', 'на сделку': 'per trade',
+  'PnL по периодам': 'PnL by period', 'Период': 'Period', 'Изменение %': 'Change %',
+  'Не удалось обновить часть истории сделок (': 'Failed to refresh part of the trade history (',
+  ') — показаны последние загруженные данные': ') — showing the last loaded data', 'от': 'from',
+  'Календарь P&L': 'P&L calendar', 'Прибыльный день': 'Profitable day', 'Убыточный день': 'Losing day',
+  'Нет данных': 'No data', 'За месяц:': 'This month:', 'дней со сделками:': 'days with trades:',
+  'Пока нет реализованных сделок за этот месяц.': 'No realized trades this month yet.'
 };
 
 // --- Protobuf schema (inlined, subset of MEXC's official .proto files) ---
@@ -2369,7 +2410,7 @@ function setStatus(mode, text) {
   pill.className = 'conn-pill ' + (mode === 'ok' ? 'ok' : mode === 'warn' ? 'warn' : 'err');
   document.getElementById('sidebarConnText').textContent = text;
   const ds = document.getElementById('dataStatus');
-  ds.textContent = 'Поток: ' + text;
+  ds.textContent = t('Поток:') + ' ' + text;
   ds.className = 'status-item ' + (mode === 'ok' ? 'status-green' : 'status-red');
   document.getElementById('dataSource').textContent = 'MEXC Spot (WebSocket)';
 }
@@ -4988,9 +5029,9 @@ function buildBalanceStatsGridHtml(trades, assetCount, dustCount) {
     return '<div class="stat-tile ' + cls + '"><div class="stat-tile-label"><i class="' + icon + '"></i>' + t(d.label) + '</div>' +
       '<div class="stat-tile-value">' + valueHtml + '</div></div>';
   }).join('');
-  const assetsTile = '<div class="stat-tile neutral"><div class="stat-tile-label"><i class="ri-coins-line"></i>Активы</div>' +
+  const assetsTile = '<div class="stat-tile neutral"><div class="stat-tile-label"><i class="ri-coins-line"></i>' + t('Активы') + '</div>' +
     '<div class="stat-tile-value"><span class="stat-tile-pct">' + assetCount + '</span>' +
-    '<span class="stat-tile-abs muted">' + (dustCount > 0 ? dustCount + ' мелких скрыто' : 'монет учтено') + '</span></div></div>';
+    '<span class="stat-tile-abs muted">' + (dustCount > 0 ? dustCount + ' ' + t('мелких скрыто') : t('монет учтено')) + '</span></div></div>';
   return tiles + assetsTile;
 }
 
@@ -5003,6 +5044,7 @@ function buildBalanceStatsGridHtml(trades, assetCount, dustCount) {
 // не с чем сравнить). Реализованный PnL по сделкам не требует никакой "опорной точки" — работает
 // с первой же сделки, ровно то же число, что уже показывают "Обзор"/P&L-плитки/"Лучший день" на Рисках.
 const RU_MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+const EN_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 let balanceCalendarMonth = new Date(); // какой месяц сейчас показан в календаре (число дня не важно)
 
 function balCalDayKey(d) {
@@ -5050,7 +5092,7 @@ function renderBalanceCalendarWithTrades(trades, animate) {
   const dailyMap = computeDailyRealizedPnlMap(trades);
   const year = balanceCalendarMonth.getFullYear();
   const month = balanceCalendarMonth.getMonth();
-  label.textContent = RU_MONTHS[month] + ' ' + year;
+  label.textContent = (currentLang === 'en' ? EN_MONTHS[month] : RU_MONTHS[month]) + ' ' + year;
 
   const firstOfMonth = new Date(year, month, 1);
   const firstWeekday = (firstOfMonth.getDay() + 6) % 7; // getDay(): вс=0..сб=6 → переводим на пн-старт недели
@@ -5088,7 +5130,7 @@ function renderBalanceCalendarWithTrades(trades, animate) {
     }
     cellIndex++;
     const titleAttr = entry
-      ? (key + ': ' + (entry.abs >= 0 ? '+' : '-') + fmtUsd(Math.abs(entry.abs)).slice(1) + ' (' + entry.count + ' сдел' + (entry.count === 1 ? 'ка' : (entry.count < 5 ? 'ки' : 'ок')) + ')')
+      ? (key + ': ' + (entry.abs >= 0 ? '+' : '-') + fmtUsd(Math.abs(entry.abs)).slice(1) + ' (' + entry.count + ' ' + t(entry.count === 1 ? 'сделка' : (entry.count < 5 ? 'сделки' : 'сделок')) + ')')
       : key;
     html += '<div class="' + cls + '" title="' + titleAttr + '">' +
       '<div class="' + innerCls + '" style="' + styleAttr + '"><span class="balcal-daynum">' + d + '</span>' + amountHtml + '</div></div>';
@@ -5097,8 +5139,8 @@ function renderBalanceCalendarWithTrades(trades, animate) {
   grid.innerHTML = html;
 
   summaryEl.innerHTML = monthDaysWithData
-    ? 'За месяц: <span class="' + (monthDelta >= 0 ? 'up' : 'down') + '">' + (monthDelta >= 0 ? '+' : '-') + fmtUsd(Math.abs(monthDelta)).slice(1) + '</span> · дней со сделками: ' + monthDaysWithData
-    : 'Пока нет реализованных сделок за этот месяц.';
+    ? t('За месяц:') + ' <span class="' + (monthDelta >= 0 ? 'up' : 'down') + '">' + (monthDelta >= 0 ? '+' : '-') + fmtUsd(Math.abs(monthDelta)).slice(1) + '</span> · ' + t('дней со сделками:') + ' ' + monthDaysWithData
+    : t('Пока нет реализованных сделок за этот месяц.');
 }
 
 // ============================================================================================
@@ -5312,8 +5354,8 @@ function buildFinresPeriodTableHtml(allTrades) {
       '<td>' + agg.winRate.toFixed(2) + '%</td>' +
       '</tr>';
   }).join('');
-  return '<div class="finres-table-card"><div class="finres-table-title">PnL по периодам</div>' +
-    '<table class="finres-table"><thead><tr><th>Период</th><th>PnL</th><th>Изменение %</th><th>Прибыль</th><th>Убытки</th><th>Сделки</th><th>Винрейт</th></tr></thead>' +
+  return '<div class="finres-table-card"><div class="finres-table-title">' + t('PnL по периодам') + '</div>' +
+    '<table class="finres-table"><thead><tr><th>' + t('Период') + '</th><th>PnL</th><th>' + t('Изменение %') + '</th><th>' + t('Прибыль') + '</th><th>' + t('Убытки') + '</th><th>' + t('Сделки') + '</th><th>' + t('Винрейт') + '</th></tr></thead>' +
     '<tbody>' + rowsHtml + '</tbody></table></div>';
 }
 
@@ -5329,8 +5371,8 @@ const FINRES_PNL_PERIOD_MAP = { day: '1d', week: '7d', month: '30d', all: 'all' 
 function finresStaleErrorBannerHtml(data) {
   if (!data || !data.error || !data.trades || !data.trades.length) return '';
   return '<div class="finres-stale-banner"><i class="ri-error-warning-line"></i>' +
-    'Не удалось обновить часть истории сделок (' + data.error + ') — показаны последние загруженные данные' +
-    (data.loadedAt ? ' от ' + new Date(data.loadedAt).toTimeString().slice(0, 8) : '') + '.</div>';
+    t('Не удалось обновить часть истории сделок (') + data.error + t(') — показаны последние загруженные данные') +
+    (data.loadedAt ? ' ' + t('от') + ' ' + new Date(data.loadedAt).toTimeString().slice(0, 8) : '') + '.</div>';
 }
 
 function finresStatPlaceholder(n) {
@@ -5344,9 +5386,9 @@ function finresStatPlaceholder(n) {
 // на каждое открытие вкладки, см. её же комментарий), И из настоящего async-обновления.
 function buildFinresPnlStatsHtml(data) {
   function statCard(label, valueHtml, cls, subHtml) {
-    return '<div class="finres-stat-card' + (cls ? ' ' + cls : '') + '"><div class="finres-stat-label">' + label + '</div>' +
+    return '<div class="finres-stat-card' + (cls ? ' ' + cls : '') + '"><div class="finres-stat-label">' + t(label) + '</div>' +
       '<div class="finres-stat-value' + (cls ? ' ' + cls : '') + '">' + valueHtml + '</div>' +
-      (subHtml ? '<div class="finres-stat-sub ' + (cls || 'muted') + '">' + subHtml + '</div>' : '') + '</div>';
+      (subHtml ? '<div class="finres-stat-sub ' + (cls || 'muted') + '">' + t(subHtml) + '</div>' : '') + '</div>';
   }
   if (!data || !data.trades.length) {
     return '<div class="finres-empty" style="grid-column:1/-1;padding:20px"><i class="ri-bar-chart-line"></i>' +
@@ -5359,7 +5401,7 @@ function buildFinresPnlStatsHtml(data) {
   const pnlCls = agg.pnl >= 0 ? 'up' : 'down';
   const avgPnl = agg.count ? agg.pnl / agg.count : 0;
   const pf = !stats ? '—' : (stats.profitFactor === Infinity ? '∞' : stats.profitFactor.toFixed(2));
-  return statCard('Общий PnL', (agg.pnl >= 0 ? '+' : '-') + fmtUsd(Math.abs(agg.pnl)).slice(1), pnlCls, agg.count + ' сделок') +
+  return statCard('Общий PnL', (agg.pnl >= 0 ? '+' : '-') + fmtUsd(Math.abs(agg.pnl)).slice(1), pnlCls, agg.count + ' ' + t('сделок')) +
     statCard('Средний PnL', (avgPnl >= 0 ? '+' : '-') + fmtUsd(Math.abs(avgPnl)).slice(1), avgPnl >= 0 ? 'up' : 'down', 'на сделку') +
     statCard('Лучший день', stats ? (stats.bestDay >= 0 ? '+' : '-') + fmtUsd(Math.abs(stats.bestDay)).slice(1) : '—', stats && stats.bestDay >= 0 ? 'up' : null, null) +
     statCard('Худший день', stats ? (stats.worstDay >= 0 ? '+' : '-') + fmtUsd(Math.abs(stats.worstDay)).slice(1) : '—', stats && stats.worstDay < 0 ? 'down' : null, null) +
@@ -5408,20 +5450,22 @@ function renderFinresPnlTab(el) {
     '<div class="finres-stats-grid" id="finresPnlStatsGrid">' + cachedStatsHtml + '</div>' +
     '<div class="balance-calendar-card">' +
       '<div class="balance-calendar-header">' +
-        '<div class="balance-calendar-title"><i class="ri-calendar-2-line"></i> Календарь P&amp;L</div>' +
+        '<div class="balance-calendar-title"><i class="ri-calendar-2-line"></i> ' + t('Календарь P&L') + '</div>' +
         '<div class="balance-calendar-nav">' +
           '<button type="button" class="balance-calendar-navbtn" id="balCalPrev"><i class="ri-arrow-left-s-line"></i></button>' +
           '<span class="balance-calendar-month" id="balCalMonthLabel">—</span>' +
           '<button type="button" class="balance-calendar-navbtn" id="balCalNext"><i class="ri-arrow-right-s-line"></i></button>' +
         '</div>' +
       '</div>' +
-      '<div class="balance-calendar-weekdays"><span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span></div>' +
+      '<div class="balance-calendar-weekdays">' + (currentLang === 'en'
+        ? '<span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span>'
+        : '<span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span>') + '</div>' +
       '<div class="balance-calendar-grid" id="balCalGrid"></div>' +
       '<div class="balance-calendar-summary" id="balCalSummary"></div>' +
       '<div class="balance-calendar-legend">' +
-        '<span class="balance-calendar-legend-item"><span class="balance-calendar-legend-dot up"></span>Прибыльный день</span>' +
-        '<span class="balance-calendar-legend-item"><span class="balance-calendar-legend-dot down"></span>Убыточный день</span>' +
-        '<span class="balance-calendar-legend-item"><span class="balance-calendar-legend-dot empty-dot"></span>Нет данных</span>' +
+        '<span class="balance-calendar-legend-item"><span class="balance-calendar-legend-dot up"></span>' + t('Прибыльный день') + '</span>' +
+        '<span class="balance-calendar-legend-item"><span class="balance-calendar-legend-dot down"></span>' + t('Убыточный день') + '</span>' +
+        '<span class="balance-calendar-legend-item"><span class="balance-calendar-legend-dot empty-dot"></span>' + t('Нет данных') + '</span>' +
       '</div>' +
     '</div>' +
     '<div class="balance-period-pills" id="finresPnlPeriodPills">' + periodPillsHtml + '</div>' +
@@ -5508,20 +5552,20 @@ function renderFinresTradesTab(el, animate) {
   const journalChipsHtml = buildJournalChipsHtml();
   el.innerHTML =
     '<div class="finres-tab-body' + (animate ? ' finres-anim-in' : '') + '">' +
-    '<div class="finres-head"><h2>Сделки</h2></div>' +
+    '<div class="finres-head"><h2>' + t('Сделки') + '</h2></div>' +
     '<div class="balance-journal-card">' +
       '<div class="balance-journal-header">' +
-        '<div class="balance-journal-title"><i class="ri-file-list-3-line"></i> График входа/выхода по монете</div>' +
-        '<span class="balance-journal-hint">Выберите монету — покажем сделки и точки входа/выхода на графике</span>' +
+        '<div class="balance-journal-title"><i class="ri-file-list-3-line"></i> ' + t('График входа/выхода по монете') + '</div>' +
+        '<span class="balance-journal-hint">' + t('Выберите монету — покажем сделки и точки входа/выхода на графике') + '</span>' +
       '</div>' +
       '<div class="finres-coin-search">' +
         '<div class="finres-coin-search-box"><i class="ri-search-line"></i>' +
-          '<input type="text" id="finresCoinSearchInput" autocomplete="off" placeholder="Найти любую монету (в т.ч. полностью закрытые позиции)...">' +
+          '<input type="text" id="finresCoinSearchInput" autocomplete="off" placeholder="' + t('Найти любую монету (в т.ч. полностью закрытые позиции)...') + '">' +
         '</div>' +
         '<div class="finres-coin-search-results" id="finresCoinSearchResults"></div>' +
       '</div>' +
-      '<div class="balance-journal-subtitle">Из текущего баланса</div>' +
-      '<div class="balance-journal-chips">' + (journalChipsHtml || '<span class="balance-journal-empty">Сейчас в балансе нет монет с известной USDT-парой — найдите нужную через поиск выше.</span>') + '</div>' +
+      '<div class="balance-journal-subtitle">' + t('Из текущего баланса') + '</div>' +
+      '<div class="balance-journal-chips">' + (journalChipsHtml || '<span class="balance-journal-empty">' + t('Сейчас в балансе нет монет с известной USDT-парой — найдите нужную через поиск выше.') + '</span>') + '</div>' +
     '</div>' +
     '<div class="finres-table-card" id="finresTradesTableCard"><div class="finres-empty"><i class="ri-loader-4-line spin-icon"></i>' + t('Загрузка истории сделок...') + '</div></div>' +
     '</div>';
@@ -5680,23 +5724,23 @@ function renderFinresTradesTable(data) {
   card.innerHTML =
     finresStaleErrorBannerHtml(data) +
     '<div class="finres-toolbar">' +
-      '<div class="finres-search"><i class="ri-search-line"></i><input type="text" id="finresTradesSearchInput" placeholder="Поиск по монете..." value="' + finresTradesSearch.replace(/"/g, '&quot;') + '"></div>' +
-      '<span class="finres-trades-count">' + rows.length + ' ' + pluralSdelka(rows.length) + '</span>' +
+      '<div class="finres-search"><i class="ri-search-line"></i><input type="text" id="finresTradesSearchInput" placeholder="' + t('Поиск по монете...') + '" value="' + finresTradesSearch.replace(/"/g, '&quot;') + '"></div>' +
+      '<span class="finres-trades-count">' + rows.length + ' ' + t(pluralSdelka(rows.length)) + '</span>' +
     '</div>' +
     '<div style="overflow-x:auto">' +
     '<table class="finres-table"><thead><tr>' +
-      '<th class="sortable" data-sort="time">Дата' + sortIc('time') + '</th>' +
-      '<th>Время</th>' +
-      '<th class="sortable" data-sort="asset">Монета' + sortIc('asset') + '</th>' +
-      '<th>Цена входа</th>' +
-      '<th>Цена выхода</th>' +
-      '<th>Объём</th>' +
+      '<th class="sortable" data-sort="time">' + t('Дата') + sortIc('time') + '</th>' +
+      '<th>' + t('Время') + '</th>' +
+      '<th class="sortable" data-sort="asset">' + t('Монета') + sortIc('asset') + '</th>' +
+      '<th>' + t('Цена входа') + '</th>' +
+      '<th>' + t('Цена выхода') + '</th>' +
+      '<th>' + t('Объём') + '</th>' +
       '<th class="sortable" data-sort="pnl">PnL' + sortIc('pnl') + '</th>' +
       '<th class="sortable" data-sort="pnlPct">PnL %' + sortIc('pnlPct') + '</th>' +
-      '<th>Результат</th>' +
+      '<th>' + t('Результат') + '</th>' +
     '</tr></thead><tbody>' + rowsHtml + '</tbody></table>' +
     '</div>' +
-    (rows.length > shown.length ? '<button type="button" class="finres-load-more" id="finresTradesLoadMore">Показать ещё (' + (rows.length - shown.length) + ')</button>' : '');
+    (rows.length > shown.length ? '<button type="button" class="finres-load-more" id="finresTradesLoadMore">' + t('Показать ещё') + ' (' + (rows.length - shown.length) + ')</button>' : '');
 
   const searchInput = document.getElementById('finresTradesSearchInput');
   if (searchInput) {
@@ -5741,7 +5785,7 @@ function renderFinresAssetsTab(el, animate) {
   const unpriced = lastBalanceState.unpriced || [], dust = lastBalanceState.dust || [], dustTotal = lastBalanceState.dustTotal || 0;
 
   function statCard(label, valueHtml, cls, subHtml) {
-    return '<div class="finres-stat-card"><div class="finres-stat-label">' + label + '</div>' +
+    return '<div class="finres-stat-card"><div class="finres-stat-label">' + t(label) + '</div>' +
       '<div class="finres-stat-value' + (cls ? ' ' + cls : '') + '">' + valueHtml + '</div>' +
       (subHtml ? '<div class="finres-stat-sub ' + (cls || 'muted') + '">' + subHtml + '</div>' : '') + '</div>';
   }
@@ -5750,10 +5794,10 @@ function renderFinresAssetsTab(el, animate) {
   const dayDelta = computeBalanceDelta(lastBalanceState.hist, total, 'day');
   const deltaCls = !dayDelta ? null : (dayDelta.abs > 0.005 ? 'up' : (dayDelta.abs < -0.005 ? 'down' : null));
   const summaryHtml =
-    statCard('Общий баланс', fmtUsd(total), null, priced.length + ' актив' + (priced.length === 1 ? '' : (priced.length >= 2 && priced.length <= 4 ? 'а' : 'ов'))) +
-    statCard('Доступно', fmtUsd(availableValue), null, total > 0 ? (availableValue / total * 100).toFixed(1) + '% от портфеля' : null) +
-    statCard('В ордерах', fmtUsd(lockedValue), lockedValue > 0.01 ? null : 'muted', total > 0 && lockedValue > 0 ? (lockedValue / total * 100).toFixed(1) + '% от портфеля' : 'нет активных ордеров') +
-    statCard('Изменение за 24ч', dayDelta ? (dayDelta.abs >= 0 ? '+' : '-') + fmtUsd(Math.abs(dayDelta.abs)).slice(1) : '—', deltaCls, dayDelta ? (dayDelta.abs >= 0 ? '+' : '') + dayDelta.pct.toFixed(2) + '%' : 'копим историю');
+    statCard('Общий баланс', fmtUsd(total), null, priced.length + ' ' + t('активов')) +
+    statCard('Доступно', fmtUsd(availableValue), null, total > 0 ? (availableValue / total * 100).toFixed(1) + '% ' + t('от портфеля') : null) +
+    statCard('В ордерах', fmtUsd(lockedValue), lockedValue > 0.01 ? null : 'muted', total > 0 && lockedValue > 0 ? (lockedValue / total * 100).toFixed(1) + '% ' + t('от портфеля') : t('нет активных ордеров')) +
+    statCard('Изменение за 24ч', dayDelta ? (dayDelta.abs >= 0 ? '+' : '-') + fmtUsd(Math.abs(dayDelta.abs)).slice(1) : '—', deltaCls, dayDelta ? (dayDelta.abs >= 0 ? '+' : '') + dayDelta.pct.toFixed(2) + '%' : t('копим историю'));
 
   const legendHtml = donutSegments.map(function (seg) {
     const pct = total > 0 ? (seg.value / total * 100) : 0;
@@ -5773,37 +5817,37 @@ function renderFinresAssetsTab(el, animate) {
         '<div class="balance-asset-bar-track"><div class="balance-asset-bar-fill" style="width:' + Math.max(pct, 1.5) + '%;background:' + color + '"></div></div>' +
       '</div>' +
       '<div class="balance-asset-right"><div class="balance-asset-usdt">' + fmtUsd(r.usdtValue) + '</div><div class="balance-asset-pct">' + pct.toFixed(1) + '%</div>' +
-      (r.locked > 0 ? '<div class="balance-asset-locked">в ордерах: ' + r.locked.toLocaleString('en', { maximumFractionDigits: 8 }) + '</div>' : '') +
+      (r.locked > 0 ? '<div class="balance-asset-locked">' + t('в ордерах:') + ' ' + r.locked.toLocaleString('en', { maximumFractionDigits: 8 }) + '</div>' : '') +
       '</div></div>';
   }).join('');
 
   const unpricedHtml = unpriced.length
-    ? '<div class="balance-unpriced-note"><i class="ri-information-line"></i> Без USDT-пары в скринере (не учтено в общей стоимости): ' +
+    ? '<div class="balance-unpriced-note"><i class="ri-information-line"></i> ' + t('Без USDT-пары в скринере (не учтено в общей стоимости):') + ' ' +
       unpriced.map(function (r) { return r.asset + ' ' + r.amount.toLocaleString('en', { maximumFractionDigits: 8 }); }).join(', ') + '</div>'
     : '';
   const dustToggleHtml = dust.length
     ? '<div class="balance-dust-toggle" id="finresDustToggle">' +
       (hideDustBalances
-        ? '<i class="ri-eye-line"></i> Показать мелкие остатки (&lt;$1): ' + dust.length + ' актив' + (dust.length === 1 ? '' : (dust.length < 5 ? 'а' : 'ов')) + ' на ' + fmtUsd(dustTotal)
-        : '<i class="ri-eye-off-line"></i> Скрыть мелкие остатки (&lt;$1) — как на самой бирже') +
+        ? '<i class="ri-eye-line"></i> ' + t('Показать мелкие остатки (&lt;$1):') + ' ' + dust.length + ' ' + t('активов') + ' ' + t('на') + ' ' + fmtUsd(dustTotal)
+        : '<i class="ri-eye-off-line"></i> ' + t('Скрыть мелкие остатки (&lt;$1) — как на самой бирже')) +
       '</div>'
     : '';
 
   el.innerHTML =
     '<div class="finres-tab-body' + (animate ? ' finres-anim-in' : '') + '">' +
-    '<div class="finres-head"><h2>Активы</h2></div>' +
+    '<div class="finres-head"><h2>' + t('Активы') + '</h2></div>' +
     '<div class="finres-stats-grid">' + summaryHtml + '</div>' +
     '<div class="finres-chart-row">' +
       '<div class="finres-card">' +
-        '<div class="finres-card-head"><span class="finres-card-title">Распределение портфеля</span></div>' +
+        '<div class="finres-card-head"><span class="finres-card-title">' + t('Распределение портфеля') + '</span></div>' +
         '<div class="finres-donut-wrap"><canvas id="finresAssetsDonut"></canvas>' +
-          '<div class="finres-donut-center"><div class="finres-donut-center-value small">' + fmtUsd(total) + '</div><div class="finres-donut-center-label">Всего</div></div>' +
+          '<div class="finres-donut-center"><div class="finres-donut-center-value small">' + fmtUsd(total) + '</div><div class="finres-donut-center-label">' + t('Всего') + '</div></div>' +
         '</div>' +
-        '<div class="finres-donut-legend">' + (legendHtml || '<div class="balance-earnings-empty">Нет ценообразованных активов.</div>') + '</div>' +
+        '<div class="finres-donut-legend">' + (legendHtml || '<div class="balance-earnings-empty">' + t('Нет ценообразованных активов.') + '</div>') + '</div>' +
       '</div>' +
       '<div class="finres-card">' +
-        '<div class="finres-card-head"><span class="finres-card-title">Список активов</span></div>' +
-        '<div class="balance-asset-list no-anim">' + (assetRowsHtml || '<div class="balance-earnings-empty">Нет ценообразованных активов.</div>') + '</div>' +
+        '<div class="finres-card-head"><span class="finres-card-title">' + t('Список активов') + '</span></div>' +
+        '<div class="balance-asset-list no-anim">' + (assetRowsHtml || '<div class="balance-earnings-empty">' + t('Нет ценообразованных активов.') + '</div>') + '</div>' +
         unpricedHtml + dustToggleHtml +
       '</div>' +
     '</div>' +
@@ -5902,9 +5946,9 @@ function computeFinresTradeStats(trades) {
 // первая строка (концентрация портфеля, не требует сделок) отрисовывается мгновенно, а эта — following.
 function renderFinresRiskTradeStatsHtml(data, loading) {
   function statCard(label, valueHtml, cls, subHtml) {
-    return '<div class="finres-stat-card' + (cls ? ' ' + cls : '') + '"><div class="finres-stat-label">' + label + '</div>' +
+    return '<div class="finres-stat-card' + (cls ? ' ' + cls : '') + '"><div class="finres-stat-label">' + t(label) + '</div>' +
       '<div class="finres-stat-value' + (cls ? ' ' + cls : '') + '">' + valueHtml + '</div>' +
-      (subHtml ? '<div class="finres-stat-sub ' + (cls || 'muted') + '">' + subHtml + '</div>' : '') + '</div>';
+      (subHtml ? '<div class="finres-stat-sub ' + (cls || 'muted') + '">' + t(subHtml) + '</div>' : '') + '</div>';
   }
   if (loading) {
     return statCard('Лучший день', '···', null, null) +
@@ -5924,7 +5968,7 @@ function renderFinresRiskTradeStatsHtml(data, loading) {
     statCard('Худший день', (stats.worstDay >= 0 ? '+' : '-') + fmtUsd(Math.abs(stats.worstDay)).slice(1), stats.worstDay >= 0 ? 'up' : 'down', 'по реализованному PnL') +
     statCard('Серии подряд', stats.maxWinStreak + ' / ' + stats.maxLossStreak, null, 'макс. побед / макс. убытков') +
     statCard('Profit Factor', pf, stats.profitFactor >= 1.5 ? 'up' : (stats.profitFactor < 1 ? 'down' : null), 'Risk/Reward ' + rr) +
-    statCard('Просадка эквити', dd ? '-' + fmtUsd(Math.abs(dd.abs)).slice(1) : '$0.00', dd && dd.abs < -0.01 ? 'down' : 'muted', dd && dd.pct != null ? dd.pct.toFixed(2) + '% от пика P&L' : 'ещё не выходили в плюс');
+    statCard('Просадка эквити', dd ? '-' + fmtUsd(Math.abs(dd.abs)).slice(1) : '$0.00', dd && dd.abs < -0.01 ? 'down' : 'muted', dd && dd.pct != null ? dd.pct.toFixed(2) + '% ' + t('от пика P&L') : t('ещё не выходили в плюс'));
 }
 
 // Раунд 12 ("доработать Риски"): третья строка — риск ОТКРЫТЫХ (ещё не проданных) позиций, которого
@@ -5932,9 +5976,9 @@ function renderFinresRiskTradeStatsHtml(data, loading) {
 // finresLoadRealized(), т.к. openPositions считается там же по реальной истории /api/v3/myTrades.
 function renderFinresOpenRiskHtml(data, loading) {
   function statCard(label, valueHtml, cls, subHtml) {
-    return '<div class="finres-stat-card' + (cls ? ' ' + cls : '') + '"><div class="finres-stat-label">' + label + '</div>' +
+    return '<div class="finres-stat-card' + (cls ? ' ' + cls : '') + '"><div class="finres-stat-label">' + t(label) + '</div>' +
       '<div class="finres-stat-value' + (cls ? ' ' + cls : '') + '">' + valueHtml + '</div>' +
-      (subHtml ? '<div class="finres-stat-sub ' + (cls || 'muted') + '">' + subHtml + '</div>' : '') + '</div>';
+      (subHtml ? '<div class="finres-stat-sub ' + (cls || 'muted') + '">' + t(subHtml) + '</div>' : '') + '</div>';
   }
   if (loading) {
     return statCard('Открытых позиций', '···', null, null) +
@@ -5950,7 +5994,7 @@ function renderFinresOpenRiskHtml(data, loading) {
   const totalPct = totalCost > 1e-9 ? (totalUnrealized / totalCost * 100) : 0;
   const worst = positions[0]; // отсортировано по |unrealizedPnl| убыв. в finresLoadRealized
   return statCard('Открытых позиций', String(positions.length), null, 'без учтённой продажи в истории') +
-    statCard('Нереализованный PnL', (totalUnrealized >= 0 ? '+' : '-') + fmtUsd(Math.abs(totalUnrealized)).slice(1), totalUnrealized >= 0 ? 'up' : 'down', (totalPct >= 0 ? '+' : '') + totalPct.toFixed(2) + '% от вложенного') +
+    statCard('Нереализованный PnL', (totalUnrealized >= 0 ? '+' : '-') + fmtUsd(Math.abs(totalUnrealized)).slice(1), totalUnrealized >= 0 ? 'up' : 'down', (totalPct >= 0 ? '+' : '') + totalPct.toFixed(2) + '% ' + t('от вложенного')) +
     statCard('Самая рискованная', worst.asset, worst.unrealizedPnl >= 0 ? 'up' : 'down', (worst.unrealizedPnl >= 0 ? '+' : '-') + fmtUsd(Math.abs(worst.unrealizedPnl)).slice(1) + ' (' + (worst.unrealizedPct >= 0 ? '+' : '') + worst.unrealizedPct.toFixed(1) + '%)');
 }
 
@@ -5970,20 +6014,20 @@ function renderFinresRiskTab(el, animate) {
   const stablePct = total > 0 ? (stableValue / total * 100) : 0;
 
   function statCard(label, valueHtml, cls, subHtml) {
-    return '<div class="finres-stat-card' + (cls ? ' ' + cls : '') + '"><div class="finres-stat-label">' + label + '</div>' +
+    return '<div class="finres-stat-card' + (cls ? ' ' + cls : '') + '"><div class="finres-stat-label">' + t(label) + '</div>' +
       '<div class="finres-stat-value' + (cls ? ' ' + cls : '') + '">' + valueHtml + '</div>' +
       (subHtml ? '<div class="finres-stat-sub ' + (cls || 'muted') + '">' + subHtml + '</div>' : '') + '</div>';
   }
 
   const top1Cls = conc.top1Pct >= 50 ? 'down' : (conc.top1Pct >= 30 ? null : 'up');
   const statsHtml =
-    statCard('Крупнейший актив', conc.top1 ? conc.top1.asset : '—', top1Cls, conc.top1 ? conc.top1Pct.toFixed(1) + '% портфеля' : (priced.length ? 'нет открытых позиций' : null)) +
-    statCard('Топ-3 концентрация', conc.top3Pct.toFixed(1) + '%', conc.top3Pct >= 70 ? 'down' : null, 'доля трёх крупнейших НЕ-стейблкоинов') +
-    statCard('В кэше (USDT/USDC…)', stablePct.toFixed(1) + '%', null, fmtUsd(stableValue) + ' вне рынка') +
-    statCard('Активов в портфеле', String(priced.length), null, 'учтено в общей стоимости');
+    statCard('Крупнейший актив', conc.top1 ? conc.top1.asset : '—', top1Cls, conc.top1 ? conc.top1Pct.toFixed(1) + '% ' + t('портфеля') : (priced.length ? t('нет открытых позиций') : null)) +
+    statCard('Топ-3 концентрация', conc.top3Pct.toFixed(1) + '%', conc.top3Pct >= 70 ? 'down' : null, t('доля трёх крупнейших НЕ-стейблкоинов')) +
+    statCard('В кэше (USDT/USDC…)', stablePct.toFixed(1) + '%', null, fmtUsd(stableValue) + ' ' + t('вне рынка')) +
+    statCard('Активов в портфеле', String(priced.length), null, t('учтено в общей стоимости'));
 
   const warnHtml = conc.top1 && conc.top1Pct >= 50
-    ? '<div class="finres-warn-banner"><i class="ri-alert-line"></i> Высокая концентрация: ' + conc.top1.asset + ' занимает ' + conc.top1Pct.toFixed(1) + '% портфеля — просадка по этой монете сильно повлияет на весь баланс.</div>'
+    ? '<div class="finres-warn-banner"><i class="ri-alert-line"></i> ' + t('Высокая концентрация:') + ' ' + conc.top1.asset + ' ' + t('занимает') + ' ' + conc.top1Pct.toFixed(1) + '% ' + t('портфеля — просадка по этой монете сильно повлияет на весь баланс.') + '</div>'
     : '';
 
   const topRowsHtml = priced.slice(0, 10).map(function (r) {
@@ -5993,7 +6037,7 @@ function renderFinresRiskTab(el, animate) {
       '<span class="balance-asset-avatar" style="background:' + color + '">' + r.asset.slice(0, 3) + '</span>' +
       '<div class="balance-asset-mid">' +
         '<div class="balance-asset-name-row"><span class="balance-asset-name">' + r.asset + '</span>' +
-        '<span class="balance-asset-amount">' + pct.toFixed(1) + '% портфеля</span></div>' +
+        '<span class="balance-asset-amount">' + pct.toFixed(1) + '% ' + t('портфеля') + '</span></div>' +
         '<div class="balance-asset-bar-track"><div class="balance-asset-bar-fill" style="width:' + Math.max(pct, 1.5) + '%;background:' + color + '"></div></div>' +
       '</div>' +
       '<div class="balance-asset-right"><div class="balance-asset-usdt">' + fmtUsd(r.usdtValue) + '</div></div>' +
@@ -6002,16 +6046,16 @@ function renderFinresRiskTab(el, animate) {
 
   el.innerHTML =
     '<div class="finres-tab-body' + (animate ? ' finres-anim-in' : '') + '">' +
-    '<div class="finres-head"><h2>Риски</h2></div>' +
-    '<div class="finres-card-title" style="margin-bottom:10px">Концентрация портфеля</div>' +
+    '<div class="finres-head"><h2>' + t('Риски') + '</h2></div>' +
+    '<div class="finres-card-title" style="margin-bottom:10px">' + t('Концентрация портфеля') + '</div>' +
     '<div class="finres-stats-grid' + (animate ? '' : ' no-anim') + '">' + statsHtml + '</div>' +
     warnHtml +
-    '<div class="finres-card-title" style="margin:18px 0 10px">Показатели по сделкам</div>' +
+    '<div class="finres-card-title" style="margin:18px 0 10px">' + t('Показатели по сделкам') + '</div>' +
     '<div class="finres-stats-grid' + (animate ? '' : ' no-anim') + '" id="finresRiskTradeStats">' + renderFinresRiskTradeStatsHtml(null, true) + '</div>' +
-    '<div class="finres-card-title" style="margin:18px 0 10px">Открытые позиции</div>' +
+    '<div class="finres-card-title" style="margin:18px 0 10px">' + t('Открытые позиции') + '</div>' +
     '<div class="finres-stats-grid' + (animate ? '' : ' no-anim') + '" id="finresOpenRiskStats">' + renderFinresOpenRiskHtml(null, true) + '</div>' +
-    '<div class="finres-table-card" style="margin-top:18px"><div class="finres-table-title">Концентрация по активам (топ-10)</div>' +
-    '<div class="balance-asset-list no-anim">' + (topRowsHtml || '<div class="balance-earnings-empty">Нет ценообразованных активов.</div>') + '</div></div>' +
+    '<div class="finres-table-card" style="margin-top:18px"><div class="finres-table-title">' + t('Концентрация по активам (топ-10)') + '</div>' +
+    '<div class="balance-asset-list no-anim">' + (topRowsHtml || '<div class="balance-earnings-empty">' + t('Нет ценообразованных активов.') + '</div>') + '</div></div>' +
     '</div>';
 
   finresLoadRealized(false).then(function (data) {
