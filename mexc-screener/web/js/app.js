@@ -563,10 +563,17 @@ function getCoinColor(symbol) {
 // коллизий с "голыми" символами MEXC (например тем же "BTC/USDT") быть не может, без переделки
 // каждого из этих мест по отдельности. Эта функция — только для ОТОБРАЖЕНИЯ: превращает такой
 // символ в маленький цветной бейдж биржи + читаемую пару, вместо сырой строки с двоеточием.
+// "BINANCEFUT" (см. upsertExternalCoin/EXCHANGE_CONNECTORS.binance.exchangeTags) красится ТЕМ ЖЕ
+// жёлтым, что и обычный Binance (exch-tag-binance, суффикс FUT снят только у класса цвета) — это та
+// же биржа, просто другой рынок — но подписывается отдельно "FUT", не "BIN", чтобы не перепутать со спотом.
+const EXCHANGE_BADGE_TEXT = { BINANCE: 'BIN', BINANCEFUT: 'FUT', OKX: 'OKX' };
+
 function coinDisplayLabel(c) {
   if (!c.exchange || c.exchange === 'MEXC') return c.symbol;
   const pair = c.baseAsset + '/USDT';
-  return '<span class="exch-tag exch-tag-' + c.exchange.toLowerCase() + '">' + c.exchange.slice(0, 3) + '</span>' + pair;
+  const colorCls = c.exchange.replace(/FUT$/, '').toLowerCase();
+  const text = EXCHANGE_BADGE_TEXT[c.exchange] || c.exchange.slice(0, 3);
+  return '<span class="exch-tag exch-tag-' + colorCls + '">' + text + '</span>' + pair;
 }
 
 function getSignal(c) {
@@ -759,7 +766,13 @@ function rawSymbol(sym) {
 function tvSymbol(sym) {
   const s = String(sym || '');
   const m = s.match(/^([A-Z]+):(.+)$/);
-  if (m) return m[1] + ':' + rawSymbol(m[2]);
+  if (m) {
+    // "BINANCEFUT" — не настоящий биржевой префикс TradingView (см. exchangeTags у
+    // EXCHANGE_CONNECTORS.binance) — это по-прежнему обычная "BINANCE", просто её бессрочный
+    // (perpetual) фьючерс, а TradingView различает их суффиксом ".P" у СИМВОЛА, не отдельным префиксом биржи.
+    if (m[1] === 'BINANCEFUT') return 'BINANCE:' + rawSymbol(m[2]) + '.P';
+    return m[1] + ':' + rawSymbol(m[2]);
+  }
   return 'MEXC:' + rawSymbol(s);
 }
 
@@ -782,6 +795,7 @@ function exchangeTerminalUrl(symbol) {
   if (exch === 'MEXC') return mexcTerminalUrl(symbol);
   const base = String(symbol).replace(/^[A-Z]+:/, '').replace('/USDT', '');
   if (exch === 'BINANCE') return 'https://www.binance.com/en/trade/' + encodeURIComponent(base) + '_USDT';
+  if (exch === 'BINANCEFUT') return 'https://www.binance.com/en/futures/' + encodeURIComponent(base) + 'USDT';
   if (exch === 'OKX') return 'https://www.okx.com/trade-spot/' + encodeURIComponent(base.toLowerCase()) + '-usdt';
   return mexcTerminalUrl(symbol);
 }
@@ -2575,8 +2589,10 @@ function applyConnectionBadge() {
     cls += ' off';
   } else {
     const exch = activeExchangeFilter === 'ALL' ? 'MEXC' : activeExchangeFilter;
-    cls += ' exch-' + exch.toLowerCase();
-    if (activeExchangeFilter !== 'ALL') text = exch + ' LIVE';
+    // "BINANCEFUT" красится так же, как обычный Binance (та же биржа, другой рынок) — снимаем
+    // суффикс только для класса цвета, не для отображаемого текста (см. EXCHANGE_SWITCH_TITLES).
+    cls += ' exch-' + exch.replace(/FUT$/, '').toLowerCase();
+    if (activeExchangeFilter !== 'ALL') text = (EXCHANGE_SWITCH_TITLES[exch] || exch).toUpperCase() + ' LIVE';
   }
   badge.className = cls;
   document.getElementById('statusText').textContent = text;
@@ -7081,15 +7097,29 @@ const EXCHANGE_CONNECTORS = {
         throw new Error(data.msg || ('Ошибка Binance (код ' + data.code + ')'));
       }
     },
-    // Публичный (без ключа/подписи) снимок 24ч-тикеров СРАЗУ по всем парам одним запросом — см.
+    // Публичные (без ключа/подписи) снимки 24ч-тикеров одним запросом на КАЖДЫЙ рынок — см.
     // pollExternalTickers ниже. Формат полей у Binance ticker/24hr идентичен тому, что уже понимает
-    // upsertCoin() для MEXC (не совпадение — MEXC spot API документированно клонирует Binance).
-    tickerUrl: 'https://api.binance.com/api/v3/ticker/24hr',
-    parseTickers: function (body) {
+    // upsertCoin() для MEXC (не совпадение — MEXC spot API документированно клонирует Binance);
+    // у фьючерсного fapi.binance.com — тот же формат один в один, просто другой хост.
+    //
+    // На Binance реальный объём в основном именно во фьючерсах (USDT-M perpetual), не в споте — без
+    // отдельного фьючерсного фида таблица честно недооценивала бы, что там на самом деле происходит.
+    // Помечаем такие монеты ОТДЕЛЬНЫМ псевдо-биржевым тегом "BINANCEFUT" (а не market-полем на "BINANCE") —
+    // так они автоматически получают свой отдельный ключ в coinMap (не путаются со спотовым BTC/USDT
+    // той же пары) и свою отдельную кнопку в переключателе бирж (см. renderExchangeSwitch), без
+    // необходимости заводить второе, отдельное измерение фильтрации. tvSymbol/exchangeTerminalUrl/
+    // coinDisplayLabel ниже знают про этот тег отдельно (у фьючерсов другой символ на TradingView
+    // — с суффиксом ".P" — и другая ссылка на терминал).
+    exchangeTags: ['BINANCE', 'BINANCEFUT'],
+    feeds: [
+      { exchangeTag: 'BINANCE', url: 'https://api.binance.com/api/v3/ticker/24hr' },
+      { exchangeTag: 'BINANCEFUT', url: 'https://fapi.binance.com/fapi/v1/ticker/24hr' }
+    ],
+    parseTickers: function (body, exchangeTag) {
       const data = JSON.parse(body);
       if (!Array.isArray(data)) throw new Error('неожиданный формат ответа Binance');
       data.forEach(function (row) {
-        upsertExternalCoin(row.symbol, num(row.lastPrice), num(row.priceChangePercent), num(row.quoteVolume), num(row.highPrice), num(row.lowPrice), 'BINANCE');
+        upsertExternalCoin(row.symbol, num(row.lastPrice), num(row.priceChangePercent), num(row.quoteVolume), num(row.highPrice), num(row.lowPrice), exchangeTag);
       });
     }
   },
@@ -7127,8 +7157,9 @@ const EXCHANGE_CONNECTORS = {
     // готового "изменения за 24ч в %" в ответе (в отличие от Binance/MEXC) — считаем сами из
     // last/open24h; instId у OKX через дефис ("BTC-USDT"), приводим к слитному виду для
     // upsertExternalCoin (тот же формат, что и raw-символ на MEXC/Binance).
-    tickerUrl: 'https://www.okx.com/api/v5/market/tickers?instType=SPOT',
-    parseTickers: function (body) {
+    exchangeTags: ['OKX'],
+    feeds: [{ exchangeTag: 'OKX', url: 'https://www.okx.com/api/v5/market/tickers?instType=SPOT' }],
+    parseTickers: function (body, exchangeTag) {
       const parsed = JSON.parse(body);
       const rows = parsed && parsed.data;
       if (!Array.isArray(rows)) throw new Error('неожиданный формат ответа OKX');
@@ -7137,7 +7168,7 @@ const EXCHANGE_CONNECTORS = {
         const last = num(row.last);
         const open = num(row.open24h);
         const change24 = open > 0 ? (last - open) / open * 100 : 0;
-        upsertExternalCoin(rawSymbol, last, change24, num(row.volCcy24h), num(row.high24h), num(row.low24h), 'OKX');
+        upsertExternalCoin(rawSymbol, last, change24, num(row.volCcy24h), num(row.high24h), num(row.low24h), exchangeTag);
       });
     }
   }
@@ -7168,14 +7199,20 @@ const EXTERNAL_TICKER_POLL_MS = 4000;
 
 async function pollExternalTickers(id) {
   const connector = EXCHANGE_CONNECTORS[id];
-  try {
-    const body = await fetchPublicText(connector.tickerUrl);
-    connector.parseTickers(body);
-    rebuildList();
-    renderTable();
-  } catch (e) {
-    logW('Exchange', id + ': не удалось обновить тикеры — ' + e.message);
+  // Каждый фид (спот, у Binance ещё и фьючерсы) опрашивается отдельно и независимо — сбой одного
+  // (например, фьючерсный fapi.binance.com временно недоступен) не должен утопить обновление
+  // остальных, уже успешно показанных монет этой биржи.
+  for (let i = 0; i < connector.feeds.length; i++) {
+    const feed = connector.feeds[i];
+    try {
+      const body = await fetchPublicText(feed.url);
+      connector.parseTickers(body, feed.exchangeTag);
+    } catch (e) {
+      logW('Exchange', id + '/' + feed.exchangeTag + ': не удалось обновить тикеры — ' + e.message);
+    }
   }
+  rebuildList();
+  renderTable();
 }
 
 // Запускается при успешном connectExchange(id) — публичные рыночные данные качаются периодическим
@@ -7194,7 +7231,7 @@ function stopExternalTickerPollingTimer(id) {
 // биржи из таблицы (иначе они молча "зависли" бы последним известным снимком цены навсегда).
 function stopExternalTickerPolling(id) {
   stopExternalTickerPollingTimer(id);
-  removeExternalCoinsForExchange(EXCHANGE_CONNECTORS[id].label.toUpperCase());
+  EXCHANGE_CONNECTORS[id].exchangeTags.forEach(removeExternalCoinsForExchange);
   rebuildList();
   renderTable();
 }
@@ -7225,7 +7262,11 @@ function setExchangeStatus(id, state, msg) {
 // по публичному WS независимо от того, подключен ли API-ключ аккаунта — см. accountConnected — это
 // про баланс/сделки, не про рыночные данные); Binance/OKX появляются в переключателе, только когда
 // реально подключены (см. connectExchange/disconnectExchange), иначе выбирать там нечего.
-const EXCHANGE_SWITCH_LABELS = { MEXC: 'M', BINANCE: 'B', OKX: 'O' };
+// "BINANCEFUT" — псевдо-биржа для фьючерсов Binance (см. exchangeTags/feeds у EXCHANGE_CONNECTORS.binance
+// выше) — своя буква "F" и своё полное имя для подсказки, но цвет кнопки (см. styles.css) намеренно
+// тот же жёлтый, что и у обычного Binance — это та же биржа, просто другой рынок.
+const EXCHANGE_SWITCH_LABELS = { MEXC: 'M', BINANCE: 'B', BINANCEFUT: 'F', OKX: 'O' };
+const EXCHANGE_SWITCH_TITLES = { MEXC: 'MEXC', BINANCE: 'Binance Spot', BINANCEFUT: 'Binance Futures', OKX: 'OKX' };
 
 function renderExchangeSwitch() {
   const box = document.getElementById('exchangeSwitch');
@@ -7233,7 +7274,7 @@ function renderExchangeSwitch() {
   const connected = ['MEXC'].concat(
     Object.keys(EXCHANGE_CONNECTORS)
       .filter(function (id) { return exchangeConnections[id] && exchangeConnections[id].connected; })
-      .map(function (id) { return EXCHANGE_CONNECTORS[id].label.toUpperCase(); })
+      .reduce(function (acc, id) { return acc.concat(EXCHANGE_CONNECTORS[id].exchangeTags); }, [])
   );
   if (connected.length <= 1) {
     box.style.display = 'none';
@@ -7255,7 +7296,7 @@ function renderExchangeSwitch() {
         '" data-exchange="ALL" title="' + t('Все биржи') + '">' + t('Все') + '</div>';
     }
     return '<div class="exch-switch-btn exch-switch-' + ex.toLowerCase() + (activeExchangeFilter === ex ? ' active' : '') +
-      '" data-exchange="' + ex + '" title="' + ex + '">' + EXCHANGE_SWITCH_LABELS[ex] + '</div>';
+      '" data-exchange="' + ex + '" title="' + (EXCHANGE_SWITCH_TITLES[ex] || ex) + '">' + EXCHANGE_SWITCH_LABELS[ex] + '</div>';
   }).join('');
 }
 

@@ -552,6 +552,9 @@ body {
 .exch-switch-btn.exch-switch-all.active { color: var(--text-primary); border-color: var(--border-color); opacity: 1; }
 .exch-switch-btn.exch-switch-mexc { background: var(--blue); }
 .exch-switch-btn.exch-switch-binance { background: #F0B90B; color: #1a1a1a; }
+/* Фьючерсы Binance — та же биржа, тот же жёлтый, но с тонкой пунктирной рамкой, чтобы на глаз
+   отличалось от спота даже без чтения буквы (F вместо B). */
+.exch-switch-btn.exch-switch-binancefut { background: #F0B90B; color: #1a1a1a; border-style: dashed; border-color: #1a1a1a; }
 .exch-switch-btn.exch-switch-okx { background: #000; }
 .search-box { position: relative; }
 .search-box input {
