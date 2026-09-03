@@ -1531,17 +1531,69 @@ body {
   grid-column: 1 / -1; height: 3px; border-radius: 2px; background: var(--bg-primary); overflow: hidden; margin-top: 2px;
 }
 .rank-bar-fill { display: block; height: 100%; border-radius: 2px; transition: width .4s cubic-bezier(.16,1,.3,1); opacity: .75; }
-.alerts-list { padding: 16px 20px; overflow: auto; }
-.alert-row {
-  display: flex; align-items: center; gap: 12px; position: relative; overflow: hidden;
-  padding: 10px 12px; background: var(--bg-card); border: 1px solid var(--border-color);
-  border-radius: 8px; margin-bottom: 8px;
-  animation: rankRowIn .3s cubic-bezier(.16,1,.3,1) both;
+/* Тулбар "Оповещений": заголовок+счётчик слева, управление (направление/биржа/порог) справа —
+   всё нужное для навигации по списку теперь на самой странице, без похода в "Настройки". */
+.alerts-toolbar {
+  padding: 14px 20px; border-bottom: 1px solid var(--border-color);
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
 }
-.alert-row-num { color: var(--text-muted); font-size: 11px; font-family: var(--font-mono); width: 16px; text-align: right; flex-shrink: 0; }
-/* Тонкая полоска относительной "силы" движения (та же логика, что и .rank-bar-fill в Аналитике) —
-   во всю высоту карточки слева, а не отдельной строкой снизу — тут строк много и места мало. */
-.alert-row-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; opacity: .8; }
+.alerts-toolbar-left { display: flex; align-items: center; gap: 10px; }
+.alerts-toolbar-left h2 { font-size: 18px; font-weight: 600; }
+.alerts-count-badge {
+  background: var(--bg-hover); color: var(--text-secondary); font-family: var(--font-mono);
+  font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 10px; min-width: 20px; text-align: center;
+}
+.alerts-toolbar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* Рост/Падение/Все — та же пилюльная стилистика, что и у фильтра биржи рядом (.exch-switch-btn),
+   просто со своими цветами вместо буквы биржи, чтобы визуально не путались друг с другом. */
+.alerts-dir-filter { display: flex; align-items: center; gap: 3px; padding: 2px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 6px; }
+.alerts-dir-btn {
+  display: flex; align-items: center; gap: 4px; padding: 0 10px; height: 24px; border-radius: 4px; cursor: pointer;
+  font-size: 11px; font-weight: 600; color: var(--text-secondary); border: 1.5px solid transparent;
+  opacity: .65; transition: opacity .15s, border-color .15s, color .15s;
+}
+.alerts-dir-btn:hover { opacity: 1; }
+.alerts-dir-btn.active { opacity: 1; border-color: var(--border-color); color: var(--text-primary); }
+.alerts-dir-btn.alerts-dir-up.active { color: var(--green); }
+.alerts-dir-btn.alerts-dir-down.active { color: var(--red); }
+.alerts-threshold {
+  display: flex; align-items: center; gap: 6px; background: var(--bg-card); border: 1px solid var(--border-color);
+  border-radius: 6px; padding: 3px 4px 3px 10px; font-size: 12px; color: var(--text-secondary);
+}
+.alerts-threshold input {
+  width: 46px; background: transparent; border: none; color: var(--text-primary); font-family: var(--font-mono);
+  font-size: 13px; text-align: center; outline: none; -moz-appearance: textfield;
+}
+.alerts-threshold input::-webkit-outer-spin-button, .alerts-threshold input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.alerts-thr-btn {
+  width: 22px; height: 22px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-hover);
+  color: var(--text-primary); font-size: 14px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: background .15s, border-color .15s;
+}
+.alerts-thr-btn:hover { background: var(--bg-primary); border-color: var(--text-muted); }
+
+.alerts-list { padding: 14px 20px; overflow: auto; }
+/* Строка оповещения — крупнее и понятнее прежнего плотного списка: явная стрелка направления,
+   кликабельна целиком (открывает монету в скринере, тот же паттерн, что у .fav-card в Избранном). */
+.alert-row {
+  display: grid; grid-template-columns: 18px 30px 1fr auto 14px; align-items: center; gap: 12px;
+  position: relative; overflow: hidden; cursor: pointer;
+  padding: 12px 14px; background: var(--bg-card); border: 1px solid var(--border-color);
+  border-radius: 9px; margin-bottom: 7px;
+  animation: rankRowIn .3s cubic-bezier(.16,1,.3,1) both;
+  transition: background .15s, border-color .15s, transform .1s;
+}
+.alert-row:hover { background: var(--bg-hover); border-color: var(--text-muted); transform: translateX(2px); }
+.alert-row-num { color: var(--text-muted); font-size: 11px; font-family: var(--font-mono); text-align: right; flex-shrink: 0; }
+/* Полоска относительной "силы" движения внутри своей направленности (та же логика, что и
+   .rank-bar-fill в Аналитике) — во всю высоту карточки слева. */
+.alert-row-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; opacity: .85; }
+.alert-row-coin { display: flex; flex-direction: column; gap: 1px; overflow: hidden; }
+.alert-row-coin strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.alert-row-price { font-family: var(--font-mono); font-size: 12.5px; color: var(--text-secondary); white-space: nowrap; }
+.alert-row-change { font-family: var(--font-mono); font-size: 14px; font-weight: 700; white-space: nowrap; text-align: right; }
+.alert-row-chevron { color: var(--text-muted); font-size: 15px; opacity: 0; transition: opacity .15s, transform .15s; transform: translateX(-3px); }
+.alert-row:hover .alert-row-chevron { opacity: .7; transform: translateX(0); }
 
 .settings-container { padding: 24px 32px; max-width: 800px; margin: 0 auto; width: 100%; overflow-y: auto; }
 .settings-group { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px 24px; margin-bottom: 16px; }
