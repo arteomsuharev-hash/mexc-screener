@@ -127,6 +127,7 @@
               <button class="view-btn active" id="viewList" title="Таблица" data-i18n-title><i class="ri-list-check"></i></button>
               <button class="view-btn" id="viewGrid" title="Сетка" data-i18n-title><i class="ri-grid-fill"></i></button>
             </div>
+            <div class="exchange-switch" id="exchangeSwitch" style="display:none;"></div>
           </div>
           <div class="toolbar-right">
             <div class="search-box"><i class="ri-search-line"></i><input id="searchInput" placeholder="Поиск: BTC, PEPE..." data-i18n-placeholder></div>
@@ -518,7 +519,22 @@
           в этом же браузере, она откроется уже в вашем личном терминале.
         </div>
 
-        <div class="settings-group">
+        <div class="exch-tabs" id="acctExchTabs">
+          <div class="exch-tab active" data-exch-tab="mexc">
+            <div class="exch-tab-icon exch-tab-icon-mexc">M</div>
+            <div class="exch-tab-mid"><div class="exch-tab-name">MEXC</div><div class="exch-tab-dot" id="acctTabDotMexc">Не подключено</div></div>
+          </div>
+          <div class="exch-tab" data-exch-tab="binance">
+            <div class="exch-tab-icon exch-tab-icon-binance">B</div>
+            <div class="exch-tab-mid"><div class="exch-tab-name">Binance</div><div class="exch-tab-dot" id="acctTabDotBinance">Не подключено</div></div>
+          </div>
+          <div class="exch-tab" data-exch-tab="okx">
+            <div class="exch-tab-icon exch-tab-icon-okx">O</div>
+            <div class="exch-tab-mid"><div class="exch-tab-name">OKX</div><div class="exch-tab-dot" id="acctTabDotOkx">Не подключено</div></div>
+          </div>
+        </div>
+
+        <div class="settings-group exch-tab-panel active" id="acctPanelMexc">
           <div class="settings-group-title" data-i18n>Подключение по API-ключу</div>
           <div class="setting-row">
             <span class="setting-label" data-i18n>Статус</span>
@@ -562,6 +578,87 @@
               тогда подключение выдаст ошибку сети. В desktop-приложении («Скачать приложение» в панели слева)
               этот же запрос идёт в обход браузера и не подвержен этому ограничению.
             </span>
+          </div>
+        </div>
+
+        <div class="settings-group exch-tab-panel" id="acctPanelBinance">
+          <div class="settings-group-title">Binance</div>
+          <div class="acct-security-note" data-i18n-block data-i18n-key="acct-other-exchanges-note">
+            <i class="ri-information-line"></i> Подключите биржу — её монеты появятся в таблице скринера
+            (переключатель «Все/M/B/O» сверху). Ключи хранятся только в этом браузере/приложении, как и у MEXC.
+          </div>
+          <div class="setting-row">
+            <span class="setting-label" data-i18n>Статус</span>
+            <div class="setting-control">
+              <span class="status-badge off" id="binanceStatusBadge" style="position:static;"><span class="status-dot"></span><span id="binanceStatusText" data-i18n>Не подключено</span></span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">API Key</span>
+            <div class="setting-control">
+              <input type="text" id="binanceApiKey" class="acct-wide-input" placeholder="..." autocomplete="off" spellcheck="false">
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">Secret Key</span>
+            <div class="setting-control">
+              <div class="acct-input-wrap">
+                <input type="password" id="binanceApiSecret" class="acct-wide-input" placeholder="••••••••••••••••" autocomplete="off" spellcheck="false">
+                <i class="ri-eye-line acct-toggle-eye" id="binanceToggleEye"></i>
+              </div>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label" data-i18n>Управление</span>
+            <div class="setting-control">
+              <button class="settings-btn" id="binanceConnectBtn" data-i18n>Подключить</button>
+              <button class="settings-btn secondary" id="binanceDisconnectBtn" data-i18n>Отключить</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-group exch-tab-panel" id="acctPanelOkx">
+          <div class="settings-group-title">OKX</div>
+          <div class="acct-security-note" data-i18n-block data-i18n-key="acct-other-exchanges-note">
+            <i class="ri-information-line"></i> Подключите биржу — её монеты появятся в таблице скринера
+            (переключатель «Все/M/B/O» сверху). Ключи хранятся только в этом браузере/приложении, как и у MEXC.
+          </div>
+          <div class="setting-row">
+            <span class="setting-label" data-i18n>Статус</span>
+            <div class="setting-control">
+              <span class="status-badge off" id="okxStatusBadge" style="position:static;"><span class="status-dot"></span><span id="okxStatusText" data-i18n>Не подключено</span></span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">API Key</span>
+            <div class="setting-control">
+              <input type="text" id="okxApiKey" class="acct-wide-input" placeholder="..." autocomplete="off" spellcheck="false">
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">Secret Key</span>
+            <div class="setting-control">
+              <div class="acct-input-wrap">
+                <input type="password" id="okxApiSecret" class="acct-wide-input" placeholder="••••••••••••••••" autocomplete="off" spellcheck="false">
+                <i class="ri-eye-line acct-toggle-eye" id="okxToggleEye"></i>
+              </div>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">Passphrase</span>
+            <div class="setting-control">
+              <div class="acct-input-wrap">
+                <input type="password" id="okxApiPassphrase" class="acct-wide-input" placeholder="••••••••••••••••" autocomplete="off" spellcheck="false">
+                <i class="ri-eye-line acct-toggle-eye" id="okxPassphraseToggleEye"></i>
+              </div>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label" data-i18n>Управление</span>
+            <div class="setting-control">
+              <button class="settings-btn" id="okxConnectBtn" data-i18n>Подключить</button>
+              <button class="settings-btn secondary" id="okxDisconnectBtn" data-i18n>Отключить</button>
+            </div>
           </div>
         </div>
 
