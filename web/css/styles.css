@@ -1596,18 +1596,25 @@ body {
 .alert-row-chevron { color: var(--text-muted); font-size: 15px; opacity: 0; transition: opacity .15s, transform .15s; transform: translateX(-3px); }
 .alert-row:hover .alert-row-chevron { opacity: .7; transform: translateX(0); }
 
-/* Листинги — строка карточки, тот же скелет что у .alert-row, без кликабельности (нет монеты в
-   coinMap до первого тика с этой биржи, некуда открывать). upcoming (Binance Futures, честный
-   обратный отсчёт) эскалирует цветом по мере приближения к листингу; justListed (MEXC/Binance spot,
-   обнаружено по факту) — нейтральная карточка с "N назад". */
+/* Листинги — строка карточки, тот же скелет что у .alert-row. Сама карточка НЕ открывает монету в
+   скринере (нет монеты в coinMap до первого тика с этой биржи) — вместо этого кнопка
+   .listing-row-copy кладёт название монеты в буфер обмена. upcoming (Binance/MEXC Futures, честный
+   обратный отсчёт) эскалирует цветом по мере приближения к листингу; justListed (обнаружено по
+   факту) — нейтральная карточка с "N назад". */
 .listing-row {
-  display: grid; grid-template-columns: 44px 1fr auto; align-items: center; gap: 12px;
+  display: grid; grid-template-columns: 44px 1fr auto auto; align-items: center; gap: 12px;
   padding: 12px 14px; background: var(--bg-card); border: 1px solid var(--border-color);
   border-radius: 9px; margin-bottom: 7px;
   animation: rankRowIn .3s cubic-bezier(.16,1,.3,1) both;
   transition: background .15s, border-color .15s;
 }
 .listing-row-coin strong { font-size: 13.5px; }
+.listing-row-copy {
+  display: flex; align-items: center; justify-content: center; width: 28px; height: 28px;
+  border-radius: 6px; border: 1px solid var(--border-color); background: transparent;
+  color: var(--text-muted); cursor: pointer; font-size: 14px; transition: background .15s, color .15s, border-color .15s;
+}
+.listing-row-copy:hover { background: var(--bg-hover); color: var(--text-primary); border-color: var(--text-muted); }
 .listing-row-countdown, .listing-row-ago {
   font-family: var(--font-mono); font-size: 12.5px; color: var(--text-secondary);
   display: flex; align-items: center; gap: 5px; white-space: nowrap;
@@ -1616,7 +1623,13 @@ body {
 .listing-row-overdue { color: var(--text-muted) !important; font-weight: 400 !important; }
 .listing-row-soon { border-color: rgba(255,165,0,.4); }
 .listing-row-soon .listing-row-countdown { color: var(--orange); }
-.listing-row-imminent { border-color: rgba(255,71,87,.55); animation: rankRowIn .3s cubic-bezier(.16,1,.3,1) both, listingPulse 1.4s ease-in-out infinite; }
+/* Только listingPulse в animation (не переобъявляем rankRowIn) — .listing-row-imminent часто
+   добавляется на УЖЕ существующий узел (тикер обратного отсчёта переустанавливает className каждую
+   секунду, см. tickListingsCountdowns в app.js), и переобъявление entrance-анимации в одном
+   shorthand с ней рисковало бы заново её запустить при добавлении класса. opacity/transform у
+   rankRowIn и так заканчиваются на визуально нейтральных значениях (1 / none), так что от потери
+   "held"-состояния ничего не меняется на глаз. */
+.listing-row-imminent { border-color: rgba(255,71,87,.55); animation: listingPulse 1.4s ease-in-out infinite; }
 .listing-row-imminent .listing-row-countdown { color: var(--red); }
 @keyframes listingPulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(255,71,87,.35); }

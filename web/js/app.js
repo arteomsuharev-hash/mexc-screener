@@ -18,7 +18,7 @@ const LEV_RE = /(UP|DOWN|BULL|BEAR|3L|3S|5L|5S)USDT$/;
 // собственный WS-мост ниже по файлу); в обычной веб-версии (без desktop-обёртки) его нет, тогда
 // берём запасную строку — держите её в СИНХРОНЕ с "version" в desktop/neutralino.config.json при
 // каждом релизе, иначе версия в интерфейсе разойдётся с реальной.
-const APP_VERSION = (typeof window.NL_APPVERSION === 'string' && window.NL_APPVERSION) || '1.7.0';
+const APP_VERSION = (typeof window.NL_APPVERSION === 'string' && window.NL_APPVERSION) || '1.7.1';
 // ЗАПОЛНИТЕ после создания GitHub-репозитория и первого релиза (см. docs/updates.md) — до этого
 // кнопка "Проверить обновления" будет честно показывать понятную ошибку, а не тихо молчать или
 // стучаться в несуществующий адрес.
@@ -176,6 +176,7 @@ const I18N_EN = {
   'Пока новых листингов не найдено — страница проверяет MEXC и Binance каждые 45с.': 'No new listings found yet — this page checks MEXC and Binance every 45s.',
   'до листинга': 'until listing', 'запаздывает — ещё не запущен': 'running late — not live yet',
   'листинг обнаружен': 'listing detected', 'назад': 'ago',
+  'Скопировать название монеты': 'Copy coin name', 'Скопировано': 'Copied',
   // --- Таймфреймы ---
   '1м': '1m', '5м': '5m', '15м': '15m', '30м': '30m', '1ч': '1h', '4ч': '4h', '1д': '1D',
   // --- График ---
@@ -3275,8 +3276,12 @@ function detectZoneReturn(symbol) {
 // STRATEGY_DEFS.density.match() на скринере — для watchlist-монет "Сайз" теперь опирается на
 // РЕАЛЬНЫЙ стакан вместо тиковой эвристики (см. её же комментарий).
 function detectStandingWall(symbol) {
+  // minWallRatio: 5 — пользовательский фидбэк: 3х над соседними уровнями ловило слишком мелкие
+  // "стены" (на книге, где обычный уровень ~10K, 3х — это всего 30K, недостаточно для настоящего
+  // пробоя). 5х (например 10K типичный уровень -> 50K+ стена) — заметно более строгий, честный
+  // порог именно под "крупную плотность, которая пойдёт на пробой".
   const ev = MexcCore.detectStandingWall(tier2Depth.get(symbol), {
-    minSnapshots: DETECTOR_DEFS.standingWall.minRepeats, lookback: 20, minWallRatio: 3, maxDistancePct: 1.5
+    minSnapshots: DETECTOR_DEFS.standingWall.minRepeats, lookback: 20, minWallRatio: 5, maxDistancePct: 1.5
   });
   if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
   return ev;
@@ -7612,7 +7617,7 @@ const LISTING_SPOT_SOURCES = {
   BINANCE: { url: 'https://api.binance.com/api/v3/exchangeInfo', isTradable: function (s) { return s.status === 'TRADING'; } }
 };
 const BINANCE_FUT_EXCHANGEINFO_URL = 'https://fapi.binance.com/fapi/v1/exchangeInfo';
-const LISTING_BADGE_TEXT = { MEXC: 'MEXC', BINANCE: 'BIN', BINANCEFUT: 'FUT' };
+const LISTING_BADGE_TEXT = { MEXC: 'MEXC', BINANCE: 'BIN', BINANCEFUT: 'FUT', MEXCFUT: 'FUT' };
 const LISTING_BASELINE_KEY = { MEXC: 'mexc_listing_baseline_mexc', BINANCE: 'mexc_listing_baseline_binance' };
 const LISTING_EVENTS_KEY = 'mexc_listing_events';
 const LISTING_EVENTS_MAX = 300;
@@ -7721,6 +7726,47 @@ async function pollBinanceFuturesListings() {
   saveListingEvents();
 }
 
+// MEXC Futures — у MEXC (в отличие от Binance) нет отдельного явного статуса вроде PENDING_TRADING,
+// но у контракта в /contract/detail есть openingTime (эпоха мс, запланированное время открытия
+// торгов) + showBeforeOpen/openingCountdownOption — та же механика, что и Binance-баннер "откроется
+// через", проверено вживую прямым запросом к API. Раз явного статуса нет, честно опираемся ТОЛЬКО
+// на openingTime: > now -> точно ещё не открыт (иначе openingTime уже был бы в прошлом по
+// определению). Как только время прошло — считаем контракт запущенным (доверяем расписанию MEXC
+// так же, как доверяем onboardDate у Binance) и переводим в "только что залистилась".
+// RECENT_WINDOW ограничивает выборку: тысяча с лишним давно живущих контрактов (BTC/ETH и т.п.)
+// тоже имеют openingTime, просто в далёком прошлом/эпохе 0 — интересны только контракты с
+// openingTime в пределах последних 10 минут или в будущем.
+const MEXC_FUT_DETAIL_URL = 'https://contract.mexc.com/api/v1/contract/detail';
+const MEXC_FUT_RECENT_WINDOW_MS = 10 * 60 * 1000;
+async function pollMexcFuturesListings() {
+  const body = await fetchPublicText(MEXC_FUT_DETAIL_URL);
+  const data = JSON.parse(body);
+  const now = Date.now();
+  (data.data || []).forEach(function (s) {
+    if (s.quoteCoin !== 'USDT' || !s.openingTime || s.openingTime <= now - MEXC_FUT_RECENT_WINDOW_MS) return;
+    const symbol = s.baseCoin + 'USDT';
+    const existing = listingEvents.find(function (e) { return e.exchange === 'MEXCFUT' && e.symbol === symbol; });
+    if (s.openingTime > now) {
+      if (existing) { existing.onboardDate = s.openingTime; }
+      else {
+        listingEvents.push({
+          id: ++listingEventsSeq, exchange: 'MEXCFUT', market: 'FUTURES', symbol: symbol, baseAsset: s.baseCoin,
+          kind: 'upcoming', onboardDate: s.openingTime, detectedAt: now, wentLiveAt: null
+        });
+      }
+    } else if (existing && existing.kind === 'upcoming') {
+      existing.kind = 'justListed';
+      existing.wentLiveAt = s.openingTime;
+    } else if (!existing) {
+      listingEvents.push({
+        id: ++listingEventsSeq, exchange: 'MEXCFUT', market: 'FUTURES', symbol: symbol, baseAsset: s.baseCoin,
+        kind: 'justListed', onboardDate: null, detectedAt: now, wentLiveAt: s.openingTime
+      });
+    }
+  });
+  saveListingEvents();
+}
+
 function updateListingsNavBadge() {
   const badge = document.getElementById('navListingBadge');
   if (!badge) return;
@@ -7740,6 +7786,7 @@ async function pollAllListings() {
   try { await pollSpotListings('MEXC'); } catch (e) { logW('Listings', 'MEXC: ' + e.message); }
   try { await pollSpotListings('BINANCE'); } catch (e) { logW('Listings', 'Binance Spot: ' + e.message); }
   try { await pollBinanceFuturesListings(); } catch (e) { logW('Listings', 'Binance Futures: ' + e.message); }
+  try { await pollMexcFuturesListings(); } catch (e) { logW('Listings', 'MEXC Futures: ' + e.message); }
   renderListingsPageIfActive();
 }
 setInterval(pollAllListings, LISTING_POLL_MS);
@@ -7764,16 +7811,19 @@ function fmtAgoShort(ms) {
 
 // Фиксированный набор вкладок (не через renderFlatExchFilter — тот скрывает себя и сбрасывает
 // фильтр, если нет ПОДКЛЮЧЁННОЙ по API-ключу биржи; листинги — публичные данные, не завязаны на
-// подключение аккаунта, должны быть видны всегда).
-let listingsExchangeFilter = 'ALL'; // 'ALL' | 'MEXC' | 'BINANCE' | 'BINANCEFUT'
-const LISTINGS_FILTER_TABS = ['ALL', 'MEXC', 'BINANCE', 'BINANCEFUT'];
+// подключение аккаунта, должны быть видны всегда). Свои label/title (не переиспользуем
+// EXCHANGE_SWITCH_LABELS/TITLES — там нет MEXCFUT, и это отдельный, самодостаточный набор вкладок).
+let listingsExchangeFilter = 'ALL'; // 'ALL' | 'MEXC' | 'MEXCFUT' | 'BINANCE' | 'BINANCEFUT'
+const LISTINGS_FILTER_TABS = ['ALL', 'MEXC', 'MEXCFUT', 'BINANCE', 'BINANCEFUT'];
+const LISTINGS_TAB_LABELS = { MEXC: 'M', MEXCFUT: 'MF', BINANCE: 'B', BINANCEFUT: 'BF' };
+const LISTINGS_TAB_TITLES = { MEXC: 'MEXC Spot', MEXCFUT: 'MEXC Futures', BINANCE: 'Binance Spot', BINANCEFUT: 'Binance Futures' };
 function renderListingsExchFilter() {
   const box = document.getElementById('listingsExchFilter');
   if (!box) return;
   box.innerHTML = LISTINGS_FILTER_TABS.map(function (ex) {
     if (ex === 'ALL') return '<div class="exch-switch-btn exch-switch-all' + (listingsExchangeFilter === 'ALL' ? ' active' : '') + '" data-fexch="ALL">' + t('Все') + '</div>';
     return '<div class="exch-switch-btn exch-switch-' + ex.replace(/FUT$/, '').toLowerCase() + (listingsExchangeFilter === ex ? ' active' : '') +
-      '" data-fexch="' + ex + '" title="' + (EXCHANGE_SWITCH_TITLES[ex] || ex) + '">' + EXCHANGE_SWITCH_LABELS[ex] + '</div>';
+      '" data-fexch="' + ex + '" title="' + LISTINGS_TAB_TITLES[ex] + '">' + LISTINGS_TAB_LABELS[ex] + '</div>';
   }).join('');
   if (!box.dataset.wired) {
     box.dataset.wired = '1';
@@ -7784,6 +7834,26 @@ function renderListingsExchFilter() {
       updateListingsPage();
     });
   }
+}
+
+// cls/statusHtml для одной карточки — вынесено отдельно от updateListingsPage(), чтобы 1-секундный
+// тикер (tickListingsCountdowns ниже) мог пересчитать ТОЛЬКО текст отсчёта у уже существующих
+// карточек, не перестраивая весь список — см. комментарий у tickListingsCountdowns о том, почему
+// это принципиально важно (полная переотрисовка каждую секунду вызывала видимое "моргание").
+function listingRowStatus(e, now) {
+  if (e.kind === 'upcoming') {
+    const msLeft = e.onboardDate - now;
+    const countdown = fmtCountdown(msLeft);
+    const cls = 'listing-row-upcoming' + (msLeft > 0 && msLeft <= 60000 ? ' listing-row-imminent' : msLeft > 0 && msLeft <= 300000 ? ' listing-row-soon' : '');
+    const statusHtml = countdown
+      ? '<span class="listing-row-countdown"><i class="ri-timer-flash-line"></i> ' + t('до листинга') + ': ' + countdown + '</span>'
+      : '<span class="listing-row-countdown listing-row-overdue">' + t('запаздывает — ещё не запущен') + '</span>';
+    return { cls: cls, statusHtml: statusHtml };
+  }
+  return {
+    cls: 'listing-row-just',
+    statusHtml: '<span class="listing-row-ago"><i class="ri-flashlight-line"></i> ' + t('листинг обнаружен') + ' ' + fmtAgoShort(now - e.detectedAt) + ' ' + t('назад') + '</span>'
+  };
 }
 
 function updateListingsPage() {
@@ -7809,34 +7879,68 @@ function updateListingsPage() {
     const pair = e.baseAsset + '/USDT';
     const badgeText = LISTING_BADGE_TEXT[e.exchange] || e.exchange;
     const colorCls = e.exchange.replace(/FUT$/, '').toLowerCase();
-    let statusHtml, cls;
-    if (e.kind === 'upcoming') {
-      const msLeft = e.onboardDate - now;
-      const countdown = fmtCountdown(msLeft);
-      cls = 'listing-row-upcoming' + (msLeft > 0 && msLeft <= 60000 ? ' listing-row-imminent' : msLeft > 0 && msLeft <= 300000 ? ' listing-row-soon' : '');
-      statusHtml = countdown
-        ? '<span class="listing-row-countdown"><i class="ri-timer-flash-line"></i> ' + t('до листинга') + ': ' + countdown + '</span>'
-        : '<span class="listing-row-countdown listing-row-overdue">' + t('запаздывает — ещё не запущен') + '</span>';
-    } else {
-      cls = 'listing-row-just';
-      statusHtml = '<span class="listing-row-ago"><i class="ri-flashlight-line"></i> ' + t('листинг обнаружен') + ' ' + fmtAgoShort(now - e.detectedAt) + ' ' + t('назад') + '</span>';
-    }
-    return '<div class="listing-row ' + cls + '" style="animation-delay:' + (Math.min(i, 20) * 22) + 'ms">' +
+    const st = listingRowStatus(e, now);
+    return '<div class="listing-row ' + st.cls + '" data-id="' + e.id + '" style="animation-delay:' + (Math.min(i, 20) * 22) + 'ms">' +
       '<span class="exch-tag exch-tag-' + colorCls + '">' + badgeText + '</span>' +
       '<div class="listing-row-coin"><strong>' + pair + '</strong></div>' +
-      statusHtml +
+      st.statusHtml +
+      '<button type="button" class="listing-row-copy" data-copy="' + e.baseAsset + '" title="' + t('Скопировать название монеты') + '"><i class="ri-file-copy-line"></i></button>' +
       '</div>';
   }).join('');
+  wireListingRowCopy();
+}
+
+// Клик по кнопке-копирования — кладёт название монеты (базовый актив, например "GAIB") в буфер
+// обмена, тот же паттерн copy+toast, что и у copySymbolForVataga выше. Делегированный слушатель на
+// контейнере переживает переотрисовку innerHTML — вешаем один раз.
+function copyListingSymbol(baseAsset) {
+  const announce = function () { showAppToast(t('Скопировано') + ': ' + baseAsset); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(baseAsset).then(announce).catch(function () { fallbackCopyText(baseAsset); announce(); });
+  } else {
+    fallbackCopyText(baseAsset);
+    announce();
+  }
+}
+function wireListingRowCopy() {
+  const box = document.getElementById('listingsList');
+  if (!box || box.dataset.copyWired) return;
+  box.dataset.copyWired = '1';
+  box.addEventListener('click', function (e) {
+    const btn = e.target.closest('.listing-row-copy');
+    if (!btn) return;
+    e.stopPropagation();
+    copyListingSymbol(btn.dataset.copy);
+  });
 }
 
 // Тикает раз в секунду, пока страница открыта — обратный отсчёт у upcoming-карточек живой, не
-// дожидается следующего 45с-опроса биржи.
-setInterval(function () {
+// дожидается следующего 45с-опроса биржи. НАЙДЕННЫЙ баг: раньше это вызывало полный
+// updateListingsPage() каждую секунду — box.innerHTML полностью пересобирался, что для КАЖДОЙ
+// карточки заново запускало её CSS entrance-анимацию (rankRowIn) — визуально выглядело как
+// постоянное моргание всего списка. Теперь тикер точечно обновляет только текст отсчёта/классы
+// эскалации (imminent/soon) у УЖЕ СУЩЕСТВУЮЩИХ узлов через data-id, не трогая сам список DOM-узлов
+// — анимация, once отыгранная при вставке узла, повторно не запускается.
+function tickListingsCountdowns() {
   const page = document.getElementById('page-listings');
-  if (page && page.classList.contains('active') && listingEvents.some(function (e) { return e.kind === 'upcoming'; })) {
-    updateListingsPage();
-  }
-}, 1000);
+  if (!page || !page.classList.contains('active')) return;
+  const box = document.getElementById('listingsList');
+  if (!box) return;
+  const now = Date.now();
+  const rows = box.querySelectorAll('.listing-row[data-id]');
+  if (!rows.length) return;
+  const byId = {};
+  listingEvents.forEach(function (e) { byId[e.id] = e; });
+  rows.forEach(function (row) {
+    const e = byId[row.dataset.id];
+    if (!e || e.kind !== 'upcoming') return; // justListed-карточки не тикают (их "N назад" меняется медленно — обновится на ближайшей полной перерисовке)
+    const st = listingRowStatus(e, now);
+    row.className = 'listing-row ' + st.cls; // без animation-delay/entrance-класса — тот уже был применён при вставке и не сбрасывается сменой ДРУГИХ классов на том же узле
+    const countdownEl = row.querySelector('.listing-row-countdown');
+    if (countdownEl) countdownEl.outerHTML = st.statusHtml;
+  });
+}
+setInterval(tickListingsCountdowns, 1000);
 
 let externalTickerTimers = {}; // id -> setInterval-хендл, см. start/stopExternalTickerPolling
 const EXTERNAL_TICKER_POLL_MS = 4000;
