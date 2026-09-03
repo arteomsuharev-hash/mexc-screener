@@ -519,7 +519,22 @@
           в этом же браузере, она откроется уже в вашем личном терминале.
         </div>
 
-        <div class="settings-group">
+        <div class="exch-tabs" id="acctExchTabs">
+          <div class="exch-tab active" data-exch-tab="mexc">
+            <div class="exch-tab-icon exch-tab-icon-mexc">M</div>
+            <div class="exch-tab-mid"><div class="exch-tab-name">MEXC</div><div class="exch-tab-dot" id="acctTabDotMexc">Не подключено</div></div>
+          </div>
+          <div class="exch-tab" data-exch-tab="binance">
+            <div class="exch-tab-icon exch-tab-icon-binance">B</div>
+            <div class="exch-tab-mid"><div class="exch-tab-name">Binance</div><div class="exch-tab-dot" id="acctTabDotBinance">Не подключено</div></div>
+          </div>
+          <div class="exch-tab" data-exch-tab="okx">
+            <div class="exch-tab-icon exch-tab-icon-okx">O</div>
+            <div class="exch-tab-mid"><div class="exch-tab-name">OKX</div><div class="exch-tab-dot" id="acctTabDotOkx">Не подключено</div></div>
+          </div>
+        </div>
+
+        <div class="settings-group exch-tab-panel active" id="acctPanelMexc">
           <div class="settings-group-title" data-i18n>Подключение по API-ключу</div>
           <div class="setting-row">
             <span class="setting-label" data-i18n>Статус</span>
@@ -566,24 +581,12 @@
           </div>
         </div>
 
-        <div class="acct-finres-note">
-          <i class="ri-funds-line"></i>
-          <div class="acct-finres-note-mid">
-            <div class="acct-finres-note-title" data-i18n>Баланс и аналитика — на странице «Финрез»</div>
-            <div class="acct-finres-note-text" data-i18n-block data-i18n-key="acct-finres-note-text">После подключения ключа портфель, P&amp;L, календарь, риски и журнал сделок с точками входа/выхода отображаются там.</div>
-          </div>
-          <button type="button" class="settings-btn" id="acctGoFinresBtn"><i class="ri-arrow-right-line"></i> <span data-i18n>Открыть Финрез</span></button>
-        </div>
-
-        <div class="acct-security-note" style="margin-top:16px;" data-i18n-block data-i18n-key="acct-other-exchanges-note">
-          <i class="ri-information-line"></i> <strong>Другие биржи (ниже).</strong> Пока это только подключение и
-          проверка ключа — так же безопасно, как у MEXC выше (ключи нигде не хранятся, кроме этого
-          браузера/приложения). Данные с этих бирж в таблицу скринера и на «Финрез» пока не попадают —
-          это следующий шаг.
-        </div>
-
-        <div class="settings-group">
+        <div class="settings-group exch-tab-panel" id="acctPanelBinance">
           <div class="settings-group-title">Binance</div>
+          <div class="acct-security-note" data-i18n-block data-i18n-key="acct-other-exchanges-note">
+            <i class="ri-information-line"></i> Подключите биржу — её монеты появятся в таблице скринера
+            (переключатель «Все/M/B/O» сверху). Ключи хранятся только в этом браузере/приложении, как и у MEXC.
+          </div>
           <div class="setting-row">
             <span class="setting-label" data-i18n>Статус</span>
             <div class="setting-control">
@@ -614,8 +617,12 @@
           </div>
         </div>
 
-        <div class="settings-group">
+        <div class="settings-group exch-tab-panel" id="acctPanelOkx">
           <div class="settings-group-title">OKX</div>
+          <div class="acct-security-note" data-i18n-block data-i18n-key="acct-other-exchanges-note">
+            <i class="ri-information-line"></i> Подключите биржу — её монеты появятся в таблице скринера
+            (переключатель «Все/M/B/O» сверху). Ключи хранятся только в этом браузере/приложении, как и у MEXC.
+          </div>
           <div class="setting-row">
             <span class="setting-label" data-i18n>Статус</span>
             <div class="setting-control">
@@ -653,6 +660,15 @@
               <button class="settings-btn secondary" id="okxDisconnectBtn" data-i18n>Отключить</button>
             </div>
           </div>
+        </div>
+
+        <div class="acct-finres-note">
+          <i class="ri-funds-line"></i>
+          <div class="acct-finres-note-mid">
+            <div class="acct-finres-note-title" data-i18n>Баланс и аналитика — на странице «Финрез»</div>
+            <div class="acct-finres-note-text" data-i18n-block data-i18n-key="acct-finres-note-text">После подключения ключа портфель, P&amp;L, календарь, риски и журнал сделок с точками входа/выхода отображаются там.</div>
+          </div>
+          <button type="button" class="settings-btn" id="acctGoFinresBtn"><i class="ri-arrow-right-line"></i> <span data-i18n>Открыть Финрез</span></button>
         </div>
       </div>
     </div>

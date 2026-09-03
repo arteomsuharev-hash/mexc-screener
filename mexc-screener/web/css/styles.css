@@ -426,6 +426,12 @@ body {
 }
 .status-badge.off { background: rgba(248,73,96,.1); color: var(--red); border-color: rgba(248,73,96,.25); box-shadow: none; }
 .status-badge.warn { background: rgba(240,185,11,.1); color: var(--orange); border-color: rgba(240,185,11,.25); box-shadow: 0 0 14px -4px rgba(240,185,11,.4); }
+/* Верхний статус-бейдж подсвечивается под текущий выбор в переключателе бирж (activeExchangeFilter,
+   см. applyConnectionBadge в app.js) — но только пока связь реально в порядке (mode "ok"); при warn/off
+   выше эти цвета всё равно перекрываются — проблема со связью важнее бренд-цвета. */
+.status-badge.exch-mexc { background: rgba(30,128,255,.1); color: var(--blue); border-color: rgba(30,128,255,.25); box-shadow: 0 0 14px -4px rgba(30,128,255,.5); }
+.status-badge.exch-binance { background: rgba(240,185,11,.14); color: #F0B90B; border-color: rgba(240,185,11,.3); box-shadow: 0 0 16px -3px rgba(240,185,11,.6); }
+.status-badge.exch-okx { background: var(--bg-hover); color: var(--text-primary); border-color: var(--border-color); box-shadow: none; }
 .status-dot { width: 6px; height: 6px; background: currentColor; border-radius: 50%; animation: pulse 2s infinite; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 .topbar-metrics { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
@@ -733,6 +739,33 @@ body {
   position: absolute; right: 8px; color: var(--text-muted); cursor: pointer; font-size: 14px;
 }
 .acct-toggle-eye:hover { color: var(--text-primary); }
+/* Вкладки бирж на "Настройки аккаунта" — клик по кружку сразу открывает форму ввода ключа этой
+   биржи, без скролла вниз (раньше карточки MEXC/Binance/OKX шли одна под другой). Тот же визуальный
+   язык кликабельной карточки, что и у profile-strategy-card на "Профилях" (граница+подсветка при
+   active), кружки — тот же язык, что и у .exch-switch-btn в тулбаре скринера/coin-icon у монет. */
+.exch-tabs { display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+.exch-tab {
+  display: flex; align-items: center; gap: 10px; padding: 10px 16px 10px 10px;
+  border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-card);
+  cursor: pointer; transition: border-color .15s, background .15s, transform .1s; position: relative;
+}
+.exch-tab:hover { border-color: var(--blue); background: var(--bg-hover); transform: translateY(-1px); }
+.exch-tab.active { border-color: var(--blue); background: rgba(30,128,255,.07); box-shadow: inset 0 0 0 1px var(--blue), 0 0 22px -8px rgba(30,128,255,.45); }
+.exch-tab-icon {
+  width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700; color: #fff; flex-shrink: 0;
+}
+.exch-tab-icon-mexc { background: var(--blue); }
+.exch-tab-icon-binance { background: #F0B90B; color: #1a1a1a; }
+.exch-tab-icon-okx { background: #000; }
+.exch-tab-mid { display: flex; flex-direction: column; gap: 2px; }
+.exch-tab-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.exch-tab-dot { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted); }
+.exch-tab-dot::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); }
+.exch-tab.connected .exch-tab-dot { color: var(--green); }
+.exch-tab.connected .exch-tab-dot::before { background: var(--green); box-shadow: 0 0 0 3px rgba(0,192,118,.15); }
+.exch-tab-panel { display: none; }
+.exch-tab-panel.active { display: block; }
 /* Баланс/аналитика больше не показываются на "Настройки аккаунта" — только статус подключения +
    переход на страницу "Финрез", где теперь живёт вся визуализация (см. #finresHeroBar). */
 .acct-finres-note {

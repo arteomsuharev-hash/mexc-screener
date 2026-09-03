@@ -88,9 +88,8 @@ const I18N_EN_BLOCKS = {
     'Once a key is connected, your portfolio, P&amp;L, calendar, risk and a trade journal with entry/exit ' +
     'points show up there.',
   'acct-other-exchanges-note':
-    '<strong>Other exchanges (below).</strong> For now this is only connecting and verifying the key — just ' +
-    'as safely as MEXC above (the keys aren\'t stored anywhere but this browser/app). Data from these ' +
-    'exchanges doesn\'t reach the screener table or Finance yet — that\'s the next step.'
+    'Connect an exchange — its coins will show up in the screener table (the "All/M/B/O" switcher at the ' +
+    'top). Keys are stored only in this browser/app, same as MEXC\'s.'
 };
 
 function applyStaticI18n() {
@@ -751,13 +750,40 @@ function rawSymbol(sym) {
   return String(sym || '').replace('/', '');
 }
 
+// Монеты с других бирж несут биржу прямо в символе ("BINANCE:CREAM/USDT", см. upsertExternalCoin/
+// coinDisplayLabel) — раньше tvSymbol() слепо приклеивала "MEXC:" ко ВСЕМУ, что ей передали, и для
+// такой монеты получалось "MEXC:BINANCE:CREAMUSDT" (TradingView честно отвечал "этого инструмента
+// не существует" — инструмента с таким именем действительно нет). Теперь читаем префикс биржи из
+// самого символа, если он есть, и используем ЕГО — TradingView знает Binance/OKX как отдельные
+// источники данных под собственными префиксами, так что график реально тянется с нужной биржи.
 function tvSymbol(sym) {
-  return 'MEXC:' + rawSymbol(sym);
+  const s = String(sym || '');
+  const m = s.match(/^([A-Z]+):(.+)$/);
+  if (m) return m[1] + ':' + rawSymbol(m[2]);
+  return 'MEXC:' + rawSymbol(s);
 }
 
 // URL реальной торговой страницы (терминала) MEXC для пары, напр. "BTC/USDT" -> mexc.com/exchange/BTC_USDT
 function mexcTerminalUrl(sym) {
   return 'https://www.mexc.com/exchange/' + encodeURIComponent(rawSymbol(sym).replace(/USDT$/, '_USDT'));
+}
+
+// Биржа, закодированная в начале символа ("BINANCE:CREAM/USDT" -> "BINANCE"), см. upsertExternalCoin/
+// tvSymbol выше. "MEXC" по умолчанию — её собственные символы префикса не несут ("BTC/USDT").
+function exchangeOfSymbol(sym) {
+  const m = String(sym || '').match(/^([A-Z]+):/);
+  return m ? m[1] : 'MEXC';
+}
+
+// То же самое, что и mexcTerminalUrl, но для любой из подключённых бирж — своя ссылка на реальный
+// торговый терминал этой пары на ЕЁ СОБСТВЕННОМ сайте, а не всегда на mexc.com.
+function exchangeTerminalUrl(symbol) {
+  const exch = exchangeOfSymbol(symbol);
+  if (exch === 'MEXC') return mexcTerminalUrl(symbol);
+  const base = String(symbol).replace(/^[A-Z]+:/, '').replace('/USDT', '');
+  if (exch === 'BINANCE') return 'https://www.binance.com/en/trade/' + encodeURIComponent(base) + '_USDT';
+  if (exch === 'OKX') return 'https://www.okx.com/trade-spot/' + encodeURIComponent(base.toLowerCase()) + '-usdt';
+  return mexcTerminalUrl(symbol);
 }
 
 // Открыть монету в торговом терминале MEXC — в новой вкладке браузера, либо, если приложение запущено
@@ -1460,39 +1486,18 @@ function selectCoin(symbol, forceChart) {
   currentCoin = coin;
   updateInfoPanel();
   renderTable();
-  // График/лента сделок/стакан здесь все MEXC-специфичные (собственный REST/WS MEXC) — у монет
-  // с других подключённых бирж (см. upsertExternalCoin) пока честно нет источника для них, вместо
-  // попытки запросить несуществующие/чужие данные показываем понятную заглушку.
+  // Лента сделок/стакан тянутся с MEXC WS (см. loadTrades/subscribeDeals) — для монет с других
+  // подключённых бирж (см. upsertExternalCoin) такого потока пока нет, честно показываем это вместо
+  // попытки запросить несуществующие/чужие данные. График — отдельная история: TradingView сам знает
+  // Binance/OKX как источники данных (см. tvSymbol), поэтому он загружается для любой биржи как обычно.
   if (coin.exchange && coin.exchange !== 'MEXC') {
-    showExternalCoinChartNotice(coin);
     showExternalCoinTradesNotice(coin);
-    return;
+  } else {
+    loadTrades(coin.raw);
   }
-  loadTrades(coin.raw);
   if (forceChart || chartSymbol !== coin.symbol) {
     loadExchangeChart(coin.symbol, currentTF);
   }
-}
-
-function showExternalCoinChartNotice(coin) {
-  const tvBox = document.getElementById('tv_chart_container');
-  const ownBox = document.getElementById('ownChartContainer');
-  const ph = document.getElementById('chartPlaceholder');
-  stopOwnChartAutoRefresh();
-  if (tvBox) tvBox.style.display = 'none';
-  if (ownBox) ownBox.style.display = 'none';
-  if (ph) {
-    ph.style.display = 'flex';
-    const span = ph.querySelector('span');
-    if (span) span.textContent = t('График и стакан для') + ' ' + coin.exchange + ' ' + t('пока не подключены — доступна только цена в таблице.');
-  }
-  const mexcLink = document.getElementById('openOnMexcLink');
-  if (mexcLink) mexcLink.style.display = 'none';
-  const copyBtn = document.getElementById('copyForVatagaBtn');
-  if (copyBtn) copyBtn.style.display = 'none';
-  const toggleBtn = document.getElementById('toggleOwnChartBtn');
-  if (toggleBtn) toggleBtn.style.display = 'none';
-  chartSymbol = null; // форсирует полную перезагрузку графика, когда следующей выберут монету MEXC
 }
 
 function showExternalCoinTradesNotice(coin) {
@@ -1528,19 +1533,23 @@ function loadExchangeChart(symbol, tf) {
   if (!container || !symbol) return;
   chartSymbol = symbol;
   currentTF = tf || currentTF;
+  const exch = exchangeOfSymbol(symbol);
 
   const mexcLink = document.getElementById('openOnMexcLink');
   if (mexcLink) {
-    mexcLink.href = mexcTerminalUrl(symbol);
+    mexcLink.href = exchangeTerminalUrl(symbol);
     mexcLink.style.display = 'inline-flex';
   }
+  // "Скопировать для Vataga.terminal" и "Свой график" (см. ниже) — оба завязаны на MEXC-специфику
+  // (символ для стороннего терминала заточен под MEXC; "свой график" тянет /api/v3/klines с MEXC REST,
+  // которого для пары, которой у MEXC может вообще не быть, естественно нет) — скрываем для других бирж.
   const copyBtn = document.getElementById('copyForVatagaBtn');
-  if (copyBtn) copyBtn.style.display = 'inline-flex';
+  if (copyBtn) copyBtn.style.display = exch === 'MEXC' ? 'inline-flex' : 'none';
   const toggleBtn = document.getElementById('toggleOwnChartBtn');
-  if (toggleBtn) toggleBtn.style.display = 'inline-flex';
+  if (toggleBtn) toggleBtn.style.display = exch === 'MEXC' ? 'inline-flex' : 'none';
   updateToggleChartBtnLabel();
 
-  if (ownChartModeMemory[symbol] === 'own') {
+  if (exch === 'MEXC' && ownChartModeMemory[symbol] === 'own') {
     switchToOwnChartUi();
     loadOwnChart();
     startOwnChartAutoRefresh();
@@ -2537,9 +2546,39 @@ async function loadTrades(raw) {
   }, 20000);
 }
 
+// Последнее реальное состояние MEXC WS-соединения — храним отдельно от того, что сейчас РИСУЕТСЯ
+// на бейдже, потому что бейдж дополнительно перекрашивается под переключатель бирж (см.
+// applyConnectionBadge/activeExchangeFilter) без нового события соединения.
+let lastConnStatusMode = 'off';
+let lastConnStatusText = '';
+
 function setStatus(mode, text) {
+  lastConnStatusMode = mode;
+  lastConnStatusText = text;
+  applyConnectionBadge();
+}
+
+// Красит и подписывает верхний статус-бейдж под текущий выбор в переключателе бирж (activeExchangeFilter,
+// см. exchangeSwitch) — синяя MEXC, жёлтая светящаяся Binance, светлая OKX. Реальные проблемы связи
+// (warn/off) всегда перекрывают бренд-цвет — статус соединения важнее того, какая биржа сейчас выбрана
+// для просмотра. Вызывается и из setStatus() (новое событие соединения), и из клика по переключателю
+// бирж (сама связь не менялась, но подпись/цвет бейджа должны обновиться немедленно).
+function applyConnectionBadge() {
   const badge = document.getElementById('connectionStatus');
-  badge.className = 'status-badge' + (mode === 'ok' ? '' : mode === 'warn' ? ' warn' : ' off');
+  if (!badge) return;
+  const mode = lastConnStatusMode;
+  let text = lastConnStatusText;
+  let cls = 'status-badge';
+  if (mode === 'warn') {
+    cls += ' warn';
+  } else if (mode === 'off') {
+    cls += ' off';
+  } else {
+    const exch = activeExchangeFilter === 'ALL' ? 'MEXC' : activeExchangeFilter;
+    cls += ' exch-' + exch.toLowerCase();
+    if (activeExchangeFilter !== 'ALL') text = exch + ' LIVE';
+  }
+  badge.className = cls;
   document.getElementById('statusText').textContent = text;
   const pill = document.getElementById('sidebarConn');
   pill.className = 'conn-pill ' + (mode === 'ok' ? 'ok' : mode === 'warn' ? 'warn' : 'err');
@@ -4352,6 +4391,16 @@ function setAccountStatus(state, msg) {
     text.textContent = 'Не подключено';
     navDot.title = 'Не подключено';
   }
+  updateAcctTabStatus('mexc', state === 'connected');
+}
+
+// Кружок-индикатор и подсветка вкладки биржи на "Настройки аккаунта" (см. exch-tabs в index.html) —
+// вызывается и из setAccountStatus (MEXC) выше, и из setExchangeStatus (Binance/OKX) ниже.
+function updateAcctTabStatus(id, connected) {
+  const tab = document.querySelector('.exch-tab[data-exch-tab="' + id + '"]');
+  const dot = document.getElementById('acctTabDot' + id.charAt(0).toUpperCase() + id.slice(1));
+  if (tab) tab.classList.toggle('connected', connected);
+  if (dot) dot.textContent = connected ? t('Подключено') : t('Не подключено');
 }
 
 // ------------------------------------------------------------------
@@ -7167,6 +7216,7 @@ function setExchangeStatus(id, state, msg) {
     badge.classList.add('off');
     text.textContent = t('Не подключено');
   }
+  updateAcctTabStatus(id, state === 'connected');
 }
 
 // Переключатель бирж в тулбаре скринера (#exchangeSwitch, см. index.html) — кружки с буквой вместо
@@ -7193,6 +7243,7 @@ function renderExchangeSwitch() {
     if (activeExchangeFilter !== 'ALL' && activeExchangeFilter !== 'MEXC') {
       activeExchangeFilter = 'ALL';
       renderTable();
+      applyConnectionBadge();
     }
     return;
   }
@@ -7217,6 +7268,7 @@ function renderExchangeSwitch() {
     activeExchangeFilter = btn.dataset.exchange;
     renderExchangeSwitch();
     renderTable();
+    applyConnectionBadge();
   });
 })();
 
@@ -8356,6 +8408,22 @@ function restartAnalyticsInterval() {
     updateAlerts();
   }, updateIntervalMs);
 }
+
+// Вкладки бирж на "Настройки аккаунта" (см. .exch-tabs в index.html) — клик переключает, какая
+// панель (MEXC/Binance/OKX) видна, без скролла по странице в поисках нужной формы ключа.
+(function wireAcctExchTabs() {
+  const tabs = document.getElementById('acctExchTabs');
+  if (!tabs) return;
+  tabs.addEventListener('click', function (e) {
+    const tab = e.target.closest('.exch-tab[data-exch-tab]');
+    if (!tab) return;
+    const id = tab.dataset.exchTab;
+    tabs.querySelectorAll('.exch-tab').forEach(function (t) { t.classList.toggle('active', t === tab); });
+    document.querySelectorAll('.exch-tab-panel').forEach(function (p) { p.classList.remove('active'); });
+    const panel = document.getElementById('acctPanel' + id.charAt(0).toUpperCase() + id.slice(1));
+    if (panel) panel.classList.add('active');
+  });
+})();
 
 // Аккаунт MEXC: кнопки подключения, показ/скрытие секрета, автоподключение при сохранённых ключах
 document.getElementById('acctConnectBtn').addEventListener('click', function () { connectMexcAccount(false); });
