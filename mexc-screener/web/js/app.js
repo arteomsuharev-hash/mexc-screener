@@ -18,7 +18,7 @@ const LEV_RE = /(UP|DOWN|BULL|BEAR|3L|3S|5L|5S)USDT$/;
 // собственный WS-мост ниже по файлу); в обычной веб-версии (без desktop-обёртки) его нет, тогда
 // берём запасную строку — держите её в СИНХРОНЕ с "version" в desktop/neutralino.config.json при
 // каждом релизе, иначе версия в интерфейсе разойдётся с реальной.
-const APP_VERSION = (typeof window.NL_APPVERSION === 'string' && window.NL_APPVERSION) || '1.2.0';
+const APP_VERSION = (typeof window.NL_APPVERSION === 'string' && window.NL_APPVERSION) || '1.3.0';
 // ЗАПОЛНИТЕ после создания GitHub-репозитория и первого релиза (см. docs/updates.md) — до этого
 // кнопка "Проверить обновления" будет честно показывать понятную ошибку, а не тихо молчать или
 // стучаться в несуществующий адрес.
