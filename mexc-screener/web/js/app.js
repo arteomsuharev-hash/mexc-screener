@@ -3967,7 +3967,29 @@ async function nativeCurlGet(url, apiKey, method) {
   // запроса не нужно, поэтому просто меняем метод, а не добавляем -d.
   const methodFlag = (method && method !== 'GET') ? ' -X ' + method : '';
   const cmd = 'curl.exe -s -S --max-time 10' + methodFlag + header + ' "' + stripQuotes(url) + '"';
-  const result = await nlCall('os.execCommand', { command: cmd, background: false }, 14000);
+  // Таймаут МОСТА здесь должен быть заметно больше --max-time самого curl (10с) — тот же запас на
+  // поведенческую проверку антивирусом ПЕРЕД стартом дочернего процесса, что и в execCommandSelfTest
+  // выше (там на неё явно выделено 10с даже для мгновенного "echo"). Раньше здесь стояло 14000 —
+  // при 10с у curl это давало всего ~4с запаса на саму проверку антивируса, WS-туда-обратно и разбор
+  // ответа. На "прогретой" машине этого хватало почти всегда, но именно поэтому ошибка была
+  // РЕДКОЙ, а не системной: иногда антивирус на конкретный запуск curl.exe (не на сам факт запуска
+  // процессов вообще — тот execCommandSelfTest уже проверил и закэшировал успешным) тратит на пару
+  // секунд больше обычного, и мост не успевает уложиться в 14с, хотя curl.exe в итоге отработал бы
+  // нормально. 22с — тот же принцип, что и у self-test (до ~10с на антивирус) плюс полные 10с у
+  // curl.exe плюс запас на сам WS-обмен.
+  const bridgeTimeoutMs = 22000;
+  let result;
+  try {
+    result = await nlCall('os.execCommand', { command: cmd, background: false }, bridgeTimeoutMs);
+  } catch (bridgeErr) {
+    // Мост не ответил вовремя — почти всегда одноразовая задержка старта ИМЕННО ЭТОГО запуска
+    // curl.exe (см. выше), а не системная поломка моста (ту execCommandSelfTest() уже отсеял бы
+    // ошибкой до этого места). Один быстрый повтор почти всегда решает проблему без участия
+    // пользователя; если мост правда недоступен, ошибка повторится и на второй попытке — тогда
+    // просто пробрасываем её как есть.
+    if (!/не ответил/.test(bridgeErr.message)) throw bridgeErr;
+    result = await nlCall('os.execCommand', { command: cmd, background: false }, bridgeTimeoutMs);
+  }
   if (result && result.exitCode === 0) {
     return { ok: true, body: result.stdOut };
   }
@@ -5175,6 +5197,19 @@ let finresTab = 'overview';
 let finresPeriod = '7d'; // 1d | 7d | 30d | 90d | all — период для вкладки "Обзор"
 // Кэш реализованного PnL по сделкам: { trades: [{time, asset, pnl}], loadedAt, loading, error }
 let finresRealized = null;
+
+// Начало ТЕКУЩИХ календарных суток (00:00 по местному времени устройства) в мс — используется
+// только для периода "1Д" в finresFilterByPeriod ниже. Раньше "1Д" считался скользящим окном
+// (Date.now() - 24ч), из-за чего рано утром в него всё ещё попадала БОЛЬШАЯ часть ВЧЕРАШНИХ
+// сделок — и вкладка "Обзор" выглядела так, будто показывает "вчера", хотя технически честно
+// показывала "последние 24 часа". К тому же это расходилось с тем, как считает календарь P&L
+// (тот группирует сделки строго по календарной дате, см. balCalDayKey/computeDailyRealizedPnlMap) —
+// одно и то же слово "сегодня"/"1Д" в двух местах приложения означало бы разные наборы сделок.
+function startOfTodayMs() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
 
 const FINRES_PERIODS = {
   '1d': { label: '1Д', ms: 24 * 3600 * 1000 },
@@ -6721,7 +6756,9 @@ async function finresLoadRealized(force) {
 function finresFilterByPeriod(trades, periodKey) {
   const period = FINRES_PERIODS[periodKey] || FINRES_PERIODS['7d'];
   if (period.ms == null) return trades;
-  const cutoff = Date.now() - period.ms;
+  // "1Д" — календарный день, см. комментарий у startOfTodayMs(); 7Д/30Д/90Д остаются скользящим
+  // окном (там расхождение на доли дня не бросается в глаза так, как оно бросалось на "1Д").
+  const cutoff = periodKey === '1d' ? startOfTodayMs() : (Date.now() - period.ms);
   return trades.filter(function (t) { return t.time >= cutoff; });
 }
 
