@@ -573,6 +573,86 @@
           </div>
           <button type="button" class="settings-btn" id="acctGoFinresBtn"><i class="ri-arrow-right-line"></i> <span data-i18n>Открыть Финрез</span></button>
         </div>
+
+        <div class="acct-security-note" style="margin-top:16px;" data-i18n-block data-i18n-key="acct-other-exchanges-note">
+          <i class="ri-information-line"></i> <strong>Другие биржи (ниже).</strong> Пока это только подключение и
+          проверка ключа — так же безопасно, как у MEXC выше (ключи нигде не хранятся, кроме этого
+          браузера/приложения). Данные с этих бирж в таблицу скринера и на «Финрез» пока не попадают —
+          это следующий шаг.
+        </div>
+
+        <div class="settings-group">
+          <div class="settings-group-title">Binance</div>
+          <div class="setting-row">
+            <span class="setting-label" data-i18n>Статус</span>
+            <div class="setting-control">
+              <span class="status-badge off" id="binanceStatusBadge" style="position:static;"><span class="status-dot"></span><span id="binanceStatusText" data-i18n>Не подключено</span></span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">API Key</span>
+            <div class="setting-control">
+              <input type="text" id="binanceApiKey" class="acct-wide-input" placeholder="..." autocomplete="off" spellcheck="false">
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">Secret Key</span>
+            <div class="setting-control">
+              <div class="acct-input-wrap">
+                <input type="password" id="binanceApiSecret" class="acct-wide-input" placeholder="••••••••••••••••" autocomplete="off" spellcheck="false">
+                <i class="ri-eye-line acct-toggle-eye" id="binanceToggleEye"></i>
+              </div>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label" data-i18n>Управление</span>
+            <div class="setting-control">
+              <button class="settings-btn" id="binanceConnectBtn" data-i18n>Подключить</button>
+              <button class="settings-btn secondary" id="binanceDisconnectBtn" data-i18n>Отключить</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <div class="settings-group-title">OKX</div>
+          <div class="setting-row">
+            <span class="setting-label" data-i18n>Статус</span>
+            <div class="setting-control">
+              <span class="status-badge off" id="okxStatusBadge" style="position:static;"><span class="status-dot"></span><span id="okxStatusText" data-i18n>Не подключено</span></span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">API Key</span>
+            <div class="setting-control">
+              <input type="text" id="okxApiKey" class="acct-wide-input" placeholder="..." autocomplete="off" spellcheck="false">
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">Secret Key</span>
+            <div class="setting-control">
+              <div class="acct-input-wrap">
+                <input type="password" id="okxApiSecret" class="acct-wide-input" placeholder="••••••••••••••••" autocomplete="off" spellcheck="false">
+                <i class="ri-eye-line acct-toggle-eye" id="okxToggleEye"></i>
+              </div>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">Passphrase</span>
+            <div class="setting-control">
+              <div class="acct-input-wrap">
+                <input type="password" id="okxApiPassphrase" class="acct-wide-input" placeholder="••••••••••••••••" autocomplete="off" spellcheck="false">
+                <i class="ri-eye-line acct-toggle-eye" id="okxPassphraseToggleEye"></i>
+              </div>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label" data-i18n>Управление</span>
+            <div class="setting-control">
+              <button class="settings-btn" id="okxConnectBtn" data-i18n>Подключить</button>
+              <button class="settings-btn secondary" id="okxDisconnectBtn" data-i18n>Отключить</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 

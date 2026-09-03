@@ -86,7 +86,11 @@ const I18N_EN_BLOCKS = {
     'to that restriction.',
   'acct-finres-note-text':
     'Once a key is connected, your portfolio, P&amp;L, calendar, risk and a trade journal with entry/exit ' +
-    'points show up there.'
+    'points show up there.',
+  'acct-other-exchanges-note':
+    '<strong>Other exchanges (below).</strong> For now this is only connecting and verifying the key — just ' +
+    'as safely as MEXC above (the keys aren\'t stored anywhere but this browser/app). Data from these ' +
+    'exchanges doesn\'t reach the screener table or Finance yet — that\'s the next step.'
 };
 
 function applyStaticI18n() {
@@ -3745,6 +3749,17 @@ async function hmacSha256Hex(secret, message) {
   return Array.from(new Uint8Array(sigBuf)).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
 }
 
+// Тот же HMAC-SHA256, что и hmacSha256Hex выше, но с base64-кодированием результата вместо hex —
+// именно так подписывает запросы OKX (см. EXCHANGE_CONNECTORS.okx.sign ниже); MEXC/Binance используют hex.
+async function hmacSha256Base64(secret, message) {
+  const enc = new TextEncoder();
+  const cryptoKey = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sigBuf = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(message));
+  let binary = '';
+  new Uint8Array(sigBuf).forEach(function (b) { binary += String.fromCharCode(b); });
+  return btoa(binary);
+}
+
 // fetch() без таймаута может зависнуть на десятки секунд/минуты, если сеть просто "молчит"
 // (пакеты тихо дропаются файрволом/антивирусом) — это выглядит как "долго идёт подключение".
 // Обрываем сами через AbortController, чтобы быстро перейти к запасному пути (curl.exe).
@@ -3953,15 +3968,18 @@ async function execCommandSelfTest() {
 // распространяются ограничения CORS. curl.exe — обычный скомпилированный бинарник (в отличие от
 // PowerShell с закодированным скриптом, который антивирусы чаще проверяют дольше как потенциально
 // подозрительный). Используется автоматически, только если обычный fetch() не сработал.
-async function nativeCurlGet(url, apiKey, method) {
+// headers — план объект {имя: значение} (например {'X-MEXC-APIKEY': ключ} у MEXC, четыре
+// OK-ACCESS-* заголовка у OKX — см. EXCHANGE_CONNECTORS) или null/falsy для публичных эндпоинтов
+// без авторизации (klines и т.п., заголовок тогда просто не добавляется).
+async function nativeCurlGet(url, headers, method) {
   if (!window.Neutralino) {
     return null; // нативный путь недоступен (не десктоп-приложение)
   }
   await execCommandSelfTest(); // бросит понятную ошибку, если процессы вообще не запускаются
 
-  // apiKey нужен только для приватных подписанных запросов — публичные эндпоинты (например klines)
-  // вызывают эту же функцию без ключа, тогда заголовок просто не добавляем.
-  const header = apiKey ? ' -H "X-MEXC-APIKEY: ' + stripQuotes(apiKey) + '"' : '';
+  const header = headers
+    ? Object.keys(headers).map(function (k) { return ' -H "' + stripQuotes(k) + ': ' + stripQuotes(headers[k]) + '"'; }).join('')
+    : '';
   // -X нужен только для не-GET (например POST/PUT/DELETE /api/v3/userDataStream — см. listenKeyRequest
   // ниже); MEXC у этих эндпоинтов, как и у GET, ожидает подписанные параметры в query string, тело
   // запроса не нужно, поэтому просто меняем метод, а не добавляем -d.
@@ -4039,7 +4057,7 @@ async function mexcSignedRequest(path, params, onProgress, method) {
     url = await buildSignedUrl(path, params); // свежий timestamp/подпись перед native-попыткой
     let native = null;
     try {
-      native = await nativeCurlGet(url, mexcApiKey, method);
+      native = await nativeCurlGet(url, { 'X-MEXC-APIKEY': mexcApiKey }, method);
     } catch (nativeErr) {
       throw new Error('Браузер не смог достучаться до api.mexc.com напрямую (' + fetchReason + '), и запасной способ через curl.exe тоже не сработал: ' + nativeErr.message);
     }
@@ -6865,6 +6883,227 @@ function disconnectMexcAccount() {
   const block = document.getElementById('myOrdersBlock');
   if (block) block.style.display = 'none';
 }
+
+// ============================================================================================
+// ДОПОЛНИТЕЛЬНЫЕ БИРЖИ (Binance, OKX) — Настройки аккаунта, "просто подключить".
+//
+// Это ПЕРВЫЙ шаг многобиржевого скринера: только подключение и проверка ключа, ровно как у MEXC
+// выше, но полностью НЕЗАВИСИМО от mexcApiKey/mexcApiSecret/accountConnected и mexcSignedRequest —
+// тот код (уже отлаженный, только что доработан по таймаутам native-моста) НЕ трогаем и НЕ
+// переиспользуем как единый путь, чтобы ничего в рабочем MEXC-подключении не могло случайно
+// сломаться. Экран/таблица скринера, Финрез и стратегии этих бирж пока не касаются — это
+// сознательно следующий шаг, не этот.
+//
+// Подпись у каждой биржи своя:
+//  - Binance: то же самое, что у MEXC (MEXC — документированный Binance-совместимый клон spot API)
+//    — HMAC-SHA256 в hex поверх query-строки, ключ в заголовке X-MBX-APIKEY.
+//  - OKX: другая схема — HMAC-SHA256 в base64 поверх строки timestamp+method+requestPath+body
+//    (timestamp — ISO-8601 UTC с миллисекундами), четыре заголовка OK-ACCESS-*, включая пароль
+//    (passphrase) — единственная из трёх бирж, где он обязателен.
+const EXCHANGE_CONNECTORS = {
+  binance: {
+    label: 'Binance',
+    baseUrl: 'https://api.binance.com',
+    verifyPath: '/api/v3/account',
+    needsPassphrase: false,
+    sign: async function (conn, path, params) {
+      const p = Object.assign({}, params, { timestamp: Date.now(), recvWindow: 10000 });
+      const qs = Object.keys(p).map(function (k) { return k + '=' + encodeURIComponent(p[k]); }).join('&');
+      const signature = await hmacSha256Hex(conn.apiSecret, qs);
+      return { url: this.baseUrl + path + '?' + qs + '&signature=' + signature, headers: { 'X-MBX-APIKEY': conn.apiKey } };
+    },
+    // Binance/MEXC иногда отвечают HTTP 200, но телом {code, msg} с реальной ошибкой внутри —
+    // тот же приём, что и в mexcSignedRequest выше.
+    checkError: function (data) {
+      if (data && typeof data === 'object' && !Array.isArray(data) && typeof data.code === 'number' &&
+          data.code !== 200 && typeof data.balances === 'undefined') {
+        throw new Error(data.msg || ('Ошибка Binance (код ' + data.code + ')'));
+      }
+    }
+  },
+  okx: {
+    label: 'OKX',
+    baseUrl: 'https://www.okx.com',
+    verifyPath: '/api/v5/account/balance',
+    needsPassphrase: true,
+    sign: async function (conn, path, params, method) {
+      const qs = params && Object.keys(params).length
+        ? '?' + Object.keys(params).map(function (k) { return k + '=' + encodeURIComponent(params[k]); }).join('&')
+        : '';
+      const requestPath = path + qs;
+      const timestamp = new Date().toISOString(); // уже ровно нужный формат: YYYY-MM-DDTHH:mm:ss.sssZ
+      const prehash = timestamp + (method || 'GET') + requestPath;
+      const signature = await hmacSha256Base64(conn.apiSecret, prehash);
+      return {
+        url: this.baseUrl + requestPath,
+        headers: {
+          'OK-ACCESS-KEY': conn.apiKey,
+          'OK-ACCESS-SIGN': signature,
+          'OK-ACCESS-TIMESTAMP': timestamp,
+          'OK-ACCESS-PASSPHRASE': conn.passphrase
+        }
+      };
+    },
+    // OKX почти всегда отвечает HTTP 200 (даже на неверный ключ) — реальный успех/ошибка сидит
+    // в теле: code "0" значит успех, любой другой код — ошибка с текстом в msg.
+    checkError: function (data) {
+      if (data && typeof data === 'object' && data.code !== undefined && String(data.code) !== '0') {
+        throw new Error(data.msg || ('Ошибка OKX (код ' + data.code + ')'));
+      }
+    }
+  }
+};
+
+// { binance: {apiKey, apiSecret, passphrase, connected}, okx: {...} } — независимо от mexcApiKey/
+// accountConnected выше, см. комментарий у EXCHANGE_CONNECTORS.
+let exchangeConnections = {};
+
+function setExchangeStatus(id, state, msg) {
+  const badge = document.getElementById(id + 'StatusBadge');
+  const text = document.getElementById(id + 'StatusText');
+  if (!badge || !text) return;
+  badge.classList.remove('off', 'warn');
+  if (state === 'connected') {
+    text.textContent = t('Подключено');
+  } else if (state === 'connecting') {
+    badge.classList.add('warn');
+    text.textContent = msg || t('Подключение...');
+  } else if (state === 'error') {
+    badge.classList.add('off');
+    text.textContent = t('Ошибка') + ': ' + (msg || t('не удалось подключиться'));
+  } else {
+    badge.classList.add('off');
+    text.textContent = t('Не подключено');
+  }
+}
+
+// Обобщённый аналог mexcSignedRequest (см. её же комментарий) — тот же приём "сначала fetch() из
+// браузера, при провале (CORS/сеть) — в обход через curl.exe", только параметризован коннектором
+// конкретной биржи вместо жёстко зашитого MEXC.
+async function exchangeSignedRequest(id, path, params, onProgress, method) {
+  method = method || 'GET';
+  const connector = EXCHANGE_CONNECTORS[id];
+  const conn = exchangeConnections[id];
+  let signed = await connector.sign(conn, path, params, method);
+  let text = null;
+  let httpOk = true;
+  if (onProgress) onProgress('browser');
+  try {
+    const res = await fetchWithTimeout(signed.url, { method: method, headers: signed.headers }, 8000);
+    text = await res.text();
+    httpOk = res.ok;
+    if (!httpOk) {
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch (e) { /* оставляем null */ }
+      throw new Error((data && (data.msg || data.message)) || text || ('HTTP ' + res.status));
+    }
+  } catch (fetchErr) {
+    if (!httpOk) throw fetchErr;
+    const fetchReason = fetchErr && fetchErr.name === 'AbortError' ? 'таймаут 8с' : (fetchErr && fetchErr.message) || 'сеть/CORS';
+    if (onProgress) onProgress('native');
+    signed = await connector.sign(conn, path, params, method); // свежий timestamp/подпись перед native-попыткой
+    let native = null;
+    try {
+      native = await nativeCurlGet(signed.url, signed.headers, method);
+    } catch (nativeErr) {
+      throw new Error('Браузер не смог достучаться до ' + connector.label + ' напрямую (' + fetchReason + '), и запасной способ через curl.exe тоже не сработал: ' + nativeErr.message);
+    }
+    if (!native) {
+      throw new Error('Не удалось связаться с ' + connector.label + ' напрямую из браузера (' + fetchReason + '). Похоже, биржа блокирует такие запросы из браузера для этого источника. ' +
+        'В desktop-приложении тот же запрос идёт в обход браузера и должен сработать.');
+    }
+    text = native.body;
+  }
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (e) {
+    throw new Error(connector.label + ' вернул нераспознаваемый ответ: ' + String(text).slice(0, 200));
+  }
+  if (connector.checkError) connector.checkError(data);
+  return data;
+}
+
+async function connectExchange(id, silent) {
+  const connector = EXCHANGE_CONNECTORS[id];
+  const keyEl = document.getElementById(id + 'ApiKey');
+  const secEl = document.getElementById(id + 'ApiSecret');
+  const passEl = connector.needsPassphrase ? document.getElementById(id + 'ApiPassphrase') : null;
+  const key = keyEl.value.trim();
+  const secret = secEl.value.trim();
+  const passphrase = passEl ? passEl.value.trim() : '';
+  if (!key || !secret || (connector.needsPassphrase && !passphrase)) {
+    if (!silent) showModal(connector.label, connector.needsPassphrase ? 'Введите API Key, Secret Key и Passphrase.' : 'Введите и API Key, и Secret Key.');
+    return;
+  }
+  exchangeConnections[id] = { apiKey: key, apiSecret: secret, passphrase: passphrase, connected: false };
+  setExchangeStatus(id, 'connecting');
+  try {
+    await exchangeSignedRequest(id, connector.verifyPath, {}, function (stage) {
+      setExchangeStatus(id, 'connecting', stage === 'native'
+        ? t('Браузер не ответил, пробуем в обход через curl.exe...')
+        : t('Подключение через браузер...'));
+    });
+    exchangeConnections[id].connected = true;
+    persistSet('exch_' + id + '_api_key', key);
+    persistSet('exch_' + id + '_api_secret', secret);
+    if (connector.needsPassphrase) persistSet('exch_' + id + '_api_passphrase', passphrase);
+    setExchangeStatus(id, 'connected');
+  } catch (e) {
+    exchangeConnections[id].connected = false;
+    setExchangeStatus(id, 'error', e.message);
+    if (!silent) showModal('Не удалось подключить ' + connector.label, e.message);
+  }
+}
+
+function disconnectExchange(id) {
+  const connector = EXCHANGE_CONNECTORS[id];
+  exchangeConnections[id] = { apiKey: '', apiSecret: '', passphrase: '', connected: false };
+  persistRemove('exch_' + id + '_api_key');
+  persistRemove('exch_' + id + '_api_secret');
+  if (connector.needsPassphrase) persistRemove('exch_' + id + '_api_passphrase');
+  document.getElementById(id + 'ApiKey').value = '';
+  document.getElementById(id + 'ApiSecret').value = '';
+  if (connector.needsPassphrase) document.getElementById(id + 'ApiPassphrase').value = '';
+  setExchangeStatus(id, 'disconnected');
+}
+
+function restoreSavedExchangeAndConnect(id) {
+  const connector = EXCHANGE_CONNECTORS[id];
+  try {
+    const savedKey = localStorage.getItem('exch_' + id + '_api_key');
+    const savedSecret = localStorage.getItem('exch_' + id + '_api_secret');
+    const savedPassphrase = connector.needsPassphrase ? localStorage.getItem('exch_' + id + '_api_passphrase') : '';
+    if (savedKey && savedSecret && (!connector.needsPassphrase || savedPassphrase) && !(exchangeConnections[id] && exchangeConnections[id].connected)) {
+      document.getElementById(id + 'ApiKey').value = savedKey;
+      document.getElementById(id + 'ApiSecret').value = savedSecret;
+      if (connector.needsPassphrase) document.getElementById(id + 'ApiPassphrase').value = savedPassphrase;
+      connectExchange(id, true);
+    }
+  } catch (e) { /* localStorage недоступен — просто не автоподключаемся, как и у MEXC выше */ }
+}
+
+// Общий обработчик "глазка" показать/скрыть пароль — то же самое, что и у acctToggleEye для MEXC
+// выше, только параметризован input'ом, чтобы не плодить одинаковые обработчики на каждое поле.
+function wirePasswordToggleEye(eyeId, inputId) {
+  const eye = document.getElementById(eyeId);
+  const input = document.getElementById(inputId);
+  if (!eye || !input) return;
+  eye.addEventListener('click', function () {
+    const showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    this.className = showing ? 'ri-eye-line acct-toggle-eye' : 'ri-eye-off-line acct-toggle-eye';
+  });
+}
+
+Object.keys(EXCHANGE_CONNECTORS).forEach(function (id) {
+  const connector = EXCHANGE_CONNECTORS[id];
+  const connectBtn = document.getElementById(id + 'ConnectBtn');
+  const disconnectBtn = document.getElementById(id + 'DisconnectBtn');
+  if (connectBtn) connectBtn.addEventListener('click', function () { connectExchange(id, false); });
+  if (disconnectBtn) disconnectBtn.addEventListener('click', function () { disconnectExchange(id); });
+  wirePasswordToggleEye(id + 'ToggleEye', id + 'ApiSecret');
+  if (connector.needsPassphrase) wirePasswordToggleEye(id + 'PassphraseToggleEye', id + 'ApiPassphrase');
+  restoreSavedExchangeAndConnect(id);
+});
 
 // Только для __fakeFinresLogin (ручная проверка дизайна без реального API-ключа) — реальные сетевые
 // попытки с пустым секретом просто сыпали бы ошибками HMAC и затирали тестовые данные. В обычной
