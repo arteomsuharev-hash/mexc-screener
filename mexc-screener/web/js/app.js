@@ -156,6 +156,7 @@ const I18N_EN = {
   // --- Инфо-панель монеты ---
   'Мои открытые ордера': 'My open orders',
   'Все': 'All', 'Все биржи': 'All exchanges', 'Спот': 'Spot', 'Фьючерсы': 'Futures', 'выбрать рынок': 'choose market',
+  'Нет пар с движением ≥': 'No pairs moved ≥', 'за 24ч.': 'over 24h.',
   // --- Таймфреймы ---
   '1м': '1m', '5м': '5m', '15м': '15m', '30м': '30m', '1ч': '1h', '4ч': '4h', '1д': '1D',
   // --- График ---
@@ -3673,43 +3674,54 @@ function updateFavoritesPage() {
   });
 }
 
-// Какая биржа сейчас выбрана в фильтре страницы "Аналитика" (см. analyticsExchFilter) — раньше все
-// 4 панели ранжировали allCoins целиком, вперемешку показывая монеты сразу всех подключённых бирж
-// (MEXC/Binance-спот/Binance-фьючерсы/OKX) в одном списке, что при нескольких подключённых биржах
-// быстро превращалось в нечитаемую кашу из разноцветных бейджей. По умолчанию — "Все", как и раньше.
-let analyticsExchangeFilter = 'ALL';
-
-function renderAnalyticsExchFilter() {
-  const box = document.getElementById('analyticsExchFilter');
+// Общий "плоский" фильтр по бирже (Все/MEXC/Binance/.../OKX) — переиспользуется страницами
+// "Аналитика" и "Оповещения" (см. вызовы ниже), которые раньше ранжировали/показывали allCoins
+// целиком, вперемешку показывая монеты сразу всех подключённых бирж в одном списке — при нескольких
+// подключённых биржах быстро превращалось в нечитаемую кашу из разноцветных бейджей.
+// getActive/setActive — геттер/сеттер конкретной страницы (analyticsExchangeFilter/alertsExchangeFilter
+// и т.п.), onChange — что перерисовать после смены фильтра. Кнопки — тот же exch-switch-btn, что и у
+// переключателя бирж в тулбаре скринера, просто без выдвижной ленты спот/фьючерс (для второстепенных
+// страниц с топ-листами эта тонкость не нужна — Binance-фьючерсы там просто отдельная кнопка "F").
+function renderFlatExchFilter(containerId, getActive, setActive, onChange) {
+  const box = document.getElementById(containerId);
   if (!box) return;
   const connectedIds = Object.keys(EXCHANGE_CONNECTORS).filter(function (id) { return exchangeConnections[id] && exchangeConnections[id].connected; });
   if (!connectedIds.length) {
     box.style.display = 'none';
-    analyticsExchangeFilter = 'ALL'; // нечего фильтровать — единственная биржа снова MEXC
+    if (getActive() !== 'ALL') setActive('ALL'); // нечего фильтровать — единственная биржа снова MEXC
     return;
   }
   box.style.display = 'flex';
   const tags = ['MEXC'].concat(connectedIds.reduce(function (acc, id) { return acc.concat(EXCHANGE_CONNECTORS[id].exchangeTags); }, []));
   const buttons = ['ALL'].concat(tags);
+  const active = getActive();
   box.innerHTML = buttons.map(function (ex) {
     if (ex === 'ALL') {
-      return '<div class="exch-switch-btn exch-switch-all' + (analyticsExchangeFilter === 'ALL' ? ' active' : '') + '" data-aexch="ALL">' + t('Все') + '</div>';
+      return '<div class="exch-switch-btn exch-switch-all' + (active === 'ALL' ? ' active' : '') + '" data-fexch="ALL">' + t('Все') + '</div>';
     }
-    return '<div class="exch-switch-btn exch-switch-' + ex.toLowerCase() + (analyticsExchangeFilter === ex ? ' active' : '') +
-      '" data-aexch="' + ex + '" title="' + (EXCHANGE_SWITCH_TITLES[ex] || ex) + '">' + EXCHANGE_SWITCH_LABELS[ex] + '</div>';
+    return '<div class="exch-switch-btn exch-switch-' + ex.toLowerCase() + (active === ex ? ' active' : '') +
+      '" data-fexch="' + ex + '" title="' + (EXCHANGE_SWITCH_TITLES[ex] || ex) + '">' + EXCHANGE_SWITCH_LABELS[ex] + '</div>';
   }).join('');
+  if (!box.dataset.wired) {
+    box.dataset.wired = '1'; // слушатель на контейнере переживает переотрисовку innerHTML — вешаем один раз
+    box.addEventListener('click', function (e) {
+      const btn = e.target.closest('[data-fexch]');
+      if (!btn || getActive() === btn.dataset.fexch) return;
+      setActive(btn.dataset.fexch);
+      onChange();
+    });
+  }
 }
 
-(function wireAnalyticsExchFilter() {
-  const box = document.getElementById('analyticsExchFilter');
-  if (!box) return;
-  box.addEventListener('click', function (e) {
-    const btn = e.target.closest('[data-aexch]');
-    if (!btn || analyticsExchangeFilter === btn.dataset.aexch) return;
-    analyticsExchangeFilter = btn.dataset.aexch;
-    updateAnalytics();
-  });
-})();
+// Какая биржа сейчас выбрана в фильтре страницы "Аналитика" (см. analyticsExchFilter) — по умолчанию
+// "Все", как и раньше.
+let analyticsExchangeFilter = 'ALL';
+function renderAnalyticsExchFilter() {
+  renderFlatExchFilter('analyticsExchFilter',
+    function () { return analyticsExchangeFilter; },
+    function (v) { analyticsExchangeFilter = v; },
+    updateAnalytics);
+}
 
 function updateAnalytics() {
   renderAnalyticsExchFilter();
@@ -3748,21 +3760,40 @@ function updateAnalytics() {
     function (c) { return c.vol60s; }, '--orange');
 }
 
+// Какая биржа сейчас выбрана в фильтре страницы "Оповещения" (см. renderFlatExchFilter) — бейдж в
+// сайдбаре при этом всегда честно считает ВСЕ оповещения по всем биржам сразу (это его роль —
+// "сколько их вообще"), фильтр сужает только сам список ниже.
+let alertsExchangeFilter = 'ALL';
+function renderAlertsExchFilter() {
+  renderFlatExchFilter('alertsExchFilter',
+    function () { return alertsExchangeFilter; },
+    function (v) { alertsExchangeFilter = v; },
+    updateAlerts);
+}
+
 function updateAlerts() {
+  renderAlertsExchFilter();
   const thr = num(document.getElementById('priceAlertThreshold').value) || 8;
-  const hits = allCoins.filter(function (c) { return Math.abs(c.change24) >= thr; })
+  const allHits = allCoins.filter(function (c) { return Math.abs(c.change24) >= thr; });
+  document.getElementById('navAlertBadge').textContent = allHits.length;
+  const hits = (alertsExchangeFilter === 'ALL' ? allHits : allHits.filter(function (c) { return (c.exchange || 'MEXC') === alertsExchangeFilter; }))
     .sort(function (a, b) { return Math.abs(b.change24) - Math.abs(a.change24); })
     .slice(0, 30);
-  document.getElementById('navAlertBadge').textContent = hits.length;
   const box = document.getElementById('alertsList');
   if (!hits.length) {
-    box.innerHTML = '<div class="empty-state"><i class="ri-notification-off-line"></i>Нет пар с движением ≥ ' + thr + '% за 24ч.</div>';
+    box.innerHTML = '<div class="empty-state"><i class="ri-notification-off-line"></i>' + t('Нет пар с движением ≥') + ' ' + thr + '% ' + t('за 24ч.') + '</div>';
     return;
   }
-  box.innerHTML = hits.map(function (c) {
-    return '<div class="alert-row"><div class="coin-icon" style="background:' + c.color + '">' + c.baseAsset.charAt(0) + '</div>' +
+  const maxAbs = Math.max.apply(null, hits.map(function (c) { return Math.abs(c.change24); })) || 1;
+  box.innerHTML = hits.map(function (c, i) {
+    const up = c.change24 >= 0;
+    const barPct = Math.min(100, Math.abs(c.change24) / maxAbs * 100);
+    return '<div class="alert-row" style="animation-delay:' + (i * 22) + 'ms">' +
+      '<span class="alert-row-bar" style="height:' + barPct.toFixed(0) + '%;top:auto;bottom:0;background:var(' + (up ? '--green' : '--red') + ')"></span>' +
+      '<span class="alert-row-num">' + (i + 1) + '</span>' +
+      '<div class="coin-icon" style="background:' + c.color + '">' + c.baseAsset.charAt(0) + '</div>' +
       '<strong>' + coinDisplayLabel(c) + '</strong><span>' + fmtPrice(c.price) + '</span>' +
-      '<span class="' + (c.change24 >= 0 ? 'price-up' : 'price-down') + '">' + (c.change24 >= 0 ? '+' : '') + c.change24.toFixed(2) + '%</span></div>';
+      '<span class="' + (up ? 'price-up' : 'price-down') + '">' + (up ? '+' : '') + c.change24.toFixed(2) + '%</span></div>';
   }).join('');
 }
 
