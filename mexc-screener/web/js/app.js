@@ -219,6 +219,9 @@ const I18N_EN = {
   'Отключить': 'Disconnect', 'Диагностика': 'Diagnostics', 'Проверить подключение': 'Test connection',
   'Баланс и аналитика — на странице «Финрез»': 'Balance & analytics are on the "Finance" page',
   'Открыть Финрез': 'Open Finance',
+  'График и стакан для': 'Chart and order book for',
+  'пока не подключены — доступна только цена в таблице.': 'aren\'t connected yet — only the price in the table is available.',
+  'Лента сделок пока доступна только для MEXC.': 'The trade feed is only available for MEXC for now.',
   // --- Финрез ---
   'Обзор': 'Overview', 'Сделки': 'Trades', 'Риски': 'Risk', 'Активы': 'Assets',
   // --- Bottom bar ---
@@ -549,6 +552,18 @@ function getCoinColor(symbol) {
     APT: '#00B4D8', PEPE: '#3CB371', BONK: '#FF7A00', WIF: '#FF6B6B', SHIB: '#FFA409'
   };
   return colors[symbol.replace('/USDT', '')] || '#6B7280';
+}
+
+// Монеты с других бирж (см. upsertExternalCoin) держат бирж-префикс ПРЯМО в c.symbol ("BINANCE:BTC/USDT"),
+// а не в отдельном поле — так все существующие места, которые используют c.symbol как ключ
+// identity (coinMap.get/data-symbol/избранное/паттерны), автоматически остаются рабочими и
+// коллизий с "голыми" символами MEXC (например тем же "BTC/USDT") быть не может, без переделки
+// каждого из этих мест по отдельности. Эта функция — только для ОТОБРАЖЕНИЯ: превращает такой
+// символ в маленький цветной бейдж биржи + читаемую пару, вместо сырой строки с двоеточием.
+function coinDisplayLabel(c) {
+  if (!c.exchange || c.exchange === 'MEXC') return c.symbol;
+  const pair = c.baseAsset + '/USDT';
+  return '<span class="exch-tag exch-tag-' + c.exchange.toLowerCase() + '">' + c.exchange.slice(0, 3) + '</span>' + pair;
 }
 
 function getSignal(c) {
@@ -1120,12 +1135,63 @@ function upsertCoin(row) {
     zoneHigh: m.zoneHigh,
     reverting: m.reverting,
     fav: prev ? prev.fav : false,
-    color: getCoinColor(display)
+    color: getCoinColor(display),
+    exchange: 'MEXC'
   };
   coin.signal = getSignal(coin);
   coin.__wlScore = computeWatchlistCandidateScore(coin);
   coinMap.set(display, coin);
   return coin;
+}
+
+// Тикеры с других подключённых бирж (Binance/OKX) — см. EXCHANGE_CONNECTORS/exchangeConnections
+// и pollExternalTickers ниже. НАМЕРЕННО отдельная, более простая функция, а не переиспользование
+// upsertCoin(): та тянет за собой тиковую историю (pushSnap/metricsFromSnaps) для вычисления
+// 5с/30с/60с волатильности/скорости оборота — метрики, честные только на живом WebSocket-потоке
+// сделок в реальном времени. Здесь же периодический REST-снимок раз в несколько секунд — считать
+// по нему "5-секундную волатильность" значило бы выдавать шум за сигнал. Поэтому у монет с других
+// бирж эти поля честно пустые/нулевые, а сигналы стратегий (Алгоритмы/Неэффективности/Пробой
+// плотностей) на них просто не работают — см. coinPassesFilters(), которая на активной стратегии
+// такие монеты из списка исключает, а не показывает им бессмысленный бейдж.
+//
+// c.symbol здесь ("BINANCE:BTC/USDT") — НЕ то же самое, что видит пользователь (см.
+// coinDisplayLabel) — подробности почему именно так см. в её комментарии.
+function upsertExternalCoin(rawSymbol, price, change24, vol24, high, low, exchange) {
+  if (!isUsdtSpot(rawSymbol)) return null;
+  if (!Number.isFinite(price) || price <= 0) return null;
+  const base = rawSymbol.replace(/USDT$/, '');
+  const pair = base + '/USDT';
+  const key = exchange + ':' + pair;
+  const prev = coinMap.get(key);
+  const coin = {
+    symbol: key,
+    raw: rawSymbol,
+    baseAsset: base,
+    price: price,
+    change24: Number.isFinite(change24) ? change24 : 0,
+    vol24: Number.isFinite(vol24) ? vol24 : 0,
+    high: Number.isFinite(high) ? high : price,
+    low: Number.isFinite(low) ? low : price,
+    vol5: 0, vol30: 0, vol60: 0, vol5s: 0, vol30s: 0, vol60s: 0,
+    preMove: null, rateCV: null, zoneLow: null, zoneHigh: null, reverting: false,
+    fav: prev ? prev.fav : false,
+    color: getCoinColor(pair),
+    exchange: exchange,
+    signal: 'WAIT', // нет тикового потока -> нет сигналов, см. комментарий выше
+    __wlScore: 0 // не участвует в watchlist глубокого анализа паттернов (тот тоже тиковый, MEXC-only)
+  };
+  coinMap.set(key, coin);
+  return coin;
+}
+
+// Убирает из coinMap все монеты конкретной внешней биржи (вызывается при disconnectExchange) —
+// иначе отключённая биржа продолжала бы висеть в таблице замороженным снимком последних цен.
+function removeExternalCoinsForExchange(exchange) {
+  let removed = 0;
+  coinMap.forEach(function (c, key) {
+    if (c.exchange === exchange) { coinMap.delete(key); removed++; }
+  });
+  return removed;
 }
 
 function rebuildList() {
@@ -1189,6 +1255,11 @@ function coinPassesFilters(c) {
   const q = searchQuery.toLowerCase();
   if (q && c.symbol.toLowerCase().indexOf(q) === -1 && c.baseAsset.toLowerCase().indexOf(q) === -1) return false;
   if (activeStrategy && STRATEGY_DEFS[activeStrategy]) {
+    // Алгоритмы/Неэффективности/Пробой плотностей — тиковые эвристики (см. upsertExternalCoin) на
+    // живом WS-потоке MEXC; у монет с других бирж (периодический REST-снимок) для них честно нет
+    // данных, показывать им бейдж сигнала было бы враньём — исключаем их из списка, а не подсовываем
+    // нулевой/шумовой score.
+    if (c.exchange && c.exchange !== 'MEXC') return false;
     if (!strategyStats) strategyStats = computeStrategyStats();
     if (!STRATEGY_DEFS[activeStrategy].match(c, strategyStats)) return false;
   }
@@ -1293,7 +1364,7 @@ function renderTable() {
     return '<tr data-symbol="' + c.symbol + '" class="' + (sel ? 'selected' : '') + rowAnim + '">' +
       '<td><i class="ri-star-line star ' + (c.fav ? 'active' : '') + '" data-symbol="' + c.symbol + '"></i></td>' +
       '<td>' + (i + 1) + '</td>' +
-      '<td><div class="coin-cell"><div class="coin-icon" style="background:' + c.color + '">' + c.baseAsset.charAt(0) + '</div><span>' + c.symbol + '</span></div></td>' +
+      '<td><div class="coin-cell"><div class="coin-icon" style="background:' + c.color + '">' + c.baseAsset.charAt(0) + '</div><span>' + coinDisplayLabel(c) + '</span></div></td>' +
       '<td class="cell-price">' + fmtPrice(c.price) + '</td>' +
       '<td class="' + (chg >= 0 ? 'price-up' : 'price-down') + '">' + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%</td>' +
       '<td>' + fmtNum(c.vol24) + '</td>' +
@@ -1308,7 +1379,7 @@ function renderTable() {
     const chg = c.change24 || 0;
     const sel = currentCoin && c.symbol === currentCoin.symbol;
     return '<div class="grid-card ' + (sel ? 'selected' : '') + '" data-symbol="' + c.symbol + '">' +
-      '<div class="grid-card-top"><div class="coin-icon" style="background:' + c.color + '">' + c.baseAsset.charAt(0) + '</div><strong>' + c.symbol + '</strong></div>' +
+      '<div class="grid-card-top"><div class="coin-icon" style="background:' + c.color + '">' + c.baseAsset.charAt(0) + '</div><strong>' + coinDisplayLabel(c) + '</strong></div>' +
       '<div class="grid-card-price">' + fmtPrice(c.price) + '</div>' +
       '<div class="' + (chg >= 0 ? 'price-up' : 'price-down') + '">' + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%</div>' +
       '<div class="grid-card-meta"><span>24ч ' + fmtNum(c.vol24) + '</span><span>5с ' + fmtNum(c.vol5) + '</span></div></div>';
@@ -1384,10 +1455,46 @@ function selectCoin(symbol, forceChart) {
   currentCoin = coin;
   updateInfoPanel();
   renderTable();
+  // График/лента сделок/стакан здесь все MEXC-специфичные (собственный REST/WS MEXC) — у монет
+  // с других подключённых бирж (см. upsertExternalCoin) пока честно нет источника для них, вместо
+  // попытки запросить несуществующие/чужие данные показываем понятную заглушку.
+  if (coin.exchange && coin.exchange !== 'MEXC') {
+    showExternalCoinChartNotice(coin);
+    showExternalCoinTradesNotice(coin);
+    return;
+  }
   loadTrades(coin.raw);
   if (forceChart || chartSymbol !== coin.symbol) {
     loadExchangeChart(coin.symbol, currentTF);
   }
+}
+
+function showExternalCoinChartNotice(coin) {
+  const tvBox = document.getElementById('tv_chart_container');
+  const ownBox = document.getElementById('ownChartContainer');
+  const ph = document.getElementById('chartPlaceholder');
+  stopOwnChartAutoRefresh();
+  if (tvBox) tvBox.style.display = 'none';
+  if (ownBox) ownBox.style.display = 'none';
+  if (ph) {
+    ph.style.display = 'flex';
+    const span = ph.querySelector('span');
+    if (span) span.textContent = t('График и стакан для') + ' ' + coin.exchange + ' ' + t('пока не подключены — доступна только цена в таблице.');
+  }
+  const mexcLink = document.getElementById('openOnMexcLink');
+  if (mexcLink) mexcLink.style.display = 'none';
+  const copyBtn = document.getElementById('copyForVatagaBtn');
+  if (copyBtn) copyBtn.style.display = 'none';
+  const toggleBtn = document.getElementById('toggleOwnChartBtn');
+  if (toggleBtn) toggleBtn.style.display = 'none';
+  chartSymbol = null; // форсирует полную перезагрузку графика, когда следующей выберут монету MEXC
+}
+
+function showExternalCoinTradesNotice(coin) {
+  const list = document.getElementById('tradesList');
+  if (!list) return;
+  list.innerHTML = '<div class="trades-empty"><i class="ri-information-line"></i><span>' +
+    t('Лента сделок пока доступна только для MEXC.') + '</span></div>';
 }
 
 // Основной график — TradingView-виджет по умолчанию (не встраивание САМОЙ страницы mexc.com — та
@@ -2330,7 +2437,7 @@ function updateInfoPanel() {
   if (!currentCoin) return;
   const c = coinMap.get(currentCoin.symbol) || currentCoin;
   currentCoin = c;
-  document.getElementById('infoCoinName').textContent = c.symbol;
+  document.getElementById('infoCoinName').innerHTML = coinDisplayLabel(c);
   document.getElementById('infoCoinIcon').textContent = c.baseAsset.charAt(0);
   document.getElementById('infoCoinIcon').style.background = c.color;
   document.getElementById('infoPrice').textContent = fmtPrice(c.price);
@@ -3474,7 +3581,7 @@ function updateFavoritesPage() {
   container.innerHTML = '<div class="favorites-grid">' + favs.map(function (c) {
     return '<div class="fav-card" data-symbol="' + c.symbol + '">' +
       '<div class="coin-icon" style="background:' + c.color + ';margin:0 auto 8px;width:40px;height:40px;font-size:18px;">' + c.baseAsset.charAt(0) + '</div>' +
-      '<div class="fav-symbol">' + c.symbol + '</div>' +
+      '<div class="fav-symbol">' + coinDisplayLabel(c) + '</div>' +
       '<div class="fav-price">' + fmtPrice(c.price) + '</div>' +
       '<div class="fav-change ' + (c.change24 >= 0 ? 'price-up' : 'price-down') + '">' + (c.change24 >= 0 ? '+' : '') + c.change24.toFixed(2) + '%</div>' +
       '<button class="fav-remove" data-symbol="' + c.symbol + '">Убрать</button></div>';
@@ -3501,7 +3608,7 @@ function updateFavoritesPage() {
 function updateAnalytics() {
   function list(arr, fmt) {
     return arr.map(function (c) {
-      return '<div class="rank-row"><span>' + c.symbol + '</span><span>' + fmt(c) + '</span></div>';
+      return '<div class="rank-row"><span>' + coinDisplayLabel(c) + '</span><span>' + fmt(c) + '</span></div>';
     }).join('') || '<div class="rank-row">Нет данных</div>';
   }
   const copy = allCoins.slice();
@@ -3532,7 +3639,7 @@ function updateAlerts() {
   }
   box.innerHTML = hits.map(function (c) {
     return '<div class="alert-row"><div class="coin-icon" style="background:' + c.color + '">' + c.baseAsset.charAt(0) + '</div>' +
-      '<strong>' + c.symbol + '</strong><span>' + fmtPrice(c.price) + '</span>' +
+      '<strong>' + coinDisplayLabel(c) + '</strong><span>' + fmtPrice(c.price) + '</span>' +
       '<span class="' + (c.change24 >= 0 ? 'price-up' : 'price-down') + '">' + (c.change24 >= 0 ? '+' : '') + c.change24.toFixed(2) + '%</span></div>';
   }).join('');
 }
@@ -6919,6 +7026,17 @@ const EXCHANGE_CONNECTORS = {
           data.code !== 200 && typeof data.balances === 'undefined') {
         throw new Error(data.msg || ('Ошибка Binance (код ' + data.code + ')'));
       }
+    },
+    // Публичный (без ключа/подписи) снимок 24ч-тикеров СРАЗУ по всем парам одним запросом — см.
+    // pollExternalTickers ниже. Формат полей у Binance ticker/24hr идентичен тому, что уже понимает
+    // upsertCoin() для MEXC (не совпадение — MEXC spot API документированно клонирует Binance).
+    tickerUrl: 'https://api.binance.com/api/v3/ticker/24hr',
+    parseTickers: function (body) {
+      const data = JSON.parse(body);
+      if (!Array.isArray(data)) throw new Error('неожиданный формат ответа Binance');
+      data.forEach(function (row) {
+        upsertExternalCoin(row.symbol, num(row.lastPrice), num(row.priceChangePercent), num(row.quoteVolume), num(row.highPrice), num(row.lowPrice), 'BINANCE');
+      });
     }
   },
   okx: {
@@ -6950,6 +7068,23 @@ const EXCHANGE_CONNECTORS = {
       if (data && typeof data === 'object' && data.code !== undefined && String(data.code) !== '0') {
         throw new Error(data.msg || ('Ошибка OKX (код ' + data.code + ')'));
       }
+    },
+    // Публичный снимок ВСЕХ спот-тикеров одним запросом — см. pollExternalTickers ниже. У OKX нет
+    // готового "изменения за 24ч в %" в ответе (в отличие от Binance/MEXC) — считаем сами из
+    // last/open24h; instId у OKX через дефис ("BTC-USDT"), приводим к слитному виду для
+    // upsertExternalCoin (тот же формат, что и raw-символ на MEXC/Binance).
+    tickerUrl: 'https://www.okx.com/api/v5/market/tickers?instType=SPOT',
+    parseTickers: function (body) {
+      const parsed = JSON.parse(body);
+      const rows = parsed && parsed.data;
+      if (!Array.isArray(rows)) throw new Error('неожиданный формат ответа OKX');
+      rows.forEach(function (row) {
+        const rawSymbol = String(row.instId || '').replace('-', '');
+        const last = num(row.last);
+        const open = num(row.open24h);
+        const change24 = open > 0 ? (last - open) / open * 100 : 0;
+        upsertExternalCoin(rawSymbol, last, change24, num(row.volCcy24h), num(row.high24h), num(row.low24h), 'OKX');
+      });
     }
   }
 };
@@ -6957,6 +7092,58 @@ const EXCHANGE_CONNECTORS = {
 // { binance: {apiKey, apiSecret, passphrase, connected}, okx: {...} } — независимо от mexcApiKey/
 // accountConnected выше, см. комментарий у EXCHANGE_CONNECTORS.
 let exchangeConnections = {};
+
+// GET без подписи (публичные рыночные данные) с тем же fetch()->curl.exe запасным путём, что и у
+// mexcSignedRequest/fetchKlines — публичные тикер-эндпоинты Binance/OKX на практике сами разрешают
+// CORS из браузера (проверено), но обход всё равно оставлен для устойчивости в desktop-приложении
+// (антивирус/сеть могут заблокировать САМ fetch, а не just CORS).
+async function fetchPublicText(url) {
+  try {
+    const res = await fetchWithTimeout(url, {}, 10000);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return await res.text();
+  } catch (browserErr) {
+    const native = await nativeCurlGet(url, null);
+    if (!native) throw browserErr;
+    return native.body;
+  }
+}
+
+let externalTickerTimers = {}; // id -> setInterval-хендл, см. start/stopExternalTickerPolling
+const EXTERNAL_TICKER_POLL_MS = 4000;
+
+async function pollExternalTickers(id) {
+  const connector = EXCHANGE_CONNECTORS[id];
+  try {
+    const body = await fetchPublicText(connector.tickerUrl);
+    connector.parseTickers(body);
+    rebuildList();
+    renderTable();
+  } catch (e) {
+    logW('Exchange', id + ': не удалось обновить тикеры — ' + e.message);
+  }
+}
+
+// Запускается при успешном connectExchange(id) — публичные рыночные данные качаются периодическим
+// REST-опросом (не WS, см. комментарий у upsertExternalCoin), пока эта биржа подключена.
+function startExternalTickerPolling(id) {
+  stopExternalTickerPollingTimer(id);
+  pollExternalTickers(id); // сразу первый раз, не ждём первого интервала
+  externalTickerTimers[id] = setInterval(function () { pollExternalTickers(id); }, EXTERNAL_TICKER_POLL_MS);
+}
+
+function stopExternalTickerPollingTimer(id) {
+  if (externalTickerTimers[id]) { clearInterval(externalTickerTimers[id]); delete externalTickerTimers[id]; }
+}
+
+// Вызывается при disconnectExchange(id) — останавливает опрос И убирает уже показанные монеты этой
+// биржи из таблицы (иначе они молча "зависли" бы последним известным снимком цены навсегда).
+function stopExternalTickerPolling(id) {
+  stopExternalTickerPollingTimer(id);
+  removeExternalCoinsForExchange(EXCHANGE_CONNECTORS[id].label.toUpperCase());
+  rebuildList();
+  renderTable();
+}
 
 function setExchangeStatus(id, state, msg) {
   const badge = document.getElementById(id + 'StatusBadge');
@@ -7047,6 +7234,7 @@ async function connectExchange(id, silent) {
     persistSet('exch_' + id + '_api_secret', secret);
     if (connector.needsPassphrase) persistSet('exch_' + id + '_api_passphrase', passphrase);
     setExchangeStatus(id, 'connected');
+    startExternalTickerPolling(id);
   } catch (e) {
     exchangeConnections[id].connected = false;
     setExchangeStatus(id, 'error', e.message);
@@ -7056,6 +7244,7 @@ async function connectExchange(id, silent) {
 
 function disconnectExchange(id) {
   const connector = EXCHANGE_CONNECTORS[id];
+  stopExternalTickerPolling(id);
   exchangeConnections[id] = { apiKey: '', apiSecret: '', passphrase: '', connected: false };
   persistRemove('exch_' + id + '_api_key');
   persistRemove('exch_' + id + '_api_secret');
@@ -7142,7 +7331,10 @@ async function loadMyOrdersForCoin(coin) {
   const block = document.getElementById('myOrdersBlock');
   const list = document.getElementById('myOrdersList');
   if (!block || !list) return;
-  if (!accountConnected || !coin) { block.style.display = 'none'; return; }
+  // coin.exchange !== 'MEXC' — эта монета с другой биржи (см. upsertExternalCoin), а запрос ниже
+  // всегда идёт на MEXC-аккаунт; без этой проверки для монеты вроде BINANCE:BTC/USDT здесь
+  // ошибочно показались бы MEXC-ордера по совпадающему по названию, но другому рынку символу.
+  if (!accountConnected || !coin || (coin.exchange && coin.exchange !== 'MEXC')) { block.style.display = 'none'; return; }
   block.style.display = 'block';
   list.textContent = 'Загрузка...';
   const seq = ++acctOrdersReqSeq;

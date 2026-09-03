@@ -604,6 +604,13 @@ body {
   display: flex; align-items: center; justify-content: center;
   font-size: 10px; font-weight: 700; color: #fff; flex-shrink: 0;
 }
+/* Маленький бейдж биржи перед парой у монет с других бирж (Binance/OKX) — см. coinDisplayLabel() в app.js. */
+.exch-tag {
+  display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: .02em;
+  padding: 1px 4px; border-radius: 3px; margin-right: 5px; vertical-align: 1px;
+}
+.exch-tag-binance { background: rgba(240,185,11,.16); color: #F0B90B; }
+.exch-tag-okx { background: rgba(255,255,255,.14); color: var(--text-primary); }
 .star { color: var(--text-muted); cursor: pointer; font-size: 14px; transition: color .15s; }
 .star:hover, .star.active { color: var(--orange); }
 .price-up { color: var(--green); }
