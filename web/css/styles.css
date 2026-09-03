@@ -258,6 +258,12 @@ body {
    этого раунда живёт только здесь, видна над всеми вкладками Финреза сразу. */
 .finres-hero-bar { padding: 20px 26px 4px; flex-shrink: 0; }
 .finres-hero-bar:empty { padding: 0; }
+/* Переключатель "чей Финрез сейчас показан" — крупнее и заметнее, чем такой же (тот же .exch-switch-btn)
+   в тулбаре скринера, т.к. тут он один на всю страницу, а не рядом с другими элементами тулбара. */
+.finres-exchange-tabs { margin: 18px 26px 0; padding: 3px; align-self: flex-start; }
+.finres-exchange-tabs .exch-switch-btn { width: 32px; height: 28px; font-size: 12px; }
+.finres-exchange-tabs .exch-switch-btn.connected { box-shadow: 0 0 0 1.5px var(--green); }
+.finres-exchange-tabs .exch-switch-btn.active.connected { box-shadow: 0 0 0 1.5px var(--green), inset 0 0 0 1.5px var(--text-primary); }
 
 .finres-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
 .finres-head h2 { font-size: 19px; font-weight: 700; color: var(--text-primary); }
@@ -1527,10 +1533,15 @@ body {
 .rank-bar-fill { display: block; height: 100%; border-radius: 2px; transition: width .4s cubic-bezier(.16,1,.3,1); opacity: .75; }
 .alerts-list { padding: 16px 20px; overflow: auto; }
 .alert-row {
-  display: flex; align-items: center; gap: 12px;
+  display: flex; align-items: center; gap: 12px; position: relative; overflow: hidden;
   padding: 10px 12px; background: var(--bg-card); border: 1px solid var(--border-color);
   border-radius: 8px; margin-bottom: 8px;
+  animation: rankRowIn .3s cubic-bezier(.16,1,.3,1) both;
 }
+.alert-row-num { color: var(--text-muted); font-size: 11px; font-family: var(--font-mono); width: 16px; text-align: right; flex-shrink: 0; }
+/* Тонкая полоска относительной "силы" движения (та же логика, что и .rank-bar-fill в Аналитике) —
+   во всю высоту карточки слева, а не отдельной строкой снизу — тут строк много и места мало. */
+.alert-row-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; opacity: .8; }
 
 .settings-container { padding: 24px 32px; max-width: 800px; margin: 0 auto; width: 100%; overflow-y: auto; }
 .settings-group { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px 24px; margin-bottom: 16px; }

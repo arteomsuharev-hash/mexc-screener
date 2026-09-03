@@ -313,8 +313,9 @@
     </div>
 
     <div class="page" id="page-alerts">
-      <div style="padding:16px 20px; border-bottom:1px solid var(--border-color);">
+      <div style="padding:16px 20px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
         <h2 style="font-size:18px; font-weight:600;" data-i18n>Оповещения по движению 24ч</h2>
+        <div class="analytics-exch-filter" id="alertsExchFilter" style="padding:0; display:none;"></div>
       </div>
       <div class="alerts-list" id="alertsList"></div>
     </div>
@@ -675,6 +676,7 @@
     </div>
 
     <div class="page" id="page-finres">
+      <div class="exchange-switch finres-exchange-tabs" id="finresExchangeTabs" style="display:none;"></div>
       <div class="finres-hero-bar" id="finresHeroBar"></div>
       <div class="finres-layout">
         <div class="finres-subnav">

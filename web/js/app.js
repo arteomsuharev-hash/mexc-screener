@@ -18,7 +18,7 @@ const LEV_RE = /(UP|DOWN|BULL|BEAR|3L|3S|5L|5S)USDT$/;
 // собственный WS-мост ниже по файлу); в обычной веб-версии (без desktop-обёртки) его нет, тогда
 // берём запасную строку — держите её в СИНХРОНЕ с "version" в desktop/neutralino.config.json при
 // каждом релизе, иначе версия в интерфейсе разойдётся с реальной.
-const APP_VERSION = (typeof window.NL_APPVERSION === 'string' && window.NL_APPVERSION) || '1.4.0';
+const APP_VERSION = (typeof window.NL_APPVERSION === 'string' && window.NL_APPVERSION) || '1.5.0';
 // ЗАПОЛНИТЕ после создания GitHub-репозитория и первого релиза (см. docs/updates.md) — до этого
 // кнопка "Проверить обновления" будет честно показывать понятную ошибку, а не тихо молчать или
 // стучаться в несуществующий адрес.
@@ -156,6 +156,7 @@ const I18N_EN = {
   // --- Инфо-панель монеты ---
   'Мои открытые ордера': 'My open orders',
   'Все': 'All', 'Все биржи': 'All exchanges', 'Спот': 'Spot', 'Фьючерсы': 'Futures', 'выбрать рынок': 'choose market',
+  'Нет пар с движением ≥': 'No pairs moved ≥', 'за 24ч.': 'over 24h.',
   // --- Таймфреймы ---
   '1м': '1m', '5м': '5m', '15м': '15m', '30м': '30m', '1ч': '1h', '4ч': '4h', '1д': '1D',
   // --- График ---
@@ -234,6 +235,8 @@ const I18N_EN = {
   // --- Финрез: пустые состояния / загрузка (динамические строки, обёрнуты t() в местах вывода) ---
   'Подключите API-ключ на странице «Настройки аккаунта», чтобы увидеть финансовый результат.':
     'Connect an API key on the "Account settings" page to see your financial results.',
+  'Подключите API-ключ': 'Connect an API key for',
+  'на странице «Настройки аккаунта», чтобы увидеть финансовый результат.': 'on the "Account settings" page to see your financial results.',
   'Загрузка баланса...': 'Loading balance...',
   'Загрузка истории сделок по монетам из баланса...': 'Loading trade history for balance coins...',
   'Нет данных баланса — откройте вкладку "Настройки аккаунта" и дождитесь подключения.':
@@ -452,6 +455,12 @@ let searchQuery = '';
 // 'ALL' | 'MEXC' | 'BINANCE' | 'OKX' — переключатель "какие биржи показывать" в тулбаре скринера
 // (см. renderExchangeSwitch/exchangeSwitch), учитывается в coinPassesFilters().
 let activeExchangeFilter = 'ALL';
+// 'mexc' | 'binance' — какую биржу сейчас показывает страница "Финрез" (см. switchFinresExchange
+// далеко ниже, рядом с остальным Финрез-кодом). Объявлено здесь, СИЛЬНО раньше остального Финрез-кода
+// — loadKnownSymbols() (см. её вызов сразу после объявления) читает эту переменную уже на самом
+// первом проходе скрипта; будь finresActiveExchange объявлена позже (let/const), это была бы ошибка
+// обращения к переменной до инициализации (temporal dead zone), а не просто "неопределённое значение".
+let finresActiveExchange = 'mexc';
 let sortField = 'vol24';
 let sortAsc = false;
 let viewMode = 'list';
@@ -1664,8 +1673,13 @@ function mexcKlineInterval(tf) {
   return map[tf] || '5m';
 }
 
-async function fetchKlines(raw, tf, limit) {
-  const url = MEXC_REST + '/api/v3/klines?symbol=' + encodeURIComponent(raw) + '&interval=' + mexcKlineInterval(tf) + '&limit=' + (limit || 200);
+// exchangeId — необязательный, тот же смысл, что и у fetchMyTrades: не задан (или 'mexc') — поведение
+// как раньше (MEXC_REST); любая другая подключённая биржа (сейчас — только Binance, см. журнал
+// сделок/openJournalForAsset) — тот же путь, но на её собственный REST (тот же /api/v3/klines и тот
+// же формат ответа — массив [openTime,open,high,low,close,volume,...], MEXC его 1:1 клонирует).
+async function fetchKlines(raw, tf, limit, exchangeId) {
+  const base = (!exchangeId || exchangeId === 'mexc') ? MEXC_REST : EXCHANGE_CONNECTORS[exchangeId].baseUrl;
+  const url = base + '/api/v3/klines?symbol=' + encodeURIComponent(raw) + '&interval=' + mexcKlineInterval(tf) + '&limit=' + (limit || 200);
   let bodyText = null;
   try {
     const res = await fetchWithTimeout(url, { method: 'GET' }, 10000);
@@ -3673,43 +3687,54 @@ function updateFavoritesPage() {
   });
 }
 
-// Какая биржа сейчас выбрана в фильтре страницы "Аналитика" (см. analyticsExchFilter) — раньше все
-// 4 панели ранжировали allCoins целиком, вперемешку показывая монеты сразу всех подключённых бирж
-// (MEXC/Binance-спот/Binance-фьючерсы/OKX) в одном списке, что при нескольких подключённых биржах
-// быстро превращалось в нечитаемую кашу из разноцветных бейджей. По умолчанию — "Все", как и раньше.
-let analyticsExchangeFilter = 'ALL';
-
-function renderAnalyticsExchFilter() {
-  const box = document.getElementById('analyticsExchFilter');
+// Общий "плоский" фильтр по бирже (Все/MEXC/Binance/.../OKX) — переиспользуется страницами
+// "Аналитика" и "Оповещения" (см. вызовы ниже), которые раньше ранжировали/показывали allCoins
+// целиком, вперемешку показывая монеты сразу всех подключённых бирж в одном списке — при нескольких
+// подключённых биржах быстро превращалось в нечитаемую кашу из разноцветных бейджей.
+// getActive/setActive — геттер/сеттер конкретной страницы (analyticsExchangeFilter/alertsExchangeFilter
+// и т.п.), onChange — что перерисовать после смены фильтра. Кнопки — тот же exch-switch-btn, что и у
+// переключателя бирж в тулбаре скринера, просто без выдвижной ленты спот/фьючерс (для второстепенных
+// страниц с топ-листами эта тонкость не нужна — Binance-фьючерсы там просто отдельная кнопка "F").
+function renderFlatExchFilter(containerId, getActive, setActive, onChange) {
+  const box = document.getElementById(containerId);
   if (!box) return;
   const connectedIds = Object.keys(EXCHANGE_CONNECTORS).filter(function (id) { return exchangeConnections[id] && exchangeConnections[id].connected; });
   if (!connectedIds.length) {
     box.style.display = 'none';
-    analyticsExchangeFilter = 'ALL'; // нечего фильтровать — единственная биржа снова MEXC
+    if (getActive() !== 'ALL') setActive('ALL'); // нечего фильтровать — единственная биржа снова MEXC
     return;
   }
   box.style.display = 'flex';
   const tags = ['MEXC'].concat(connectedIds.reduce(function (acc, id) { return acc.concat(EXCHANGE_CONNECTORS[id].exchangeTags); }, []));
   const buttons = ['ALL'].concat(tags);
+  const active = getActive();
   box.innerHTML = buttons.map(function (ex) {
     if (ex === 'ALL') {
-      return '<div class="exch-switch-btn exch-switch-all' + (analyticsExchangeFilter === 'ALL' ? ' active' : '') + '" data-aexch="ALL">' + t('Все') + '</div>';
+      return '<div class="exch-switch-btn exch-switch-all' + (active === 'ALL' ? ' active' : '') + '" data-fexch="ALL">' + t('Все') + '</div>';
     }
-    return '<div class="exch-switch-btn exch-switch-' + ex.toLowerCase() + (analyticsExchangeFilter === ex ? ' active' : '') +
-      '" data-aexch="' + ex + '" title="' + (EXCHANGE_SWITCH_TITLES[ex] || ex) + '">' + EXCHANGE_SWITCH_LABELS[ex] + '</div>';
+    return '<div class="exch-switch-btn exch-switch-' + ex.toLowerCase() + (active === ex ? ' active' : '') +
+      '" data-fexch="' + ex + '" title="' + (EXCHANGE_SWITCH_TITLES[ex] || ex) + '">' + EXCHANGE_SWITCH_LABELS[ex] + '</div>';
   }).join('');
+  if (!box.dataset.wired) {
+    box.dataset.wired = '1'; // слушатель на контейнере переживает переотрисовку innerHTML — вешаем один раз
+    box.addEventListener('click', function (e) {
+      const btn = e.target.closest('[data-fexch]');
+      if (!btn || getActive() === btn.dataset.fexch) return;
+      setActive(btn.dataset.fexch);
+      onChange();
+    });
+  }
 }
 
-(function wireAnalyticsExchFilter() {
-  const box = document.getElementById('analyticsExchFilter');
-  if (!box) return;
-  box.addEventListener('click', function (e) {
-    const btn = e.target.closest('[data-aexch]');
-    if (!btn || analyticsExchangeFilter === btn.dataset.aexch) return;
-    analyticsExchangeFilter = btn.dataset.aexch;
-    updateAnalytics();
-  });
-})();
+// Какая биржа сейчас выбрана в фильтре страницы "Аналитика" (см. analyticsExchFilter) — по умолчанию
+// "Все", как и раньше.
+let analyticsExchangeFilter = 'ALL';
+function renderAnalyticsExchFilter() {
+  renderFlatExchFilter('analyticsExchFilter',
+    function () { return analyticsExchangeFilter; },
+    function (v) { analyticsExchangeFilter = v; },
+    updateAnalytics);
+}
 
 function updateAnalytics() {
   renderAnalyticsExchFilter();
@@ -3748,21 +3773,40 @@ function updateAnalytics() {
     function (c) { return c.vol60s; }, '--orange');
 }
 
+// Какая биржа сейчас выбрана в фильтре страницы "Оповещения" (см. renderFlatExchFilter) — бейдж в
+// сайдбаре при этом всегда честно считает ВСЕ оповещения по всем биржам сразу (это его роль —
+// "сколько их вообще"), фильтр сужает только сам список ниже.
+let alertsExchangeFilter = 'ALL';
+function renderAlertsExchFilter() {
+  renderFlatExchFilter('alertsExchFilter',
+    function () { return alertsExchangeFilter; },
+    function (v) { alertsExchangeFilter = v; },
+    updateAlerts);
+}
+
 function updateAlerts() {
+  renderAlertsExchFilter();
   const thr = num(document.getElementById('priceAlertThreshold').value) || 8;
-  const hits = allCoins.filter(function (c) { return Math.abs(c.change24) >= thr; })
+  const allHits = allCoins.filter(function (c) { return Math.abs(c.change24) >= thr; });
+  document.getElementById('navAlertBadge').textContent = allHits.length;
+  const hits = (alertsExchangeFilter === 'ALL' ? allHits : allHits.filter(function (c) { return (c.exchange || 'MEXC') === alertsExchangeFilter; }))
     .sort(function (a, b) { return Math.abs(b.change24) - Math.abs(a.change24); })
     .slice(0, 30);
-  document.getElementById('navAlertBadge').textContent = hits.length;
   const box = document.getElementById('alertsList');
   if (!hits.length) {
-    box.innerHTML = '<div class="empty-state"><i class="ri-notification-off-line"></i>Нет пар с движением ≥ ' + thr + '% за 24ч.</div>';
+    box.innerHTML = '<div class="empty-state"><i class="ri-notification-off-line"></i>' + t('Нет пар с движением ≥') + ' ' + thr + '% ' + t('за 24ч.') + '</div>';
     return;
   }
-  box.innerHTML = hits.map(function (c) {
-    return '<div class="alert-row"><div class="coin-icon" style="background:' + c.color + '">' + c.baseAsset.charAt(0) + '</div>' +
+  const maxAbs = Math.max.apply(null, hits.map(function (c) { return Math.abs(c.change24); })) || 1;
+  box.innerHTML = hits.map(function (c, i) {
+    const up = c.change24 >= 0;
+    const barPct = Math.min(100, Math.abs(c.change24) / maxAbs * 100);
+    return '<div class="alert-row" style="animation-delay:' + (i * 22) + 'ms">' +
+      '<span class="alert-row-bar" style="height:' + barPct.toFixed(0) + '%;top:auto;bottom:0;background:var(' + (up ? '--green' : '--red') + ')"></span>' +
+      '<span class="alert-row-num">' + (i + 1) + '</span>' +
+      '<div class="coin-icon" style="background:' + c.color + '">' + c.baseAsset.charAt(0) + '</div>' +
       '<strong>' + coinDisplayLabel(c) + '</strong><span>' + fmtPrice(c.price) + '</span>' +
-      '<span class="' + (c.change24 >= 0 ? 'price-up' : 'price-down') + '">' + (c.change24 >= 0 ? '+' : '') + c.change24.toFixed(2) + '%</span></div>';
+      '<span class="' + (up ? 'price-up' : 'price-down') + '">' + (up ? '+' : '') + c.change24.toFixed(2) + '%</span></div>';
   }).join('');
 }
 
@@ -3783,6 +3827,7 @@ function switchPage(pageId) {
     // Сразу красим хиро/вкладку из уже закешированного lastBalanceState (если он есть — например,
     // юзер уже был на этой странице раньше в сессии), не дожидаясь ответа сети — и параллельно
     // запрашиваем свежие данные.
+    renderFinresExchangeTabs();
     renderFinresHero();
     renderFinresTab();
     refreshAccountBalancesIfConnected();
@@ -4499,9 +4544,39 @@ function mexcUsdtPrice(asset) {
   return null;
 }
 
+// coinMap-запись монеты для ТЕКУЩЕЙ активной биржи Финреза (finresActiveExchange) — "голый" ключ
+// ("BTC/USDT") для MEXC, префиксованный ("BINANCE:BTC/USDT") для любой другой (см. upsertExternalCoin);
+// EXCHANGE_CONNECTORS[id].exchangeTags[0] — спотовый тег, не фьючерсный (Финрез сейчас только про
+// спотовый баланс/сделки, см. комментарий у switchFinresExchange).
+function financeCoinFor(asset) {
+  if (finresActiveExchange === 'mexc') return coinMap.get(asset + '/USDT');
+  const connector = EXCHANGE_CONNECTORS[finresActiveExchange];
+  const spotTag = connector ? connector.exchangeTags[0] : finresActiveExchange.toUpperCase();
+  return coinMap.get(spotTag + ':' + asset + '/USDT');
+}
+
+// То же самое, что mexcUsdtPrice, но для ТЕКУЩЕЙ активной биржи Финреза — mexcUsdtPrice сам остаётся
+// нетронутым, эта обёртка используется только в двух местах Финреза, которым реально нужна цена
+// ЛЮБОЙ активной биржи — renderAccountBalances и finresLoadRealizedCore; по всем остальным вызовам
+// (включая __fakeFinresLogin) mexcUsdtPrice продолжает означать ровно то же, что и раньше.
+function financeUsdtPrice(asset) {
+  if (finresActiveExchange === 'mexc') return mexcUsdtPrice(asset);
+  const c = financeCoinFor(asset);
+  if (c && c.price) return c.price;
+  if (STABLECOINS.hasOwnProperty(asset)) return STABLECOINS[asset];
+  return null;
+}
+
+// MEXC хранит историю портфеля под старым ключом без изменений (не мигрируем существующих
+// пользователей на новый формат); у любой другой биржи Финреза (сейчас — Binance) свой отдельный
+// ключ, чтобы истории стоимости портфеля по разным биржам не перемешивались друг с другом.
+function balanceHistoryKeyFor(exchangeId) {
+  return exchangeId === 'mexc' ? BALANCE_HISTORY_KEY : exchangeId + '_balance_history';
+}
+
 function loadBalanceHistory() {
   try {
-    const raw = localStorage.getItem(BALANCE_HISTORY_KEY);
+    const raw = localStorage.getItem(balanceHistoryKeyFor(finresActiveExchange));
     const arr = raw ? JSON.parse(raw) : [];
     return Array.isArray(arr) ? arr : [];
   } catch (e) { return []; }
@@ -4524,7 +4599,7 @@ function pushBalanceHistory(total, assetValues) {
   const cutoff = now - BALANCE_HISTORY_MAX_AGE_MS;
   hist = hist.filter(function (p) { return p.t >= cutoff; });
   if (hist.length > BALANCE_HISTORY_MAX_POINTS) hist = hist.slice(hist.length - BALANCE_HISTORY_MAX_POINTS);
-  try { persistSet(BALANCE_HISTORY_KEY, JSON.stringify(hist)); } catch (e) {}
+  try { persistSet(balanceHistoryKeyFor(finresActiveExchange), JSON.stringify(hist)); } catch (e) {}
   return hist;
 }
 
@@ -5490,8 +5565,10 @@ document.querySelectorAll('.finres-tab[data-finres-tab]').forEach(function (b) {
 function renderFinresTab() {
   const el = document.getElementById('finresContent');
   if (!el) return;
-  if (!accountConnected) {
-    el.innerHTML = '<div class="finres-empty"><i class="ri-key-2-line"></i>' + t('Подключите API-ключ на странице «Настройки аккаунта», чтобы увидеть финансовый результат.') + '</div>';
+  if (!finresActiveExchangeConnected()) {
+    const exchLabel = finresActiveExchange === 'mexc' ? 'MEXC' : (EXCHANGE_CONNECTORS[finresActiveExchange] || {}).label || finresActiveExchange;
+    el.innerHTML = '<div class="finres-empty"><i class="ri-key-2-line"></i>' +
+      t('Подключите API-ключ') + ' ' + exchLabel + ' ' + t('на странице «Настройки аккаунта», чтобы увидеть финансовый результат.') + '</div>';
     return;
   }
   if (!lastBalanceState) {
@@ -5846,7 +5923,7 @@ function assetToRawSymbol(asset) {
 // WS ещё не успел прислать по ней тикер (см. assetToRawSymbol выше).
 function buildJournalChipsHtml() {
   return lastBalanceState.priced.map(function (r) {
-    const c = coinMap.get(r.asset + '/USDT');
+    const c = financeCoinFor(r.asset);
     const raw = (c && c.raw) || assetToRawSymbol(r.asset);
     const color = getCoinColor(r.asset);
     return '<button type="button" class="journal-chip" data-asset="' + r.asset + '" data-raw="' + raw + '">' +
@@ -5900,8 +5977,18 @@ function buildCoinSearchResultsHtml(query) {
   if (!q) return '';
   const seen = {};
   const matches = [];
+  // coinMap хранит тикеры сразу всех подключённых бирж под разными ключами ("BTC/USDT" у MEXC,
+  // "BINANCE:BTC/USDT" у Binance-спота, "BINANCEFUT:..." у её же фьючерсов — см. upsertExternalCoin) —
+  // раньше здесь совпадал вообще любой ключ, кончающийся на "/USDT", то есть поиск монеты для
+  // Финреза Binance мог бы предложить монету, которой на Binance вообще нет. Фильтруем строго по
+  // ключам ТЕКУЩЕЙ активной биржи Финреза: у MEXC ключ без префикса, у остальных — с ним.
+  const keyPrefix = finresActiveExchange === 'mexc' ? '' : (function () {
+    const connector = EXCHANGE_CONNECTORS[finresActiveExchange];
+    return (connector ? connector.exchangeTags[0] : finresActiveExchange.toUpperCase()) + ':';
+  })();
   coinMap.forEach(function (c, key) {
     if (!c || !c.raw || key.slice(-5) !== '/USDT') return;
+    if (finresActiveExchange === 'mexc' ? key.indexOf(':') !== -1 : key.indexOf(keyPrefix) !== 0) return;
     const asset = c.baseAsset || key.split('/')[0];
     if (seen[asset] || asset.toUpperCase().indexOf(q) === -1) return;
     seen[asset] = true;
@@ -6399,18 +6486,27 @@ let hideDustBalances = (function () {
 // вкладке "Сделки" (см. renderFinresTradesTab). finresLoadRealized() ниже берёт объединение этого
 // списка с текущим балансом — так однажды проданная в ноль монета остаётся в статистике.
 const KNOWN_SYMBOLS_KEY = 'mexc_known_trade_symbols';
-let knownSymbols = {}; // { BTC: 'BTCUSDT', ... }
+let knownSymbols = {}; // { BTC: 'BTCUSDT', ... } — известные символы ТЕКУЩЕЙ активной биржи Финреза
+// MEXC хранит список под старым ключом без изменений; у любой другой биржи Финреза — свой отдельный
+// ключ (тот же принцип, что и у balanceHistoryKeyFor выше), иначе, например, известные Binance-символы
+// подмешивались бы в MEXC-запросы /api/v3/myTrades и наоборот.
+function knownSymbolsKeyFor(exchangeId) {
+  return exchangeId === 'mexc' ? KNOWN_SYMBOLS_KEY : exchangeId + '_known_trade_symbols';
+}
 // Именованная (не анонимная IIFE), т.к. её нужно повторно вызвать из hydrateFromNativeStorageIfNeeded
 // ниже — если локальный localStorage-профиль оказался пустым (см. её комментарий), но резервная копия
-// нашлась в Neutralino.storage, нужно перечитать localStorage ещё раз уже ПОСЛЕ восстановления.
+// нашлась в Neutralino.storage, нужно перечитать localStorage ещё раз уже ПОСЛЕ восстановления. Также
+// вызывается из switchFinresExchange при первом переключении на биржу, для которой ещё нет снимка —
+// тогда читает уже её собственный ключ (см. knownSymbolsKeyFor(finresActiveExchange)).
 function loadKnownSymbols() {
   try {
-    const raw = localStorage.getItem(KNOWN_SYMBOLS_KEY);
+    const key = knownSymbolsKeyFor(finresActiveExchange);
+    const raw = localStorage.getItem(key);
     const arr = raw ? JSON.parse(raw) : [];
     let hadStablecoin = false;
     if (Array.isArray(arr)) arr.forEach(function (e) {
       if (!e || !e.asset || !e.raw) return;
-      // Стейблкоин сам против себя ("USDTUSDT" и т.п.) — не реальная спот-пара, MEXC всегда ответит
+      // Стейблкоин сам против себя ("USDTUSDT" и т.п.) — не реальная спот-пара, биржа всегда ответит
       // "Invalid symbol". Раньше такие записи могли попасть сюда (до того как эта проверка появилась
       // и в rememberSymbol ниже, и в finresLoadRealizedCore для текущего баланса) и с тех пор молча
       // пережёвывались на каждое обновление Финреза — один гарантированно провальный запрос впустую.
@@ -6419,7 +6515,7 @@ function loadKnownSymbols() {
     });
     if (hadStablecoin) {
       const arr2 = Object.keys(knownSymbols).map(function (a) { return { asset: a, raw: knownSymbols[a] }; });
-      persistSet(KNOWN_SYMBOLS_KEY, JSON.stringify(arr2));
+      persistSet(key, JSON.stringify(arr2));
     }
   } catch (e) { /* localStorage недоступен — просто не будет "памяти" между сессиями, не критично */ }
 }
@@ -6430,7 +6526,7 @@ function rememberSymbol(asset, raw) {
   knownSymbols[asset] = raw;
   try {
     const arr = Object.keys(knownSymbols).map(function (a) { return { asset: a, raw: knownSymbols[a] }; });
-    persistSet(KNOWN_SYMBOLS_KEY, JSON.stringify(arr));
+    persistSet(knownSymbolsKeyFor(finresActiveExchange), JSON.stringify(arr));
   } catch (e) { /* переживём без сохранения между сессиями */ }
 }
 
@@ -6449,7 +6545,7 @@ function renderAccountBalances(balances) {
     const rows = nonzero.map(function (b) {
       const free = parseFloat(b.free) || 0, locked = parseFloat(b.locked) || 0;
       const amount = free + locked;
-      const price = mexcUsdtPrice(b.asset);
+      const price = financeUsdtPrice(b.asset);
       return { asset: b.asset, free: free, locked: locked, amount: amount, price: price, usdtValue: price != null ? price * amount : null };
     });
     const pricedAll = rows.filter(function (r) { return r.usdtValue != null; }).sort(function (a, b) { return b.usdtValue - a.usdtValue; });
@@ -6457,7 +6553,7 @@ function renderAccountBalances(balances) {
     // Запоминаем символ каждой монеты, у которой сейчас ненулевой баланс — на будущее, на случай если
     // её потом продадут в ноль (см. комментарий у KNOWN_SYMBOLS_KEY выше).
     pricedAll.forEach(function (r) {
-      const c = coinMap.get(r.asset + '/USDT');
+      const c = financeCoinFor(r.asset);
       rememberSymbol(r.asset, (c && c.raw) || assetToRawSymbol(r.asset));
     });
     const dust = pricedAll.filter(function (r) { return r.usdtValue < DUST_USD_THRESHOLD; });
@@ -6495,7 +6591,7 @@ function renderAccountBalances(balances) {
 function renderFinresHero() {
   const el = document.getElementById('finresHeroBar');
   if (!el) return;
-  if (!accountConnected || !lastBalanceState) { el.innerHTML = ''; return; }
+  if (!finresActiveExchangeConnected() || !lastBalanceState) { el.innerHTML = ''; return; }
 
   // Уже была отрисована hero-карточка — значит, это авто-обновление, а не первый показ страницы:
   // плитки не должны заново проигрывать анимацию появления при каждом тике/переключении вкладок.
@@ -6566,7 +6662,7 @@ function renderFinresHero() {
   // hero-панели (finresLoadRealized сам решит, нужен ли реальный сетевой запрос, см. её 60с-кэш).
   finresLoadRealized(false).then(function (data) {
     const gridEl = document.querySelector('#finresHeroBar .balance-stats-grid');
-    if (!gridEl || !accountConnected || !lastBalanceState) return;
+    if (!gridEl || !finresActiveExchangeConnected() || !lastBalanceState) return;
     gridEl.innerHTML = buildBalanceStatsGridHtml(data.trades, lastBalanceState.priced.length, lastBalanceState.dust.length);
   });
 }
@@ -6669,7 +6765,7 @@ function updateFinresHeroPeriodView() {
 // строкой поиска — иначе каждые 3с сбрасывался бы фокус/курсор в поле поиска монеты, если юзер как раз печатает.
 function lightRefreshFinresContent() {
   const el = document.getElementById('finresContent');
-  if (!el || !accountConnected || !lastBalanceState) return;
+  if (!el || !finresActiveExchangeConnected() || !lastBalanceState) return;
   if (finresTab === 'overview') {
     renderFinresOverview(el, false);
   } else if (finresTab === 'pnl') {
@@ -6740,7 +6836,7 @@ function stopBalanceAutoRefresh() {
 // Стандартное решение: как только окно/вкладка снова видимы — форсируем немедленное обновление
 // баланса И принудительно сбрасываем часовой кэш finresLoadRealized, не дожидаясь таймеров.
 function forceRefreshFinresOnVisible() {
-  if (!accountConnected) return;
+  if (!finresActiveExchangeConnected()) return;
   const acctPage = document.getElementById('page-account');
   const finresPage = document.getElementById('page-finres');
   const acctActive = acctPage && acctPage.classList.contains('active');
@@ -6776,13 +6872,18 @@ window.addEventListener('online', function () {
 
 // --- Журнал сделок (Задача: "точки входа и выхода на графике по монете") ---
 
-// Реальная история исполненных сделок по конкретной паре — подписанный приватный эндпоинт MEXC
-// (тот же путь fetch()→curl.exe, что и у mexcSignedRequest в целом). MEXC не отдаёт единый список
-// сделок по ВСЕМ парам сразу, поэтому журнал строится только по монетам из текущего баланса —
+// Реальная история исполненных сделок по конкретной паре — подписанный приватный эндпоинт (тот же
+// путь fetch()→curl.exe, что и у mexcSignedRequest в целом). Ни MEXC, ни Binance не отдают единый
+// список сделок по ВСЕМ парам сразу, поэтому журнал строится только по монетам из текущего баланса —
 // по ним уже точно известен нужный symbol для запроса.
-async function fetchMyTrades(raw, limit) {
-  const data = await mexcSignedRequest('/api/v3/myTrades', { symbol: raw, limit: limit || 500 });
-  if (!Array.isArray(data)) throw new Error((data && (data.msg || data.message)) || 'Некорректный ответ MEXC');
+// exchangeId — необязательный: 'mexc' (или не задан, поведение как раньше — mexcSignedRequest)
+// vs любая другая подключённая биржа (см. EXCHANGE_CONNECTORS) — тогда через exchangeSignedRequest,
+// тот же ответ-формат {price,qty,time,isBuyer}, что и у MEXC (документированный Binance-клон).
+async function fetchMyTrades(raw, limit, exchangeId) {
+  const data = (!exchangeId || exchangeId === 'mexc')
+    ? await mexcSignedRequest('/api/v3/myTrades', { symbol: raw, limit: limit || 500 })
+    : await exchangeSignedRequest(exchangeId, '/api/v3/myTrades', { symbol: raw, limit: limit || 500 });
+  if (!Array.isArray(data)) throw new Error((data && (data.msg || data.message)) || 'Некорректный ответ биржи');
   return data.map(function (t) {
     return { price: Number(t.price), qty: Number(t.qty), time: Number(t.time), buy: !!t.isBuyer };
   }).filter(function (t) {
@@ -6907,7 +7008,7 @@ async function finresLoadRealizedCore() {
     // конструировать для них raw-символ через assetToRawSymbol бессмысленно (на споте MEXC такой пары,
     // как правило, просто нет) и раньше приводило к лишнему запросу, падающему с "Invalid symbol".
     if (STABLECOINS.hasOwnProperty(r.asset)) return;
-    const c = coinMap.get(r.asset + '/USDT');
+    const c = financeCoinFor(r.asset);
     targetMap[r.asset] = (c && c.raw) || assetToRawSymbol(r.asset);
   });
   Object.keys(knownSymbols).forEach(function (asset) { targetMap[asset] = knownSymbols[asset]; });
@@ -6926,7 +7027,7 @@ async function finresLoadRealizedCore() {
     while (nextIndex < targets.length) {
       const t = targets[nextIndex++];
       try {
-        const trades = await withRetry(function () { return fetchMyTrades(t.raw, 1000); }, 3, [1000, 3000, 8000], 'Finrez:' + t.asset, function (err) {
+        const trades = await withRetry(function () { return fetchMyTrades(t.raw, 1000, finresActiveExchange); }, 3, [1000, 3000, 8000], 'Finrez:' + t.asset, function (err) {
           return !/invalid symbol/i.test((err && err.message) || '');
         });
         bySymbol[t.asset] = trades;
@@ -6938,7 +7039,7 @@ async function finresLoadRealizedCore() {
         const openPos = computeOpenPositionForSymbol(trades);
         if (openPos) {
           const priceRow = priced.filter(function (r) { return r.asset === t.asset; })[0];
-          const currentPrice = priceRow ? priceRow.price : mexcUsdtPrice(t.asset);
+          const currentPrice = priceRow ? priceRow.price : financeUsdtPrice(t.asset);
           if (currentPrice != null) {
             const value = openPos.qty * currentPrice;
             const unrealizedPnl = value - openPos.costBasis;
@@ -7082,7 +7183,11 @@ async function connectMexcAccount(silent) {
     scopeAccountStorageToKey(key);
     persistSet('mexc_api_key', key);
     persistSet('mexc_api_secret', secret);
-    renderAccountBalances(data && data.balances);
+    // Если Финрез прямо сейчас показывает НЕ MEXC (пользователь подключил MEXC, глядя на Binance) —
+    // не перетираем текущие живые lastBalanceState/... данными MEXC. Свежий баланс MEXC подтянется
+    // сам, ленивым запросом, как только пользователь переключит Финрез на вкладку MEXC (см.
+    // switchFinresExchange: !lastBalanceState там как раз и обнаружит, что для MEXC ещё нет снимка).
+    if (finresActiveExchange === 'mexc') renderAccountBalances(data && data.balances);
     setAccountStatus('connected');
     startBalanceAutoRefresh();
     startPrivateDealsStream(); // автообнаружение новых монет для Финреза, см. её комментарий выше
@@ -7104,20 +7209,30 @@ function disconnectMexcAccount() {
   stopPrivateDealsStream();
   mexcApiKey = '';
   mexcApiSecret = '';
-  stopBalanceAutoRefresh();
+  // Останавливаем 3с-таймер, только если ВООБЩЕ никакая биржа больше не подключена — если, скажем,
+  // Binance всё ещё подключён, его Финрезу нужно продолжать тикать даже после отключения MEXC.
+  if (!anyFinresExchangeConnected()) stopBalanceAutoRefresh();
   persistRemove('mexc_api_key');
   persistRemove('mexc_api_secret');
   document.getElementById('acctApiKey').value = '';
   document.getElementById('acctApiSecret').value = '';
-  lastBalanceState = null;
-  lastRawBalances = null;
-  lastRenderedBalanceTotal = null;
-  // Баланс на "Настройки аккаунта" больше не рендерится — только на Финрезе; очищаем его, если
-  // страница сейчас видна, чтобы не показывать устаревшие цифры отключённого аккаунта.
-  const heroEl = document.getElementById('finresHeroBar');
-  if (heroEl) heroEl.innerHTML = '';
-  const finresPage = document.getElementById('page-finres');
-  if (finresPage && finresPage.classList.contains('active')) renderFinresTab();
+  // Если Финрез прямо сейчас показывает MEXC — чистим живые данные и перерисовываем как раньше. Если
+  // показывает другую биржу (Binance) — эти самые lastBalanceState/... принадлежат ЕЙ прямо сейчас,
+  // трогать их нельзя; вместо этого чистим отдельно хранящийся снимок MEXC (finresSnapshots.mexc),
+  // чтобы при следующем переключении обратно на MEXC он честно показался отключённым.
+  if (finresActiveExchange === 'mexc') {
+    lastBalanceState = null;
+    lastRawBalances = null;
+    lastRenderedBalanceTotal = null;
+    // Баланс на "Настройки аккаунта" больше не рендерится — только на Финрезе; очищаем его, если
+    // страница сейчас видна, чтобы не показывать устаревшие цифры отключённого аккаунта.
+    const heroEl = document.getElementById('finresHeroBar');
+    if (heroEl) heroEl.innerHTML = '';
+    const finresPage = document.getElementById('page-finres');
+    if (finresPage && finresPage.classList.contains('active')) renderFinresTab();
+  } else {
+    finresSnapshots.mexc = null;
+  }
   setAccountStatus('disconnected');
   const block = document.getElementById('myOrdersBlock');
   if (block) block.style.display = 'none';
@@ -7503,7 +7618,9 @@ async function connectExchange(id, silent) {
     if (connector.needsPassphrase) persistSet('exch_' + id + '_api_passphrase', passphrase);
     setExchangeStatus(id, 'connected');
     startExternalTickerPolling(id);
+    startBalanceAutoRefresh(); // тот же общий 3с-таймер, что и у MEXC — refreshAccountBalancesIfConnected сам решит, чью биржу обновлять (см. finresActiveExchange)
     renderExchangeSwitch();
+    renderFinresExchangeTabs();
   } catch (e) {
     exchangeConnections[id].connected = false;
     setExchangeStatus(id, 'error', e.message);
@@ -7522,7 +7639,23 @@ function disconnectExchange(id) {
   document.getElementById(id + 'ApiSecret').value = '';
   if (connector.needsPassphrase) document.getElementById(id + 'ApiPassphrase').value = '';
   setExchangeStatus(id, 'disconnected');
+  if (!anyFinresExchangeConnected()) stopBalanceAutoRefresh();
+  // Финрез прямо сейчас показывает именно эту биржу — она больше не подключена, чистим её живой снимок
+  // (то же самое, что disconnectMexcAccount делает для MEXC) и перерисовываем как "не подключено".
+  if (finresActiveExchange === id) {
+    lastBalanceState = null;
+    lastRawBalances = null;
+    lastRenderedBalanceTotal = null;
+    finresRealized = { trades: [], bySymbol: {}, openPositions: [], loadedAt: 0, loading: false, error: null };
+    const heroEl = document.getElementById('finresHeroBar');
+    if (heroEl) heroEl.innerHTML = '';
+    const finresPage = document.getElementById('page-finres');
+    if (finresPage && finresPage.classList.contains('active')) renderFinresTab();
+  } else {
+    finresSnapshots[id] = null;
+  }
   renderExchangeSwitch();
+  renderFinresExchangeTabs();
 }
 
 function restoreSavedExchangeAndConnect(id) {
@@ -7569,26 +7702,158 @@ Object.keys(EXCHANGE_CONNECTORS).forEach(function (id) {
 // работе всегда false, ни на что не влияет.
 let __designTestMode = false;
 
+// "Подключена ли биржа, которую СЕЙЧАС показывает Финрез" — accountConnected для MEXC, тот же
+// exchangeConnections[id].connected, что и в Настройках аккаунта, для любой другой (см.
+// switchFinresExchange). Единая точка вместо прямых обращений к accountConnected во всех гейтах
+// Финреза ниже — так каждый из них одинаково честно понимает, какая биржа сейчас активна.
+function finresActiveExchangeConnected() {
+  if (finresActiveExchange === 'mexc') return accountConnected;
+  return !!(exchangeConnections[finresActiveExchange] && exchangeConnections[finresActiveExchange].connected);
+}
+
+// Есть ли ВООБЩЕ хоть одна подключённая биржа (не только активная в Финрезе сейчас) — используется
+// только чтобы решить, можно ли останавливать общий 3с-таймер обновления баланса при отключении
+// ОДНОЙ конкретной биржи (см. disconnectMexcAccount/disconnectExchange): если, скажем, Binance ещё
+// подключён, таймеру рано останавливаться, даже если это MEXC только что отключили.
+function anyFinresExchangeConnected() {
+  if (accountConnected) return true;
+  return Object.keys(exchangeConnections).some(function (id) { return exchangeConnections[id] && exchangeConnections[id].connected; });
+}
+
+// ============================================================================================
+// ФИНРЕЗ ДЛЯ НЕСКОЛЬКИХ БИРЖ — переключатель сверху страницы (см. finresExchangeTabs в index.html).
+//
+// Раньше единственный набор глобалов (lastBalanceState/lastRawBalances/lastRenderedBalanceTotal/
+// finresRealized/knownSymbols) подразумевал единственную биржу — MEXC, потому что сам Финрез был
+// только про неё. НИ ОДНА из функций рендера/загрузки Финреза (renderFinresTab и все её вкладки,
+// renderFinresHero, finresLoadRealized/Core, refreshAccountBalancesIfConnected и т.д.) не менялась —
+// они по-прежнему читают/пишут ровно эти же имена переменных. Вместо этого при переключении между
+// биржами Финреза эти глобалы просто МЕНЯЮТСЯ МЕСТАМИ со снимком неактивной биржи (снимок — обычный
+// объект в finresSnapshots, не какая-то система геттеров/подписок). Именно поэтому весь дизайн/
+// фильтры/анимации Финреза остаются ровно теми же, что и были — их код в буквальном смысле не видит
+// разницы, чью биржу он сейчас рисует.
+//
+// Пока сознательно только спотовый баланс/сделки (тот же охват, что и у MEXC) — фьючерсный аккаунт
+// Binance (/fapi/v2/account) технически совсем другой API (маржа, позиции, а не free/locked баланс)
+// и заслуживает отдельного раунда, а не втискивания в существующие "баланс актива в USDT" виджеты.
+let finresSnapshots = { mexc: null }; // {exchangeId: {lastBalanceState, lastRawBalances, lastRenderedBalanceTotal, finresRealized, knownSymbols} | null}
+
+function snapshotFinresState() {
+  return {
+    lastBalanceState: lastBalanceState,
+    lastRawBalances: lastRawBalances,
+    lastRenderedBalanceTotal: lastRenderedBalanceTotal,
+    finresRealized: finresRealized,
+    knownSymbols: knownSymbols
+  };
+}
+function applyFinresSnapshot(snap) {
+  lastBalanceState = snap.lastBalanceState;
+  lastRawBalances = snap.lastRawBalances;
+  lastRenderedBalanceTotal = snap.lastRenderedBalanceTotal;
+  finresRealized = snap.finresRealized;
+  knownSymbols = snap.knownSymbols;
+}
+
+// Список бирж, у которых сейчас в принципе есть смысл показывать Финрез: MEXC — всегда (это базовая
+// биржа приложения), плюс любая подключённая биржа из EXCHANGE_CONNECTORS. OKX подключить можно уже
+// сегодня (см. Настройки аккаунта), но у нас пока нет её адаптера для Финреза (её REST не идентичен
+// Binance/MEXC по форме ответов) — явно исключаем, чтобы не предлагать вкладку, которая тут же
+// покажет "Не подключено" без реального пути её когда-либо подключить.
+const FINRES_SUPPORTED_EXCHANGES = ['mexc', 'binance'];
+const FINRES_EXCHANGE_LABEL = { mexc: 'MEXC', binance: 'Binance' };
+
+function switchFinresExchange(id) {
+  if (id === finresActiveExchange || FINRES_SUPPORTED_EXCHANGES.indexOf(id) === -1) return;
+  finresSnapshots[finresActiveExchange] = snapshotFinresState();
+  finresActiveExchange = id;
+  let snap = finresSnapshots[id];
+  if (!snap) {
+    // Впервые за эту сессию открываем Финрез этой биржи — начинаем с чистого состояния и подтягиваем
+    // её собственный список "известных символов" из localStorage (см. loadKnownSymbols выше — она
+    // читает knownSymbolsKeyFor(finresActiveExchange), а finresActiveExchange уже указывает на id).
+    knownSymbols = {};
+    loadKnownSymbols();
+    // finresRealized: та же "пустая, но валидная" форма, которую гарантирует настоящая загрузка
+    // (см. finresLoadRealized ниже, Object.assign({trades:[], ...}, ...)) — НЕ голый null, иначе
+    // finresLoadRealized(false) в __designTestMode мог бы на одно микротаск-тик вернуть null и уронить
+    // renderFinresOverviewContent/renderFinresHero, которые читают data.trades без проверки на null
+    // (в проде так не бывает — там до первого реального ответа finresRealized уже имеет эту форму).
+    snap = {
+      lastBalanceState: null, lastRawBalances: null, lastRenderedBalanceTotal: null,
+      finresRealized: { trades: [], bySymbol: {}, openPositions: [], loadedAt: 0, loading: false, error: null },
+      knownSymbols: knownSymbols
+    };
+    finresSnapshots[id] = snap;
+  }
+  applyFinresSnapshot(snap);
+  finresLoadPromise = null; // "идёт загрузка" не переносится с одной биржи на другую
+  // Очищаем DOM, чтобы следующий рендер посчитался "первой отрисовкой" и заново честно проиграл
+  // анимации появления (renderFinresHero сама решает это по наличию .balance-hero в DOM, см.
+  // комментарий у неё — а не по JS-флагу, поэтому очистки DOM достаточно, ничего больше сбрасывать не нужно).
+  const heroEl = document.getElementById('finresHeroBar');
+  if (heroEl) heroEl.innerHTML = '';
+  const contentEl = document.getElementById('finresContent');
+  if (contentEl) contentEl.innerHTML = '';
+  renderFinresExchangeTabs();
+  renderFinresHero();
+  renderFinresTab();
+  if (finresActiveExchangeConnected() && !lastBalanceState) {
+    refreshAccountBalancesIfConnected().then(function () { return finresLoadRealized(true); }).then(function () {
+      renderFinresHero();
+      renderFinresTab();
+    });
+  }
+}
+
+function renderFinresExchangeTabs() {
+  const box = document.getElementById('finresExchangeTabs');
+  if (!box) return;
+  // Показываем переключатель, только если реально есть между чем переключаться — MEXC один в один
+  // как раньше (без лишней вкладки над Финрезом, если Binance никогда не подключали).
+  const available = FINRES_SUPPORTED_EXCHANGES.filter(function (id) { return id === 'mexc' || (exchangeConnections[id] && exchangeConnections[id].connected); });
+  if (available.length <= 1) { box.style.display = 'none'; return; }
+  box.style.display = 'flex';
+  box.innerHTML = available.map(function (id) {
+    const connected = id === 'mexc' ? accountConnected : (exchangeConnections[id] && exchangeConnections[id].connected);
+    return '<div class="exch-switch-btn exch-switch-' + id + (id === finresActiveExchange ? ' active' : '') +
+      (connected ? ' connected' : '') + '" data-finres-exchange="' + id + '" title="' + FINRES_EXCHANGE_LABEL[id] + '">' +
+      EXCHANGE_SWITCH_LABELS[id.toUpperCase()] + '</div>';
+  }).join('');
+  if (!box.dataset.wired) {
+    box.dataset.wired = '1';
+    box.addEventListener('click', function (e) {
+      const btn = e.target.closest('[data-finres-exchange]');
+      if (btn) switchFinresExchange(btn.dataset.finresExchange);
+    });
+  }
+}
+
 let balanceRefreshInFlight = false;
 let balanceRefreshFailStreak = 0;
 function refreshAccountBalancesIfConnected() {
   if (__designTestMode) return Promise.resolve();
-  if (!accountConnected || balanceRefreshInFlight) return Promise.resolve(); // не копим параллельные запросы, если предыдущий ещё не ответил
+  if (!finresActiveExchangeConnected() || balanceRefreshInFlight) return Promise.resolve(); // не копим параллельные запросы, если предыдущий ещё не ответил
   balanceRefreshInFlight = true;
+  const isMexc = finresActiveExchange === 'mexc';
   // return — чтобы вызывающий код (например, кнопка «Обновить» в Финрезе) мог дождаться реального
   // завершения запроса, а не только поставить его в очередь.
-  return mexcSignedRequest('/api/v3/account', {}).then(function (data) {
+  const req = isMexc ? mexcSignedRequest('/api/v3/account', {}) : exchangeSignedRequest(finresActiveExchange, '/api/v3/account', {});
+  return req.then(function (data) {
     balanceRefreshFailStreak = 0;
     renderAccountBalances(data && data.balances);
-    // Раз соединение с MEXC прямо сейчас реально работает — статус должен это отражать, даже если
-    // до этого была временная ошибка (сеть моргнула, MEXC на секунду не ответил и т.п.). Иначе
-    // бейдж "Ошибка" мог бы навсегда зависнуть в интерфейсе даже после того, как всё восстановилось.
-    setAccountStatus('connected');
+    // Раз соединение прямо сейчас реально работает — статус должен это отражать, даже если до этого
+    // была временная ошибка (сеть моргнула, биржа на секунду не ответила и т.п.). Иначе бейдж "Ошибка"
+    // мог бы навсегда зависнуть в интерфейсе даже после того, как всё восстановилось.
+    // setAccountStatus — бейдж на "Настройки аккаунта", он есть только у MEXC (см. её же комментарий);
+    // у Binance/OKX там свой независимый setExchangeStatus, который сам управляется из connectExchange
+    // и не нуждается в подталкивании отсюда.
+    if (isMexc) setAccountStatus('connected');
   }).catch(function (e) {
     balanceRefreshFailStreak++;
     // Не дёргаем статус в "Ошибка" на каждый одиночный сбой (короткий сетевой сбой раз в 3с —
     // это нормально и само пройдёт). Показываем ошибку только если не получилось несколько раз подряд.
-    if (balanceRefreshFailStreak >= 3) setAccountStatus('error', e.message);
+    if (isMexc && balanceRefreshFailStreak >= 3) setAccountStatus('error', e.message);
     // Не пробрасываем ошибку дальше — этот промис теперь возвращается и другим вызывающим кодом
     // (кнопка «Обновить» в Финрезе), которые не всегда ставят свой .catch(), а сбой обновления баланса
     // уже полностью отражён через setAccountStatus() выше и не должен всплывать необработанным отказом.
@@ -8221,7 +8486,7 @@ function wireJournalTfPills() {
     journalChartState.tf = tf; // выставляем сразу — кнопка не должна "залипать" на старом ТФ, пока грузится
     renderJournalTfPills();
     try {
-      const candles = await fetchKlines(journalChartState.raw, tf, 1000);
+      const candles = await fetchKlines(journalChartState.raw, tf, 1000, finresActiveExchange);
       if (!candles.length || !journalChartState) return;
       journalChartState.candles = candles;
       const selPair = journalChartState.pairs[journalChartState.selectedPairIndex];
@@ -8255,13 +8520,13 @@ function startJournalLiveRefresh(asset, raw) {
     const overlay = document.getElementById('journalModal');
     if (!overlay || !overlay.classList.contains('active') || !journalChartState) { stopJournalLiveRefresh(); return; }
     try {
-      const trades = await fetchMyTrades(raw, 500);
+      const trades = await fetchMyTrades(raw, 500, finresActiveExchange);
       if (!trades.length) return;
       // Если пользователь сам выбрал таймфрейм кнопкой в шапке (journalTfPills) — уважаем его выбор
       // и на "живых" тиках тоже, а не тихо подменяем автоподобранным на каждое обновление.
       const backMs = Date.now() - trades[0].time;
       const tf = journalChartState.tf || pickJournalTf(backMs);
-      const candles = await fetchKlines(raw, tf, 1000);
+      const candles = await fetchKlines(raw, tf, 1000, finresActiveExchange);
       if (!candles.length || !journalChartState) return;
       const pairs = computeTradePairsForChart(trades);
       const wasOnLatest = journalChartState.pairs && journalChartState.selectedPairIndex === journalChartState.pairs.length - 1;
@@ -8319,9 +8584,10 @@ async function openJournalForAsset(asset, raw) {
   emptyEl.innerHTML = '<i class="ri-loader-4-line spin-icon"></i> Загрузка истории сделок...';
 
   try {
-    const trades = await fetchMyTrades(raw, 500);
+    const trades = await fetchMyTrades(raw, 500, finresActiveExchange);
     if (!trades.length) {
-      emptyEl.innerHTML = '<i class="ri-inbox-line"></i> Сделок по ' + asset + '/USDT не найдено в истории, которую отдаёт API MEXC.';
+      const exchLabel = finresActiveExchange === 'mexc' ? 'MEXC' : (EXCHANGE_CONNECTORS[finresActiveExchange] || {}).label || finresActiveExchange;
+      emptyEl.innerHTML = '<i class="ri-inbox-line"></i> Сделок по ' + asset + '/USDT не найдено в истории, которую отдаёт API ' + exchLabel + '.';
       return;
     }
     const pairs = computeTradePairsForChart(trades);
@@ -8332,7 +8598,7 @@ async function openJournalForAsset(asset, raw) {
     emptyEl.innerHTML = '<i class="ri-loader-4-line spin-icon"></i> Загрузка графика...';
     const backMs = Date.now() - trades[0].time;
     const tf = pickJournalTf(backMs);
-    const candles = await fetchKlines(raw, tf, 1000);
+    const candles = await fetchKlines(raw, tf, 1000, finresActiveExchange);
     if (!candles.length) {
       emptyEl.innerHTML = '<i class="ri-error-warning-line"></i> Не удалось загрузить свечи для графика.';
       return;
@@ -8554,7 +8820,7 @@ function updateClock() {
   document.getElementById('metricUptime').textContent = h + ':' + m + ':' + s;
   // Если отметка "Обновлено ЧЧ:ММ:СС" в Финрезе не двигалась дольше 20с (при норме ~3с) — подсвечиваем
   // её оранжевым: явный визуальный сигнал "автообновление где-то застряло", а не молчаливо старые цифры.
-  if (accountConnected && finresLastUpdatedAt) {
+  if (finresActiveExchangeConnected() && finresLastUpdatedAt) {
     const staleEl = document.getElementById('finresLastUpdated');
     if (staleEl) staleEl.classList.toggle('stale', (Date.now() - finresLastUpdatedAt) > 20000);
   }
@@ -8626,11 +8892,15 @@ restoreSavedApiKeyAndConnect();
 const NATIVE_STORAGE_HYDRATE_KEYS = [
   'mexc_api_key', 'mexc_api_secret', ACCOUNT_KEY_FINGERPRINT_KEY,
   BALANCE_HISTORY_KEY, KNOWN_SYMBOLS_KEY,
-  CHART_MODE_KEY, OWN_CHART_DRAWINGS_KEY, PATTERN_HISTORY_KEY, DETECTOR_ENABLED_KEY, 'mexc_hide_dust'
+  CHART_MODE_KEY, OWN_CHART_DRAWINGS_KEY, PATTERN_HISTORY_KEY, DETECTOR_ENABLED_KEY, 'mexc_hide_dust',
+  // Binance-Финрез (см. switchFinresExchange) — тот же принцип, свои отдельные ключи истории/известных
+  // символов, плюс её собственные API-ключи (см. connectExchange/EXCHANGE_CONNECTORS).
+  'exch_binance_api_key', 'exch_binance_api_secret', balanceHistoryKeyFor('binance'), knownSymbolsKeyFor('binance')
 ];
 async function hydrateFromNativeStorageIfNeeded() {
   if (!window.Neutralino) return; // веб-версия: один и тот же origin/профиль браузера, восстанавливать нечего
   let hydratedApiKey = false;
+  let hydratedBinanceKey = false;
   let hydratedAccountState = false;
   for (let i = 0; i < NATIVE_STORAGE_HYDRATE_KEYS.length; i++) {
     const key = NATIVE_STORAGE_HYDRATE_KEYS[i];
@@ -8641,10 +8911,11 @@ async function hydrateFromNativeStorageIfNeeded() {
     if (remote == null) continue; // и в резервном хранилище пусто — действительно восстанавливать нечего
     try { localStorage.setItem(key, remote); } catch (e) { continue; }
     if (key === 'mexc_api_key' || key === 'mexc_api_secret') hydratedApiKey = true;
+    if (key === 'exch_binance_api_key' || key === 'exch_binance_api_secret') hydratedBinanceKey = true;
     if (key === BALANCE_HISTORY_KEY || key === KNOWN_SYMBOLS_KEY) hydratedAccountState = true;
     if (key === KNOWN_SYMBOLS_KEY) loadKnownSymbols(); // перечитать в уже загруженный в память объект
   }
-  if (!hydratedApiKey && !hydratedAccountState) return;
+  if (!hydratedApiKey && !hydratedBinanceKey && !hydratedAccountState) return;
   logI('Storage', 'локальный профиль браузера был пуст — восстановлены данные из резервного хранилища Neutralino (переживает пересборку .exe)');
   if (hydratedApiKey) {
     restoreSavedApiKeyAndConnect();
@@ -8652,6 +8923,7 @@ async function hydrateFromNativeStorageIfNeeded() {
     renderFinresTab();
     renderFinresHero();
   }
+  if (hydratedBinanceKey) restoreSavedExchangeAndConnect('binance');
 }
 // Небольшая задержка перед первой попыткой — тот же самый задокументированный у nlCall баг тайминга
 // старта (внутренний WS-сервер Neutralino может быть ещё не полностью поднят в первые секунды).
@@ -8757,10 +9029,16 @@ window.__nativeStorageSelfTest = async function () {
 // смысла просить настоящий API-ключ ради вёрстки) — подставляет правдоподобные тестовые баланс и
 // историю сделок (по РЕАЛЬНЫМ живым ценам монет, которые уже есть в coinMap) и переключает на
 // страницу «Финрез». НЕ вызывается production-кодом, ничего не сохраняет между сессиями.
-window.__fakeFinresLogin = function () {
+// exchangeId — необязательный ('mexc' по умолчанию, как и раньше): 'binance' переключает Финрез на
+// вкладку Binance ПЕРЕД тем, как насыпать туда те же синтетические данные — удобно для ручной
+// проверки дизайна/переключателя без реального Binance-ключа.
+window.__fakeFinresLogin = function (exchangeId) {
   __designTestMode = true;
-  accountConnected = true;
+  if (exchangeId && exchangeId !== finresActiveExchange) switchFinresExchange(exchangeId);
+  if (finresActiveExchange === 'mexc') accountConnected = true;
+  else exchangeConnections[finresActiveExchange] = Object.assign({ apiKey: 'fake', apiSecret: 'fake', passphrase: '', connected: true }, exchangeConnections[finresActiveExchange]);
   setAccountStatus('connected');
+  renderFinresExchangeTabs();
 
   const assets = [
     { asset: 'BTC', qty: 0.15 }, { asset: 'ETH', qty: 2.4 }, { asset: 'SOL', qty: 18 },
@@ -8794,8 +9072,8 @@ window.__fakeFinresLogin = function () {
   }
   trades.sort(function (a, b) { return a.time - b.time; });
   const openPositions = [
-    { asset: 'ETH', qty: 0.8, avgCost: 2200, currentPrice: mexcUsdtPrice('ETH') || 2380, costBasis: 1760, value: 1904, unrealizedPnl: 144, unrealizedPct: 8.18 },
-    { asset: 'SOL', qty: 10, avgCost: 105, currentPrice: mexcUsdtPrice('SOL') || 98, costBasis: 1050, value: 980, unrealizedPnl: -70, unrealizedPct: -6.67 }
+    { asset: 'ETH', qty: 0.8, avgCost: 2200, currentPrice: financeUsdtPrice('ETH') || 2380, costBasis: 1760, value: 1904, unrealizedPnl: 144, unrealizedPct: 8.18 },
+    { asset: 'SOL', qty: 10, avgCost: 105, currentPrice: financeUsdtPrice('SOL') || 98, costBasis: 1050, value: 980, unrealizedPnl: -70, unrealizedPct: -6.67 }
   ];
   finresRealized = { trades: trades, bySymbol: {}, openPositions: openPositions, loadedAt: Date.now(), loading: false, error: null };
 

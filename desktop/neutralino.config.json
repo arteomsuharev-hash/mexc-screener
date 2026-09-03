@@ -1,6 +1,6 @@
 {
   "applicationId": "com.mexcscreener.app",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "defaultMode": "window",
   "port": 38217,
   "documentRoot": "/resources/",
