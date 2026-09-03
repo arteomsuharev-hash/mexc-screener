@@ -18,7 +18,7 @@ const LEV_RE = /(UP|DOWN|BULL|BEAR|3L|3S|5L|5S)USDT$/;
 // собственный WS-мост ниже по файлу); в обычной веб-версии (без desktop-обёртки) его нет, тогда
 // берём запасную строку — держите её в СИНХРОНЕ с "version" в desktop/neutralino.config.json при
 // каждом релизе, иначе версия в интерфейсе разойдётся с реальной.
-const APP_VERSION = (typeof window.NL_APPVERSION === 'string' && window.NL_APPVERSION) || '1.6.0';
+const APP_VERSION = (typeof window.NL_APPVERSION === 'string' && window.NL_APPVERSION) || '1.6.1';
 // ЗАПОЛНИТЕ после создания GitHub-репозитория и первого релиза (см. docs/updates.md) — до этого
 // кнопка "Проверить обновления" будет честно показывать понятную ошибку, а не тихо молчать или
 // стучаться в несуществующий адрес.
@@ -970,9 +970,16 @@ async function checkForAppUpdate() {
 // через захват стандартного вывода (как это делает nativeCurlGet для текстовых ответов MEXC) были бы
 // повреждены при прохождении через WS-мост как JS-строка. -f — считать HTTP-ошибки (404 и т.п.)
 // падением, а не "успешно скачали страницу с текстом ошибки вместо файла".
+// --retry 3 --retry-delay 2 --retry-all-errors — сама загрузка (GitHub отдаёт zip-ассет через редирект
+// на CDN objects.githubusercontent.com) время от времени рвётся посреди передачи одноразовым сбросом
+// соединения ("curl: (35) Recv failure: Connection was reset" — реальная ошибка, увиденная пользователем
+// на его сети/антивирусе). Без --retry-all-errors обычный --retry curl повторяет только часть кодов
+// ошибок и не гарантированно захватывает именно этот случай — теперь одноразовый обрыв решается сам,
+// без участия пользователя, и только настоящая, повторяющаяся проблема сети доходит до него как ошибка.
 async function nativeCurlDownloadToFile(url, destPath) {
   await execCommandSelfTest();
-  const cmd = 'curl.exe -f -L -s -S --max-time 180 -o "' + stripQuotes(destPath) + '" "' + stripQuotes(url) + '"';
+  const cmd = 'curl.exe -f -L -s -S --max-time 180 --retry 3 --retry-delay 2 --retry-all-errors -o "' +
+    stripQuotes(destPath) + '" "' + stripQuotes(url) + '"';
   const result = await nlCall('os.execCommand', { command: cmd, background: false }, 190000);
   if (!result || result.exitCode !== 0) {
     throw new Error('curl.exe: ' + ((result && (result.stdErr || result.stdOut)) || ('код завершения ' + (result && result.exitCode))));
