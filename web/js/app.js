@@ -18,7 +18,7 @@ const LEV_RE = /(UP|DOWN|BULL|BEAR|3L|3S|5L|5S)USDT$/;
 // собственный WS-мост ниже по файлу); в обычной веб-версии (без desktop-обёртки) его нет, тогда
 // берём запасную строку — держите её в СИНХРОНЕ с "version" в desktop/neutralino.config.json при
 // каждом релизе, иначе версия в интерфейсе разойдётся с реальной.
-const APP_VERSION = (typeof window.NL_APPVERSION === 'string' && window.NL_APPVERSION) || '1.6.1';
+const APP_VERSION = (typeof window.NL_APPVERSION === 'string' && window.NL_APPVERSION) || '1.6.2';
 // ЗАПОЛНИТЕ после создания GitHub-репозитория и первого релиза (см. docs/updates.md) — до этого
 // кнопка "Проверить обновления" будет честно показывать понятную ошибку, а не тихо молчать или
 // стучаться в несуществующий адрес.
@@ -980,7 +980,15 @@ async function nativeCurlDownloadToFile(url, destPath) {
   await execCommandSelfTest();
   const cmd = 'curl.exe -f -L -s -S --max-time 180 --retry 3 --retry-delay 2 --retry-all-errors -o "' +
     stripQuotes(destPath) + '" "' + stripQuotes(url) + '"';
-  const result = await nlCall('os.execCommand', { command: cmd, background: false }, 190000);
+  let result;
+  try {
+    result = await nlCall('os.execCommand', { command: cmd, background: false }, 190000);
+  } catch (bridgeErr) {
+    // Тот же диагноз, что и в nativeCurlGet выше: мост не ответил вообще — значит запуск процессов
+    // сломался ПОСЕРЕДИНЕ сессии, после того как execCommandSelfTest() выше уже прошёл и закэшировался.
+    if (!/не ответил/.test(bridgeErr.message)) throw bridgeErr;
+    throw new Error(markNativeExecBroken(bridgeErr.message));
+  }
   if (!result || result.exitCode !== 0) {
     throw new Error('curl.exe: ' + ((result && (result.stdErr || result.stdOut)) || ('код завершения ' + (result && result.exitCode))));
   }
@@ -4295,6 +4303,24 @@ let nativeExecFailedAt = 0;
 let nativeExecFailReason = '';
 const NATIVE_EXEC_FAIL_COOLDOWN_MS = 30000;
 
+// Общий текст диагноза + сброс кэша self-test'а — используется и самим execCommandSelfTest(), и
+// ниже в nativeCurlGet/nativeCurlDownloadToFile для СЛУЧАЯ, который self-test с его кэшем "успех
+// навсегда" не ловит: антивирус/EDR иногда разрешает самый первый дочерний процесс (self-test это
+// проходит, результат кэшируется как "работает"), а потом, ПОСЕРЕДИНЕ сессии, начинает блокировать
+// дальнейшие — поведенческая эскалация по накопленной активности, а не разовая проверка при старте.
+// Без этой функции пользователь в такой момент видел голое "native-мост не ответил за N мс" вместо
+// понятной инструкции. Помечаем кэш снова как "сломано", чтобы и следующий вызов сразу получил
+// этот же понятный текст, не дожидаясь очередного полного таймаута.
+function markNativeExecBroken(rawMessage) {
+  nativeExecOk = false;
+  nativeExecFailedAt = Date.now();
+  nativeExecFailReason = 'Запуск процессов из приложения не работает на этой машине (' + rawMessage + '). ' +
+    'Похоже, антивирус блокирует или задерживает дочерние процессы у MEXC-Screener.exe. Добавьте ' +
+    'MEXC-Screener.exe в исключения антивируса (Защитник Windows: Параметры → Безопасность Windows → ' +
+    'Защита от вирусов и угроз → Управление настройками → Добавление или удаление исключений) и попробуйте снова.';
+  return nativeExecFailReason;
+}
+
 async function execCommandSelfTest() {
   if (nativeExecOk === true) return; // уже подтверждено рабочим в этой сессии — не проверяем повторно
   if (nativeExecOk === false && (Date.now() - nativeExecFailedAt) < NATIVE_EXEC_FAIL_COOLDOWN_MS) {
@@ -4311,13 +4337,7 @@ async function execCommandSelfTest() {
     }
     nativeExecOk = true;
   } catch (pingErr) {
-    nativeExecOk = false;
-    nativeExecFailedAt = Date.now();
-    nativeExecFailReason = 'Запуск процессов из приложения не работает на этой машине (' + pingErr.message + '). ' +
-      'Похоже, антивирус блокирует или задерживает дочерние процессы у MEXC-Screener.exe. Добавьте ' +
-      'MEXC-Screener.exe в исключения антивируса (Защитник Windows: Параметры → Безопасность Windows → ' +
-      'Защита от вирусов и угроз → Управление настройками → Добавление или удаление исключений) и попробуйте снова.';
-    throw new Error(nativeExecFailReason);
+    throw new Error(markNativeExecBroken(pingErr.message));
   }
 }
 
@@ -4360,11 +4380,18 @@ async function nativeCurlGet(url, headers, method) {
   } catch (bridgeErr) {
     // Мост не ответил вовремя — почти всегда одноразовая задержка старта ИМЕННО ЭТОГО запуска
     // curl.exe (см. выше), а не системная поломка моста (ту execCommandSelfTest() уже отсеял бы
-    // ошибкой до этого места). Один быстрый повтор почти всегда решает проблему без участия
-    // пользователя; если мост правда недоступен, ошибка повторится и на второй попытке — тогда
-    // просто пробрасываем её как есть.
+    // ошибкой до этого места, ЕСЛИ бы она была видна с самого начала сессии). Один быстрый повтор
+    // почти всегда решает проблему без участия пользователя.
     if (!/не ответил/.test(bridgeErr.message)) throw bridgeErr;
-    result = await nlCall('os.execCommand', { command: cmd, background: false }, bridgeTimeoutMs);
+    try {
+      result = await nlCall('os.execCommand', { command: cmd, background: false }, bridgeTimeoutMs);
+    } catch (secondErr) {
+      // Мост правда недоступен и на повторе — это тот же диагноз, что даёт execCommandSelfTest(),
+      // просто он мог проявиться ПОЗЖЕ (антивирус разрешил самый первый пробный процесс, потом начал
+      // блокировать) и потому не был пойман в начале сессии. Помечаем кэш сломанным на будущее и
+      // отдаём то же понятное сообщение с инструкцией, а не голый таймаут моста.
+      throw new Error(markNativeExecBroken(secondErr.message));
+    }
   }
   if (result && result.exitCode === 0) {
     return { ok: true, body: result.stdOut };
