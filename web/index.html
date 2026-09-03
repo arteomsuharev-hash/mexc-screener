@@ -17,7 +17,7 @@
     <div class="logo">
       <div class="logo-icon" title="MEXC">
         <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <path fill="#FFFFFF" d="M6.5 40V8h8.2L24 24.6 33.3 8H41.5v32h-7.4V19.2L25.4 36.4h-2.8L13.9 19.2V40H6.5z"/>
+          <path fill="currentColor" d="M6.5 40V8h8.2L24 24.6 33.3 8H41.5v32h-7.4V19.2L25.4 36.4h-2.8L13.9 19.2V40H6.5z"/>
         </svg>
       </div>
       <div class="logo-text">
@@ -26,40 +26,39 @@
       </div>
     </div>
     <nav class="nav">
-      <div class="nav-section">Платформа</div>
-      <a class="nav-item active" data-page="screener"><i class="ri-dashboard-line"></i><span>Скринер</span></a>
-      <a class="nav-item" data-page="favorites"><i class="ri-star-line"></i><span>Избранное</span><span class="nav-badge" id="navFavBadge">0</span></a>
-      <a class="nav-item" data-page="alerts"><i class="ri-notification-3-line"></i><span>Оповещения</span><span class="nav-badge" id="navAlertBadge">0</span></a>
-      <a class="nav-item" data-page="analytics"><i class="ri-bar-chart-box-line"></i><span>Аналитика</span></a>
-      <div class="nav-section">Аккаунт</div>
-      <a class="nav-item" data-page="account"><i class="ri-key-2-line"></i><span>Настройки аккаунта</span><span class="nav-dot" id="navAccountDot" title="Не подключено"></span></a>
-      <a class="nav-item" data-page="finres"><i class="ri-funds-line"></i><span>Финрез</span></a>
-      <div class="nav-section">Система</div>
-      <a class="nav-item" data-page="patterns"><i class="ri-radar-2-line"></i><span>Паттерны</span><span class="nav-badge" id="navPatternBadge">0</span></a>
-      <a class="nav-item" data-page="profiles"><i class="ri-user-line"></i><span>Профили</span></a>
-      <a class="nav-item" data-page="settings"><i class="ri-settings-3-line"></i><span>Настройки</span></a>
-      <a class="nav-item" data-action="download-app" id="downloadAppNav"><i class="ri-download-2-line"></i><span>Скачать приложение</span></a>
+      <div class="nav-section" data-i18n>Платформа</div>
+      <a class="nav-item active" data-page="screener"><i class="ri-dashboard-line"></i><span data-i18n>Скринер</span></a>
+      <a class="nav-item" data-page="favorites"><i class="ri-star-line"></i><span data-i18n>Избранное</span><span class="nav-badge" id="navFavBadge">0</span></a>
+      <a class="nav-item" data-page="alerts"><i class="ri-notification-3-line"></i><span data-i18n>Оповещения</span><span class="nav-badge" id="navAlertBadge">0</span></a>
+      <a class="nav-item" data-page="analytics"><i class="ri-bar-chart-box-line"></i><span data-i18n>Аналитика</span></a>
+      <div class="nav-section" data-i18n>Аккаунт</div>
+      <a class="nav-item" data-page="account"><i class="ri-key-2-line"></i><span data-i18n>Настройки аккаунта</span><span class="nav-dot" id="navAccountDot" title="Не подключено" data-i18n-title></span></a>
+      <a class="nav-item" data-page="finres"><i class="ri-funds-line"></i><span data-i18n>Финрез</span></a>
+      <div class="nav-section" data-i18n>Система</div>
+      <a class="nav-item" data-page="patterns"><i class="ri-radar-2-line"></i><span data-i18n>Паттерны</span><span class="nav-badge" id="navPatternBadge">0</span></a>
+      <a class="nav-item" data-page="profiles"><i class="ri-user-line"></i><span data-i18n>Профили</span></a>
+      <a class="nav-item" data-page="settings"><i class="ri-settings-3-line"></i><span data-i18n>Настройки</span></a>
     </nav>
     <div class="sidebar-bottom">
-      <div class="conn-pill" id="sidebarConn"><span class="dot"></span><span id="sidebarConnText">Нет связи</span></div>
-      <div class="sidebar-action" id="langToggle"><i class="ri-global-line"></i><span>RU</span></div>
+      <div class="conn-pill" id="sidebarConn"><span class="dot"></span><span id="sidebarConnText" data-i18n>Нет связи</span></div>
+      <div class="sidebar-action" id="langToggle"><i class="ri-global-line"></i><span id="langToggleLabel">RU</span></div>
       <div class="sidebar-action" id="themeToggle">
-        <i class="ri-moon-line"></i><span>Тёмная тема</span>
+        <i class="ri-moon-line"></i><span data-i18n>Тёмная тема</span>
         <div class="toggle-switch active" id="themeSwitch"></div>
       </div>
-      <div class="sidebar-action" id="collapseBtn"><i class="ri-arrow-left-s-line"></i><span>Свернуть меню</span></div>
+      <div class="sidebar-action" id="collapseBtn"><i class="ri-arrow-left-s-line"></i><span data-i18n>Свернуть меню</span></div>
     </div>
   </aside>
 
   <main class="main">
     <div class="topbar">
       <div class="topbar-left">
-        <div class="status-badge off" id="connectionStatus"><span class="status-dot"></span><span id="statusText">ПОДКЛЮЧЕНИЕ...</span></div>
+        <div class="status-badge off" id="connectionStatus"><span class="status-dot"></span><span id="statusText" data-i18n>ПОДКЛЮЧЕНИЕ...</span></div>
         <div class="topbar-metrics">
-          <div class="metric"><div class="metric-label">Пары USDT</div><div class="metric-value" id="metricCoins">0</div></div>
-          <div class="metric"><div class="metric-label">Показано</div><div class="metric-value" id="metricShown">0</div></div>
-          <div class="metric"><div class="metric-label">Сделок</div><div class="metric-value" id="metricTrades">0</div></div>
-          <div class="metric"><div class="metric-label">Время работы</div><div class="metric-value" id="metricUptime">00:00:00</div></div>
+          <div class="metric"><div class="metric-label" data-i18n>Пары USDT</div><div class="metric-value" id="metricCoins">0</div></div>
+          <div class="metric"><div class="metric-label" data-i18n>Показано</div><div class="metric-value" id="metricShown">0</div></div>
+          <div class="metric"><div class="metric-label" data-i18n>Сделок</div><div class="metric-value" id="metricTrades">0</div></div>
+          <div class="metric"><div class="metric-label" data-i18n>Время работы</div><div class="metric-value" id="metricUptime">00:00:00</div></div>
         </div>
       </div>
       <div class="topbar-right">
@@ -70,67 +69,67 @@
     <div class="page active" id="page-screener">
       <div class="filter-bar">
         <div class="filter-group">
-          <span class="filter-label">Объём 24ч</span>
+          <span class="filter-label" data-i18n>Объём 24ч</span>
           <select class="filter-select" id="filterVol24Op"><option value=">=" selected>&ge;</option><option value=">">&gt;</option><option value="<=">&le;</option><option value="<">&lt;</option></select>
           <input class="filter-input wide" id="filterVol24" value="100000" placeholder="USDT">
         </div>
         <div class="filter-group">
-          <span class="filter-label">Объём 5с</span>
+          <span class="filter-label" data-i18n>Объём 5с</span>
           <select class="filter-select" id="filterVol5Op"><option value=">=" selected>&ge;</option><option value=">">&gt;</option><option value="<=">&le;</option><option value="<">&lt;</option></select>
-          <input class="filter-input" id="filterVol5" value="" placeholder="любой">
+          <input class="filter-input" id="filterVol5" value="" placeholder="любой" data-i18n-placeholder>
         </div>
         <div class="filter-group">
-          <span class="filter-label">Волат. 5с %</span>
+          <span class="filter-label" data-i18n>Волат. 5с %</span>
           <select class="filter-select" id="filterVol5sOp"><option value=">=" selected>&ge;</option><option value=">">&gt;</option><option value="<=">&le;</option><option value="<">&lt;</option></select>
-          <input class="filter-input" id="filterVol5s" value="" placeholder="любая">
+          <input class="filter-input" id="filterVol5s" value="" placeholder="любая" data-i18n-placeholder>
         </div>
         <div class="filter-group">
-          <span class="filter-label">Волат. 30с %</span>
+          <span class="filter-label" data-i18n>Волат. 30с %</span>
           <select class="filter-select" id="filterVol30sOp"><option value=">=" selected>&ge;</option><option value=">">&gt;</option><option value="<=">&le;</option><option value="<">&lt;</option></select>
-          <input class="filter-input" id="filterVol30s" value="" placeholder="любая">
+          <input class="filter-input" id="filterVol30s" value="" placeholder="любая" data-i18n-placeholder>
         </div>
         <div class="filter-group">
-          <span class="filter-label">Изм. 24ч %</span>
+          <span class="filter-label" data-i18n>Изм. 24ч %</span>
           <select class="filter-select" id="filterChgOp"><option value=">=" selected>&ge;</option><option value=">">&gt;</option><option value="<=">&le;</option><option value="<">&lt;</option></select>
-          <input class="filter-input" id="filterChg" value="" placeholder="любое">
+          <input class="filter-input" id="filterChg" value="" placeholder="любое" data-i18n-placeholder>
         </div>
         <div class="filter-group">
-          <span class="filter-label">Цена</span>
-          <input class="filter-input" id="filterPriceFrom" value="" placeholder="от" style="width:80px">
+          <span class="filter-label" data-i18n>Цена</span>
+          <input class="filter-input" id="filterPriceFrom" value="" placeholder="от" style="width:80px" data-i18n-placeholder>
           <span class="filter-label">—</span>
-          <input class="filter-input" id="filterPriceTo" value="" placeholder="до" style="width:80px">
+          <input class="filter-input" id="filterPriceTo" value="" placeholder="до" style="width:80px" data-i18n-placeholder>
         </div>
-        <label class="filter-live"><input type="checkbox" id="liveFilters" checked> Живые</label>
+        <label class="filter-live"><input type="checkbox" id="liveFilters" checked> <span data-i18n>Живые</span></label>
         <span class="filter-count" id="filterCount">0 / 0</span>
-        <button class="filter-btn" id="resetFilters"><i class="ri-refresh-line"></i> Сбросить</button>
-        <button class="filter-btn primary" id="applyFilters"><i class="ri-filter-3-line"></i> Применить</button>
-        <button class="filter-btn" id="refreshData"><i class="ri-refresh-line"></i> Обновить</button>
+        <button class="filter-btn" id="resetFilters"><i class="ri-refresh-line"></i> <span data-i18n>Сбросить</span></button>
+        <button class="filter-btn primary" id="applyFilters"><i class="ri-filter-3-line"></i> <span data-i18n>Применить</span></button>
+        <button class="filter-btn" id="refreshData"><i class="ri-refresh-line"></i> <span data-i18n>Обновить</span></button>
       </div>
 
       <div class="content" id="screenerContent">
         <div class="table-toolbar">
           <div class="toolbar-left">
             <select class="profile-select" id="profileSelect">
-              <optgroup label="Стандарт">
-                <option value="custom">Профиль: CUSTOM</option>
-                <option value="balanced" selected>Профиль: BALANCED</option>
-                <option value="aggressive">Профиль: AGGRESSIVE</option>
-                <option value="conservative">Профиль: CONSERVATIVE</option>
-                <option value="movers">Профиль: MOVERS</option>
+              <optgroup label="Стандарт" data-i18n-label>
+                <option value="custom" data-i18n>Профиль: CUSTOM</option>
+                <option value="balanced" selected data-i18n>Профиль: BALANCED</option>
+                <option value="aggressive" data-i18n>Профиль: AGGRESSIVE</option>
+                <option value="conservative" data-i18n>Профиль: CONSERVATIVE</option>
+                <option value="movers" data-i18n>Профиль: MOVERS</option>
               </optgroup>
-              <optgroup label="Стратегии">
-                <option value="algo">Стратегия: АЛГОРИТМЫ</option>
-                <option value="ineff">Стратегия: НЕЭФФЕКТИВНОСТИ</option>
-                <option value="density">Стратегия: ПРОБОЙ ПЛОТНОСТЕЙ</option>
+              <optgroup label="Стратегии" data-i18n-label>
+                <option value="algo" data-i18n>Стратегия: АЛГОРИТМЫ</option>
+                <option value="ineff" data-i18n>Стратегия: НЕЭФФЕКТИВНОСТИ</option>
+                <option value="density" data-i18n>Стратегия: ПРОБОЙ ПЛОТНОСТЕЙ</option>
               </optgroup>
             </select>
             <div class="view-toggle">
-              <button class="view-btn active" id="viewList" title="Таблица"><i class="ri-list-check"></i></button>
-              <button class="view-btn" id="viewGrid" title="Сетка"><i class="ri-grid-fill"></i></button>
+              <button class="view-btn active" id="viewList" title="Таблица" data-i18n-title><i class="ri-list-check"></i></button>
+              <button class="view-btn" id="viewGrid" title="Сетка" data-i18n-title><i class="ri-grid-fill"></i></button>
             </div>
           </div>
           <div class="toolbar-right">
-            <div class="search-box"><i class="ri-search-line"></i><input id="searchInput" placeholder="Поиск: BTC, PEPE..."></div>
+            <div class="search-box"><i class="ri-search-line"></i><input id="searchInput" placeholder="Поиск: BTC, PEPE..." data-i18n-placeholder></div>
             <button class="view-btn" id="settingsBtn"><i class="ri-settings-4-line"></i></button>
           </div>
         </div>
@@ -143,22 +142,22 @@
         <div class="table-container">
           <div class="loading-overlay" id="loadingIndicator">
             <div class="loading-spinner"></div>
-            <div class="loading-text">Загрузка рынка MEXC...</div>
+            <div class="loading-text" data-i18n>Загрузка рынка MEXC...</div>
           </div>
           <table class="data-table" id="coinTable">
             <thead>
               <tr>
                 <th style="width:30px"><i class="ri-star-line"></i></th>
                 <th style="width:30px">#</th>
-                <th data-sort="symbol">Монета</th>
-                <th data-sort="price">Цена</th>
-                <th data-sort="change24">Изм. 24ч</th>
-                <th data-sort="vol24" class="sorted-desc">Объём 24ч</th>
-                <th data-sort="vol5">Объём 5с</th>
-                <th data-sort="vol5s">Волат. 5с</th>
-                <th data-sort="vol30s">Волат. 30с</th>
-                <th data-sort="vol60s">Волат. 60с</th>
-                <th data-sort="signal">Сигнал</th>
+                <th data-sort="symbol" data-i18n>Монета</th>
+                <th data-sort="price" data-i18n>Цена</th>
+                <th data-sort="change24" data-i18n>Изм. 24ч</th>
+                <th data-sort="vol24" class="sorted-desc" data-i18n>Объём 24ч</th>
+                <th data-sort="vol5" data-i18n>Объём 5с</th>
+                <th data-sort="vol5s" data-i18n>Волат. 5с</th>
+                <th data-sort="vol30s" data-i18n>Волат. 30с</th>
+                <th data-sort="vol60s" data-i18n>Волат. 60с</th>
+                <th data-sort="signal" data-i18n>Сигнал</th>
               </tr>
             </thead>
             <tbody id="tableBody"></tbody>
@@ -177,36 +176,36 @@
           <div class="coin-price" id="infoPrice">--</div>
           <div class="coin-change" id="infoChange">--</div>
           <div class="info-grid">
-            <div class="info-item"><div class="info-label">Объём 24ч</div><div class="info-value" id="infoVol24">--</div></div>
-            <div class="info-item"><div class="info-label">Объём 5с</div><div class="info-value" id="infoVol5">--</div></div>
-            <div class="info-item"><div class="info-label">Изм. 24ч</div><div class="info-value" id="infoChange24">--</div></div>
+            <div class="info-item"><div class="info-label" data-i18n>Объём 24ч</div><div class="info-value" id="infoVol24">--</div></div>
+            <div class="info-item"><div class="info-label" data-i18n>Объём 5с</div><div class="info-value" id="infoVol5">--</div></div>
+            <div class="info-item"><div class="info-label" data-i18n>Изм. 24ч</div><div class="info-value" id="infoChange24">--</div></div>
             <div class="info-item"><div class="info-label">High / Low</div><div class="info-value" id="infoHL">--</div></div>
           </div>
           <div class="my-orders-block" id="myOrdersBlock" style="display:none;">
-            <div class="info-label" style="margin-bottom:6px;">Мои открытые ордера</div>
+            <div class="info-label" style="margin-bottom:6px;" data-i18n>Мои открытые ордера</div>
             <div id="myOrdersList" style="font-size:12px;color:var(--text-secondary);">—</div>
           </div>
         </div>
         <div class="chart-area">
           <div class="chart-header">
             <div class="timeframes">
-              <button class="tf-btn" data-tf="1">1м</button>
-              <button class="tf-btn active" data-tf="5">5м</button>
-              <button class="tf-btn" data-tf="15">15м</button>
-              <button class="tf-btn" data-tf="30">30м</button>
-              <button class="tf-btn" data-tf="60">1ч</button>
-              <button class="tf-btn" data-tf="240">4ч</button>
-              <button class="tf-btn" data-tf="D">1д</button>
+              <button class="tf-btn" data-tf="1" data-i18n>1м</button>
+              <button class="tf-btn active" data-tf="5" data-i18n>5м</button>
+              <button class="tf-btn" data-tf="15" data-i18n>15м</button>
+              <button class="tf-btn" data-tf="30" data-i18n>30м</button>
+              <button class="tf-btn" data-tf="60" data-i18n>1ч</button>
+              <button class="tf-btn" data-tf="240" data-i18n>4ч</button>
+              <button class="tf-btn" data-tf="D" data-i18n>1д</button>
             </div>
             <div id="chartPrice" style="font-family:var(--font-mono);font-size:13px;font-weight:600">--</div>
             <a id="openOnMexcLink" href="#" target="_blank" rel="noopener" class="filter-btn" style="display:none;text-decoration:none;white-space:nowrap;">
-              Открыть на бирже <i class="ri-external-link-line"></i>
+              <span data-i18n>Открыть на бирже</span> <i class="ri-external-link-line"></i>
             </a>
-            <button id="copyForVatagaBtn" type="button" class="filter-btn" title="Скопировать тикер для вставки в поиск Vataga.terminal" style="display:none;">
+            <button id="copyForVatagaBtn" type="button" class="filter-btn" title="Скопировать тикер для вставки в поиск Vataga.terminal" data-i18n-title style="display:none;">
               <i class="ri-file-copy-line"></i>
             </button>
-            <button id="toggleOwnChartBtn" type="button" class="filter-btn" style="display:none;white-space:nowrap;" title="Переключить между TradingView и своим графиком (по своим данным MEXC)">
-              <i class="ri-exchange-line"></i> <span id="toggleOwnChartLabel">Свой график</span>
+            <button id="toggleOwnChartBtn" type="button" class="filter-btn" style="display:none;white-space:nowrap;" title="Переключить между TradingView и своим графиком (по своим данным MEXC)" data-i18n-title>
+              <i class="ri-exchange-line"></i> <span id="toggleOwnChartLabel" data-i18n>Свой график</span>
             </button>
           </div>
           <div class="coin-analysis-bar" id="coinAnalysisBar">
@@ -216,61 +215,61 @@
           </div>
           <div class="density-levels-bar" id="densityLevelsBar">
             <i class="ri-crosshair-line"></i>
-            <span class="density-levels-label">Плотность</span>
+            <span class="density-levels-label" data-i18n>Плотность</span>
             <span class="density-levels-zone" id="densityZoneText">—</span>
             <span class="density-levels-break" id="densityBreakText">—</span>
-            <span class="density-levels-hint">эвристика по тикам, не данные стакана</span>
+            <span class="density-levels-hint" data-i18n>эвристика по тикам, не данные стакана</span>
           </div>
           <div class="chart-container">
             <div id="tv_chart_container"></div>
             <div class="chart-placeholder" id="chartPlaceholder">
               <i class="ri-line-chart-line"></i>
-              <span>Выберите монету для графика MEXC</span>
+              <span data-i18n>Выберите монету для графика MEXC</span>
             </div>
             <div class="own-chart-container" id="ownChartContainer">
               <div class="own-chart-topbar" id="ownChartToolbar">
                 <div class="ochart-segmented">
-                  <button type="button" class="ochart-tool active" data-charttype="candles" title="Свечи"><i class="ri-stock-line"></i></button>
-                  <button type="button" class="ochart-tool" data-charttype="line" title="Линия"><i class="ri-line-chart-line"></i></button>
-                  <button type="button" class="ochart-tool" data-charttype="area" title="Область"><i class="ri-funds-line"></i></button>
+                  <button type="button" class="ochart-tool active" data-charttype="candles" title="Свечи" data-i18n-title><i class="ri-stock-line"></i></button>
+                  <button type="button" class="ochart-tool" data-charttype="line" title="Линия" data-i18n-title><i class="ri-line-chart-line"></i></button>
+                  <button type="button" class="ochart-tool" data-charttype="area" title="Область" data-i18n-title><i class="ri-funds-line"></i></button>
                 </div>
                 <div class="ochart-indicators-wrap">
-                  <button type="button" class="ochart-pill" id="ochartIndicatorsBtn" title="Индикаторы"><i class="ri-eye-line"></i><span>Индикаторы</span></button>
+                  <button type="button" class="ochart-pill" id="ochartIndicatorsBtn" title="Индикаторы" data-i18n-title><i class="ri-eye-line"></i><span data-i18n>Индикаторы</span></button>
                   <div class="ochart-indicators-panel" id="ochartIndicatorsPanel">
                     <div class="ochart-ind-row" data-ind="volume">
-                      <button type="button" class="ochart-ind-eye active" title="Показать/скрыть"><i class="ri-eye-line"></i></button>
-                      <span>Объём</span>
+                      <button type="button" class="ochart-ind-eye active" title="Показать/скрыть" data-i18n-title><i class="ri-eye-line"></i></button>
+                      <span data-i18n>Объём</span>
                     </div>
                     <div class="ochart-ind-row" data-ind="ma">
-                      <button type="button" class="ochart-ind-eye" title="Показать/скрыть"><i class="ri-eye-off-line"></i></button>
+                      <button type="button" class="ochart-ind-eye" title="Показать/скрыть" data-i18n-title><i class="ri-eye-off-line"></i></button>
                       <span>MA 7 / 25</span>
                     </div>
                   </div>
                 </div>
-                <span class="ochart-hint" id="ochartHint">Колесо мыши — масштаб, зажать и тащить — панорама</span>
+                <span class="ochart-hint" id="ochartHint" data-i18n>Колесо мыши — масштаб, зажать и тащить — панорама</span>
                 <div class="ochart-topbar-right">
-                  <button type="button" class="ochart-tool" id="ochartSettingsBtn" title="Настройки графика (индикаторы)"><i class="ri-settings-3-line"></i></button>
-                  <button type="button" class="ochart-tool" id="ochartScreenshot" title="Сохранить скриншот графика"><i class="ri-camera-line"></i></button>
-                  <button type="button" class="ochart-tool" id="ochartFullscreen" title="Полноэкранный режим"><i class="ri-fullscreen-line"></i></button>
+                  <button type="button" class="ochart-tool" id="ochartSettingsBtn" title="Настройки графика (индикаторы)" data-i18n-title><i class="ri-settings-3-line"></i></button>
+                  <button type="button" class="ochart-tool" id="ochartScreenshot" title="Сохранить скриншот графика" data-i18n-title><i class="ri-camera-line"></i></button>
+                  <button type="button" class="ochart-tool" id="ochartFullscreen" title="Полноэкранный режим" data-i18n-title><i class="ri-fullscreen-line"></i></button>
                   <span class="ochart-sep"></span>
-                  <button type="button" class="ochart-tool" id="ochartClear" title="Очистить все построения"><i class="ri-delete-bin-line"></i></button>
-                  <button type="button" class="ochart-tool" id="ochartResetView" title="Сбросить масштаб"><i class="ri-crop-2-line"></i></button>
+                  <button type="button" class="ochart-tool" id="ochartClear" title="Очистить все построения" data-i18n-title><i class="ri-delete-bin-line"></i></button>
+                  <button type="button" class="ochart-tool" id="ochartResetView" title="Сбросить масштаб" data-i18n-title><i class="ri-crop-2-line"></i></button>
                 </div>
               </div>
               <div class="ochart-body">
                 <div class="ochart-vtoolbar" id="ochartVToolbar">
-                  <button type="button" class="ochart-tool active" data-tool="cursor" title="Курсор / панорама (зажмите и тащите)"><i class="ri-cursor-line"></i></button>
+                  <button type="button" class="ochart-tool active" data-tool="cursor" title="Курсор / панорама (зажмите и тащите)" data-i18n-title><i class="ri-cursor-line"></i></button>
                   <span class="ochart-vsep"></span>
-                  <button type="button" class="ochart-tool" data-tool="hline" title="Уровень (горизонтальная линия)"><i class="ri-subtract-line"></i></button>
-                  <button type="button" class="ochart-tool" data-tool="trend" title="Отрезок (трендовая линия между двумя точками)"><i class="ri-slideshow-line"></i></button>
-                  <button type="button" class="ochart-tool" data-tool="ray" title="Луч (бесконечен в одну сторону)"><i class="ri-arrow-right-up-line"></i></button>
-                  <button type="button" class="ochart-tool" data-tool="xline" title="Прямая (бесконечна в обе стороны)"><i class="ri-expand-diagonal-line"></i></button>
-                  <button type="button" class="ochart-tool" data-tool="ruler" title="Линейка (замер цены/времени)"><i class="ri-ruler-2-line"></i></button>
+                  <button type="button" class="ochart-tool" data-tool="hline" title="Уровень (горизонтальная линия)" data-i18n-title><i class="ri-subtract-line"></i></button>
+                  <button type="button" class="ochart-tool" data-tool="trend" title="Отрезок (трендовая линия между двумя точками)" data-i18n-title><i class="ri-slideshow-line"></i></button>
+                  <button type="button" class="ochart-tool" data-tool="ray" title="Луч (бесконечен в одну сторону)" data-i18n-title><i class="ri-arrow-right-up-line"></i></button>
+                  <button type="button" class="ochart-tool" data-tool="xline" title="Прямая (бесконечна в обе стороны)" data-i18n-title><i class="ri-expand-diagonal-line"></i></button>
+                  <button type="button" class="ochart-tool" data-tool="ruler" title="Линейка (замер цены/времени)" data-i18n-title><i class="ri-ruler-2-line"></i></button>
                 </div>
                 <div class="own-chart-canvas-wrap" id="ownChartCanvasWrap">
                   <div class="ochart-watermark" id="ochartWatermark"></div>
                   <canvas id="ownCandleChart"></canvas>
-                  <button type="button" class="ochart-live-btn" id="ochartLiveBtn"><i class="ri-play-circle-line"></i> К живым данным</button>
+                  <button type="button" class="ochart-live-btn" id="ochartLiveBtn"><i class="ri-play-circle-line"></i> <span data-i18n>К живым данным</span></button>
                   <div class="own-chart-empty" id="ownChartEmpty"></div>
                 </div>
               </div>
@@ -280,13 +279,13 @@
         <div class="right-panel">
           <div class="trades-panel">
             <div class="orderbook-mini" id="orderbookMini" style="display:none;">
-              <div class="panel-title"><span>Стакан</span><span id="orderbookAge"></span></div>
+              <div class="panel-title"><span data-i18n>Стакан</span><span id="orderbookAge"></span></div>
               <div class="orderbook-rows" id="orderbookRows"></div>
             </div>
             <div class="orderbook-unavailable" id="orderbookUnavailable" style="display:none;">
-              <i class="ri-stack-line"></i> Стакан недоступен — монета не в списке глубокого анализа (см. «Паттерны»)
+              <i class="ri-stack-line"></i> <span data-i18n>Стакан недоступен — монета не в списке глубокого анализа (см. «Паттерны»)</span>
             </div>
-            <div class="panel-title"><span>Последние сделки</span><span id="tradesCount">0</span></div>
+            <div class="panel-title"><span data-i18n>Последние сделки</span><span id="tradesCount">0</span></div>
             <div class="trades-list" id="tradesList"></div>
           </div>
           <div class="algo-panel">
@@ -295,10 +294,10 @@
                 <path class="gauge-bg" d="M 10 70 A 60 60 0 0 1 130 70"></path>
                 <path class="gauge-fill" id="gaugeFill" d="M 10 70 A 60 60 0 0 1 130 70" stroke-dasharray="0 188.5"></path>
               </svg>
-              <div class="gauge-text"><div class="gauge-value" id="gaugeValue">--</div><div class="gauge-label">из 100</div></div>
+              <div class="gauge-text"><div class="gauge-value" id="gaugeValue">--</div><div class="gauge-label" data-i18n>из 100</div></div>
             </div>
-            <div class="algo-status" id="algoStatus"><i class="ri-loader-line"></i> Ожидание данных</div>
-            <button class="algo-fav" id="addFav"><i class="ri-star-line"></i> Добавить в избранное</button>
+            <div class="algo-status" id="algoStatus"><i class="ri-loader-line"></i> <span data-i18n>Ожидание данных</span></div>
+            <button class="algo-fav" id="addFav"><i class="ri-star-line"></i> <span data-i18n>Добавить в избранное</span></button>
           </div>
         </div>
       </div>
@@ -306,7 +305,7 @@
 
     <div class="page" id="page-favorites">
       <div style="padding:16px 20px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; gap:12px;">
-        <h2 style="font-size:18px; font-weight:600;"><i class="ri-star-fill" style="color:var(--orange);"></i> Избранные монеты</h2>
+        <h2 style="font-size:18px; font-weight:600;"><i class="ri-star-fill" style="color:var(--orange);"></i> <span data-i18n>Избранные монеты</span></h2>
         <span style="color:var(--text-muted);font-size:12px;" id="favCount">0 монет</span>
       </div>
       <div style="flex:1; overflow-y:auto;"><div id="favoritesContainer"></div></div>
@@ -314,32 +313,32 @@
 
     <div class="page" id="page-alerts">
       <div style="padding:16px 20px; border-bottom:1px solid var(--border-color);">
-        <h2 style="font-size:18px; font-weight:600;">Оповещения по движению 24ч</h2>
+        <h2 style="font-size:18px; font-weight:600;" data-i18n>Оповещения по движению 24ч</h2>
       </div>
       <div class="alerts-list" id="alertsList"></div>
     </div>
 
     <div class="page" id="page-analytics">
       <div class="analytics-grid">
-        <div class="analytics-card"><h3>Топ рост 24ч</h3><div id="topGainers"></div></div>
-        <div class="analytics-card"><h3>Топ падение 24ч</h3><div id="topLosers"></div></div>
-        <div class="analytics-card"><h3>Лидер по объёму</h3><div id="topVolume"></div></div>
-        <div class="analytics-card"><h3>Волатильность 60с</h3><div id="topVolat"></div></div>
+        <div class="analytics-card"><h3 data-i18n>Топ рост 24ч</h3><div id="topGainers"></div></div>
+        <div class="analytics-card"><h3 data-i18n>Топ падение 24ч</h3><div id="topLosers"></div></div>
+        <div class="analytics-card"><h3 data-i18n>Лидер по объёму</h3><div id="topVolume"></div></div>
+        <div class="analytics-card"><h3 data-i18n>Волатильность 60с</h3><div id="topVolat"></div></div>
       </div>
     </div>
 
     <div class="page" id="page-patterns">
       <div style="padding:16px 20px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; gap:12px;">
-        <h2 style="font-size:18px; font-weight:600;"><i class="ri-radar-2-line" style="color:var(--blue);"></i> Паттерны</h2>
+        <h2 style="font-size:18px; font-weight:600;"><i class="ri-radar-2-line" style="color:var(--blue);"></i> <span data-i18n>Паттерны</span></h2>
         <span style="color:var(--text-muted);font-size:12px;" id="patternsCount">0 активных</span>
       </div>
       <div style="flex:1; overflow-y:auto; padding:20px 24px;">
         <div class="strategy-hint-bar visible">
           <i class="ri-radar-2-line"></i>
           <span class="strategy-hint-badge">WATCHLIST</span>
-          <span class="strategy-hint-text" id="watchlistStatusText">Наполняется...</span>
+          <span class="strategy-hint-text" id="watchlistStatusText" data-i18n>Наполняется...</span>
         </div>
-        <div class="profile-strategy-note" style="margin-top:14px;">
+        <div class="profile-strategy-note" style="margin-top:14px;" data-i18n-block data-i18n-key="patterns-watchlist-note">
           <strong>Важно про глубокий анализ.</strong> В отличие от «Профилей» (тикерная эвристика по
           всему рынку сразу), детекторы паттернов работают на реальных сделках и стакане конкретных
           монет — но это отдельные WS-подключения НА КАЖДУЮ монету, и тысячи их одновременно физически
@@ -348,18 +347,18 @@
           открытая монета/избранное) — не по всему рынку. Монеты вне watchlist здесь не появятся,
           какими бы интересными они ни выглядели на вкладке «Скринер».
         </div>
-        <h4 style="font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:18px 0 10px;">Детекторы <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);">(отключённые не считаются и не расходуют бюджет вычислений)</span></h4>
+        <h4 style="font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:18px 0 10px;"><span data-i18n>Детекторы</span> <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);" data-i18n>(отключённые не считаются и не расходуют бюджет вычислений)</span></h4>
         <div class="detector-filter-row" id="detectorFilterRow"></div>
         <div class="finres-stats-grid" id="patternsHealthGrid" style="margin-top:18px;"></div>
         <div class="pattern-log-panel" id="patternLogPanel" style="display:none;">
-          <div class="pattern-log-title">Последние события (предупреждения/ошибки)</div>
+          <div class="pattern-log-title" data-i18n>Последние события (предупреждения/ошибки)</div>
           <div class="pattern-log-list" id="patternLogList"></div>
         </div>
-        <h4 style="font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:24px 0 10px;">Обнаруженные паттерны</h4>
+        <h4 style="font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:24px 0 10px;" data-i18n>Обнаруженные паттерны</h4>
         <div class="profile-grid" id="patternsGrid"></div>
 
-        <h4 style="font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:24px 0 10px;">Валидация детекторов</h4>
-        <p style="color:var(--text-secondary);font-size:12px;line-height:1.5;margin-bottom:12px;">
+        <h4 style="font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:24px 0 10px;" data-i18n>Валидация детекторов</h4>
+        <p style="color:var(--text-secondary);font-size:12px;line-height:1.5;margin-bottom:12px;" data-i18n-block data-i18n-key="patterns-validation-note">
           Честная защита от переобучения (без исторического архива тика/стакана, которого физически
           нет — см. README): сравнение винрейта детектора на «старых» (закрыты раньше 24ч назад) и
           «свежих» (закрыты позже) сигналах, только по УЖЕ ЗАВЕРШЁННЫМ (прошло ≥2 минуты после
@@ -367,7 +366,7 @@
         </p>
         <div class="finres-table-card">
           <table class="finres-table">
-            <thead><tr><th>Детектор</th><th>Винрейт (старые)</th><th>Винрейт (свежие)</th><th>Статус</th></tr></thead>
+            <thead><tr><th data-i18n>Детектор</th><th data-i18n>Винрейт (старые)</th><th data-i18n>Винрейт (свежие)</th><th data-i18n>Статус</th></tr></thead>
             <tbody id="patternValidationBody"></tbody>
           </table>
         </div>
@@ -376,62 +375,62 @@
 
     <div class="page" id="page-profiles">
       <div style="padding:32px 40px; max-width:920px;">
-        <h3 style="font-size:18px;color:var(--text-primary);margin-bottom:8px;">Профили</h3>
-        <p style="color:var(--text-secondary); font-size:13px; line-height:1.6; margin-bottom:18px;">
+        <h3 style="font-size:18px;color:var(--text-primary);margin-bottom:8px;" data-i18n>Профили</h3>
+        <p style="color:var(--text-secondary); font-size:13px; line-height:1.6; margin-bottom:18px;" data-i18n>
           Профиль в панели скринера сразу меняет набор фильтров (или включает готовую стратегию отбора)
           и сортировку таблицы. Нажмите карточку ниже, чтобы применить профиль и перейти в скринер —
           то же самое делает выпадающий список «Профиль» над таблицей. Активный профиль подсвечен синим.
         </p>
 
         <div class="profile-nav-pills">
-          <span class="profile-nav-pill" data-scroll-to="profileSectionStandard"><i class="ri-list-settings-line"></i> Стандарт</span>
-          <span class="profile-nav-pill" data-scroll-to="profileSectionStrategy"><i class="ri-magic-line"></i> Стратегии отбора</span>
+          <span class="profile-nav-pill" data-scroll-to="profileSectionStandard"><i class="ri-list-settings-line"></i> <span data-i18n>Стандарт</span></span>
+          <span class="profile-nav-pill" data-scroll-to="profileSectionStrategy"><i class="ri-magic-line"></i> <span data-i18n>Стратегии отбора</span></span>
         </div>
 
-        <h4 id="profileSectionStandard" style="font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:8px 0 10px;">1. Стандарт</h4>
+        <h4 id="profileSectionStandard" style="font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:8px 0 10px;"><span data-i18n>1. Стандарт</span></h4>
         <div class="profile-grid">
           <div class="profile-strategy-card" data-profile="balanced">
-            <span class="card-active-badge"><i class="ri-checkbox-circle-fill"></i> АКТИВЕН</span>
+            <span class="card-active-badge"><i class="ri-checkbox-circle-fill"></i> <span data-i18n>АКТИВЕН</span></span>
             <div class="card-top"><span class="card-icon"><i class="ri-scales-3-line"></i></span><h4>Balanced</h4></div>
-            <p>Базовый профиль: объём 24ч от 100K USDT, без жёстких ограничений по волатильности.</p>
+            <p data-i18n>Базовый профиль: объём 24ч от 100K USDT, без жёстких ограничений по волатильности.</p>
           </div>
           <div class="profile-strategy-card" data-profile="conservative">
-            <span class="card-active-badge"><i class="ri-checkbox-circle-fill"></i> АКТИВЕН</span>
+            <span class="card-active-badge"><i class="ri-checkbox-circle-fill"></i> <span data-i18n>АКТИВЕН</span></span>
             <div class="card-top"><span class="card-icon"><i class="ri-shield-check-line"></i></span><h4>Conservative</h4></div>
-            <p>Только крупные, ликвидные пары — объём 24ч от 5M USDT.</p>
+            <p data-i18n>Только крупные, ликвидные пары — объём 24ч от 5M USDT.</p>
           </div>
           <div class="profile-strategy-card" data-profile="aggressive">
-            <span class="card-active-badge"><i class="ri-checkbox-circle-fill"></i> АКТИВЕН</span>
+            <span class="card-active-badge"><i class="ri-checkbox-circle-fill"></i> <span data-i18n>АКТИВЕН</span></span>
             <div class="card-top"><span class="card-icon"><i class="ri-fire-line"></i></span><h4>Aggressive</h4></div>
-            <p>Мелкая ликвидность (от 20K USDT) с заметной волатильностью за 5с — больше шума, больше кандидатов.</p>
+            <p data-i18n>Мелкая ликвидность (от 20K USDT) с заметной волатильностью за 5с — больше шума, больше кандидатов.</p>
           </div>
           <div class="profile-strategy-card" data-profile="movers">
-            <span class="card-active-badge"><i class="ri-checkbox-circle-fill"></i> АКТИВЕН</span>
+            <span class="card-active-badge"><i class="ri-checkbox-circle-fill"></i> <span data-i18n>АКТИВЕН</span></span>
             <div class="card-top"><span class="card-icon"><i class="ri-rocket-2-line"></i></span><h4>Movers</h4></div>
-            <p>Пары с сильным движением за 24ч (от +5%) при объёме от 50K USDT.</p>
+            <p data-i18n>Пары с сильным движением за 24ч (от +5%) при объёме от 50K USDT.</p>
           </div>
         </div>
 
-        <h4 id="profileSectionStrategy" style="font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:24px 0 10px;">Стратегии отбора (адаптивные пороги под текущий рынок)</h4>
+        <h4 id="profileSectionStrategy" style="font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:24px 0 10px;" data-i18n>Стратегии отбора (адаптивные пороги под текущий рынок)</h4>
         <div class="profile-grid">
           <div class="profile-strategy-card" data-profile="algo">
-            <span class="card-active-badge"><i class="ri-checkbox-circle-fill"></i> АКТИВЕН</span>
-            <div class="card-top"><span class="card-icon"><i class="ri-robot-2-line"></i></span><h4>2. Алгоритмы <span class="card-count" id="cardCountAlgo">— монет</span></h4></div>
-            <p>Заметный непрерывный оборот при сдержанном движении цены («много сделок — мало хода») — похоже на работу маркет-мейкера или бота, а не на органическую торговлю людьми.</p>
+            <span class="card-active-badge"><i class="ri-checkbox-circle-fill"></i> <span data-i18n>АКТИВЕН</span></span>
+            <div class="card-top"><span class="card-icon"><i class="ri-robot-2-line"></i></span><h4><span data-i18n>2. Алгоритмы</span> <span class="card-count" id="cardCountAlgo">— монет</span></h4></div>
+            <p data-i18n>Заметный непрерывный оборот при сдержанном движении цены («много сделок — мало хода») — похоже на работу маркет-мейкера или бота, а не на органическую торговлю людьми.</p>
           </div>
           <div class="profile-strategy-card" data-profile="ineff">
-            <span class="card-active-badge"><i class="ri-checkbox-circle-fill"></i> АКТИВЕН</span>
-            <div class="card-top"><span class="card-icon"><i class="ri-scales-3-line"></i></span><h4>3. Неэффективности <span class="card-count" id="cardCountIneff">— монет</span></h4></div>
-            <p>Резкий сдвиг цены за последние 5с на средней/тонкой ликвидности — вероятный локальный перекос цены, интересный для быстрой отработки.</p>
+            <span class="card-active-badge"><i class="ri-checkbox-circle-fill"></i> <span data-i18n>АКТИВЕН</span></span>
+            <div class="card-top"><span class="card-icon"><i class="ri-scales-3-line"></i></span><h4><span data-i18n>3. Неэффективности</span> <span class="card-count" id="cardCountIneff">— монет</span></h4></div>
+            <p data-i18n>Резкий сдвиг цены за последние 5с на средней/тонкой ликвидности — вероятный локальный перекос цены, интересный для быстрой отработки.</p>
           </div>
           <div class="profile-strategy-card" data-profile="density">
-            <span class="card-active-badge"><i class="ri-checkbox-circle-fill"></i> АКТИВЕН</span>
-            <div class="card-top"><span class="card-icon"><i class="ri-crosshair-line"></i></span><h4>4. Пробой плотностей <span class="card-count" id="cardCountDensity">— монет</span></h4></div>
-            <p>Объём за последние 5с в разы выше обычного темпа суток («объём проедают») + цена уже пошла — прокси пробоя плотности/крупной заявки с последующим импульсом.</p>
+            <span class="card-active-badge"><i class="ri-checkbox-circle-fill"></i> <span data-i18n>АКТИВЕН</span></span>
+            <div class="card-top"><span class="card-icon"><i class="ri-crosshair-line"></i></span><h4><span data-i18n>4. Пробой плотностей</span> <span class="card-count" id="cardCountDensity">— монет</span></h4></div>
+            <p data-i18n>Объём за последние 5с в разы выше обычного темпа суток («объём проедают») + цена уже пошла — прокси пробоя плотности/крупной заявки с последующим импульсом.</p>
           </div>
         </div>
 
-        <div class="profile-strategy-note">
+        <div class="profile-strategy-note" data-i18n-block data-i18n-key="profiles-strategy-note">
           <strong>Важно про стратегии.</strong> У скринера нет подписки на стакан (order book depth) по всем
           парам рынка одновременно — это архитектурно невозможно для тысяч пар сразу (у MEXC лимит ~30
           потоков на одно WebSocket-соединение). Поэтому «Алгоритмы», «Неэффективности» и особенно
@@ -448,55 +447,55 @@
 
     <div class="page" id="page-settings">
       <div style="padding:16px 20px; border-bottom:1px solid var(--border-color);">
-        <h2 style="font-size:18px; font-weight:600;">Настройки</h2>
+        <h2 style="font-size:18px; font-weight:600;" data-i18n>Настройки</h2>
       </div>
       <div class="settings-container">
         <div class="settings-group">
-          <div class="settings-group-title">Отображение</div>
+          <div class="settings-group-title" data-i18n>Отображение</div>
           <div class="setting-row">
-            <span class="setting-label">Обновление аналитики и оповещений (сек)</span>
+            <span class="setting-label" data-i18n>Обновление аналитики и оповещений (сек)</span>
             <div class="setting-control">
               <select id="updateInterval">
-                <option value="5">5 сек</option>
-                <option value="10" selected>10 сек</option>
-                <option value="30">30 сек</option>
-                <option value="60">60 сек</option>
+                <option value="5" data-i18n>5 сек</option>
+                <option value="10" selected data-i18n>10 сек</option>
+                <option value="30" data-i18n>30 сек</option>
+                <option value="60" data-i18n>60 сек</option>
               </select>
             </div>
           </div>
           <div class="setting-row">
-            <span class="setting-label">Максимум пар в таблице</span>
+            <span class="setting-label" data-i18n>Максимум пар в таблице</span>
             <div class="setting-control"><input type="number" id="maxPairs" value="400" min="20" max="2000"></div>
           </div>
           <div class="setting-row">
-            <span class="setting-label">Порог оповещения |изм. 24ч| (%)</span>
+            <span class="setting-label" data-i18n>Порог оповещения |изм. 24ч| (%)</span>
             <div class="setting-control"><input type="number" id="priceAlertThreshold" value="8" step="0.1"></div>
           </div>
         </div>
         <div class="settings-group">
-          <div class="settings-group-title">Управление</div>
+          <div class="settings-group-title" data-i18n>Управление</div>
           <div class="setting-row">
-            <span class="setting-label">Сохранить настройки</span>
-            <div class="setting-control"><button class="settings-btn" id="saveSettings">Сохранить</button></div>
+            <span class="setting-label" data-i18n>Сохранить настройки</span>
+            <div class="setting-control"><button class="settings-btn" id="saveSettings" data-i18n>Сохранить</button></div>
           </div>
           <div class="setting-row">
-            <span class="setting-label">Очистить избранное</span>
-            <div class="setting-control"><button class="settings-btn danger" id="clearData">Очистить</button></div>
+            <span class="setting-label" data-i18n>Очистить избранное</span>
+            <div class="setting-control"><button class="settings-btn danger" id="clearData" data-i18n>Очистить</button></div>
           </div>
         </div>
         <div class="settings-group">
-          <div class="settings-group-title">Обновления</div>
+          <div class="settings-group-title" data-i18n>Обновления</div>
           <div class="setting-row">
-            <span class="setting-label">Текущая версия</span>
+            <span class="setting-label" data-i18n>Текущая версия</span>
             <div class="setting-control"><span id="appVersionLabel" style="font-family:var(--font-mono); color:var(--text-muted);">—</span></div>
           </div>
           <div class="setting-row">
-            <span class="setting-label" id="updateStatusLabel">Проверьте, вышла ли новая версия</span>
-            <div class="setting-control"><button class="settings-btn" id="checkUpdateBtn">Проверить обновления</button></div>
+            <span class="setting-label" id="updateStatusLabel" data-i18n>Проверьте, вышла ли новая версия</span>
+            <div class="setting-control"><button class="settings-btn" id="checkUpdateBtn" data-i18n>Проверить обновления</button></div>
           </div>
           <div class="setting-row" id="updateAvailableRow" style="display:none;">
             <span class="setting-label" id="updateAvailableLabel"></span>
-            <div class="setting-control"><button class="settings-btn" id="downloadUpdateBtn">Скачать и установить</button></div>
+            <div class="setting-control"><button class="settings-btn" id="downloadUpdateBtn" data-i18n>Скачать и установить</button></div>
           </div>
         </div>
       </div>
@@ -504,10 +503,10 @@
 
     <div class="page" id="page-account">
       <div style="padding:16px 20px; border-bottom:1px solid var(--border-color);">
-        <h2 style="font-size:18px; font-weight:600;">Настройки аккаунта</h2>
+        <h2 style="font-size:18px; font-weight:600;" data-i18n>Настройки аккаунта</h2>
       </div>
       <div class="settings-container">
-        <div class="acct-security-note">
+        <div class="acct-security-note" data-i18n-block data-i18n-key="acct-security-note">
           <strong>Как это работает и что важно знать.</strong> У скринера нет своего сервера — ключи, которые
           вы введёте, хранятся только в этом браузере/приложении (localStorage) и уходят напрямую в API MEXC,
           подписанные прямо здесь, на вашем устройстве, ни через какие сторонние сервисы. Это значит:
@@ -520,11 +519,11 @@
         </div>
 
         <div class="settings-group">
-          <div class="settings-group-title">Подключение по API-ключу</div>
+          <div class="settings-group-title" data-i18n>Подключение по API-ключу</div>
           <div class="setting-row">
-            <span class="setting-label">Статус</span>
+            <span class="setting-label" data-i18n>Статус</span>
             <div class="setting-control">
-              <span class="status-badge off" id="acctStatusBadge" style="position:static;"><span class="status-dot"></span><span id="acctStatusText">Не подключено</span></span>
+              <span class="status-badge off" id="acctStatusBadge" style="position:static;"><span class="status-dot"></span><span id="acctStatusText" data-i18n>Не подключено</span></span>
             </div>
           </div>
           <div class="setting-row">
@@ -543,21 +542,21 @@
             </div>
           </div>
           <div class="setting-row">
-            <span class="setting-label">Управление</span>
+            <span class="setting-label" data-i18n>Управление</span>
             <div class="setting-control">
-              <button class="settings-btn" id="acctConnectBtn">Подключить</button>
-              <button class="settings-btn secondary" id="acctDisconnectBtn">Отключить</button>
+              <button class="settings-btn" id="acctConnectBtn" data-i18n>Подключить</button>
+              <button class="settings-btn secondary" id="acctDisconnectBtn" data-i18n>Отключить</button>
             </div>
           </div>
           <div class="setting-row" style="align-items:flex-start; flex-wrap:wrap;">
-            <span class="setting-label">Диагностика</span>
+            <span class="setting-label" data-i18n>Диагностика</span>
             <div class="setting-control" style="flex-direction:column; align-items:flex-start; gap:8px; max-width:520px;">
-              <button class="settings-btn secondary" id="acctDiagBtn">Проверить подключение</button>
+              <button class="settings-btn secondary" id="acctDiagBtn" data-i18n>Проверить подключение</button>
               <pre id="acctDiagOutput" style="display:none; margin:0; font-size:11px; line-height:1.7; white-space:pre-wrap; word-break:break-word; background:var(--bg-primary); border:1px solid var(--border-color); border-radius:6px; padding:10px 12px; width:100%; color:var(--text-secondary); font-family:var(--font-mono);"></pre>
             </div>
           </div>
           <div class="setting-row" id="acctWebOnlyNote" style="display:none; border-bottom:none;">
-            <span style="font-size:11.5px; color:var(--text-muted); line-height:1.5;">
+            <span style="font-size:11.5px; color:var(--text-muted); line-height:1.5;" data-i18n-block data-i18n-key="acct-weblonly-note">
               <i class="ri-information-line"></i> Вы открыли веб-версию: некоторые биржи, включая MEXC, могут
               не разрешать браузеру напрямую обращаться к приватному API (политика CORS на стороне биржи) —
               тогда подключение выдаст ошибку сети. В desktop-приложении («Скачать приложение» в панели слева)
@@ -569,10 +568,10 @@
         <div class="acct-finres-note">
           <i class="ri-funds-line"></i>
           <div class="acct-finres-note-mid">
-            <div class="acct-finres-note-title">Баланс и аналитика — на странице «Финрез»</div>
-            <div class="acct-finres-note-text">После подключения ключа портфель, P&amp;L, календарь, риски и журнал сделок с точками входа/выхода отображаются там.</div>
+            <div class="acct-finres-note-title" data-i18n>Баланс и аналитика — на странице «Финрез»</div>
+            <div class="acct-finres-note-text" data-i18n-block data-i18n-key="acct-finres-note-text">После подключения ключа портфель, P&amp;L, календарь, риски и журнал сделок с точками входа/выхода отображаются там.</div>
           </div>
-          <button type="button" class="settings-btn" id="acctGoFinresBtn"><i class="ri-arrow-right-line"></i> Открыть Финрез</button>
+          <button type="button" class="settings-btn" id="acctGoFinresBtn"><i class="ri-arrow-right-line"></i> <span data-i18n>Открыть Финрез</span></button>
         </div>
       </div>
     </div>
@@ -581,12 +580,12 @@
       <div class="finres-hero-bar" id="finresHeroBar"></div>
       <div class="finres-layout">
         <div class="finres-subnav">
-          <div class="finres-subnav-title">Аналитика</div>
-          <button type="button" class="finres-tab active" data-finres-tab="overview"><i class="ri-line-chart-line"></i><span>Обзор</span></button>
+          <div class="finres-subnav-title" data-i18n>Аналитика</div>
+          <button type="button" class="finres-tab active" data-finres-tab="overview"><i class="ri-line-chart-line"></i><span data-i18n>Обзор</span></button>
           <button type="button" class="finres-tab" data-finres-tab="pnl"><i class="ri-calendar-2-line"></i><span>P&amp;L</span></button>
-          <button type="button" class="finres-tab" data-finres-tab="trades"><i class="ri-exchange-line"></i><span>Сделки</span></button>
-          <button type="button" class="finres-tab" data-finres-tab="risk"><i class="ri-shield-flash-line"></i><span>Риски</span></button>
-          <button type="button" class="finres-tab" data-finres-tab="assets"><i class="ri-pie-chart-2-line"></i><span>Активы</span></button>
+          <button type="button" class="finres-tab" data-finres-tab="trades"><i class="ri-exchange-line"></i><span data-i18n>Сделки</span></button>
+          <button type="button" class="finres-tab" data-finres-tab="risk"><i class="ri-shield-flash-line"></i><span data-i18n>Риски</span></button>
+          <button type="button" class="finres-tab" data-finres-tab="assets"><i class="ri-pie-chart-2-line"></i><span data-i18n>Активы</span></button>
         </div>
         <div class="finres-content" id="finresContent"></div>
       </div>
@@ -594,12 +593,12 @@
 
     <div class="bottom-bar">
       <div class="bottom-bar-left">
-        <span class="status-item">Сервер: <span id="serverTime">--:--:--</span></span>
-        <span class="status-item">Обновлено: <span id="lastUpdate">—</span></span>
-        <span class="status-item">Источник: <span id="dataSource">MEXC</span></span>
+        <span class="status-item" data-i18n-prefix="Сервер: ">Сервер: <span id="serverTime">--:--:--</span></span>
+        <span class="status-item" data-i18n-prefix="Обновлено: ">Обновлено: <span id="lastUpdate">—</span></span>
+        <span class="status-item" data-i18n-prefix="Источник: ">Источник: <span id="dataSource">MEXC</span></span>
       </div>
       <div class="bottom-bar-right">
-        <span class="status-item" id="dataStatus">Поток: ожидание</span>
+        <span class="status-item" id="dataStatus" data-i18n>Поток: ожидание</span>
       </div>
     </div>
   </main>
@@ -616,46 +615,46 @@
 <div class="modal-overlay" id="journalModal">
   <div class="journal-modal">
     <div class="journal-modal-header">
-      <div class="journal-modal-title" id="journalModalTitle"><i class="ri-file-list-3-line"></i> Журнал сделок</div>
+      <div class="journal-modal-title" id="journalModalTitle"><i class="ri-file-list-3-line"></i> <span data-i18n>Журнал сделок</span></div>
       <div class="journal-tf-pills" id="journalTfPills"></div>
       <button type="button" class="journal-modal-close" id="journalModalClose"><i class="ri-close-line"></i></button>
     </div>
     <div class="own-chart-topbar" id="journalToolbar">
       <div class="ochart-indicators-wrap">
-        <button type="button" class="ochart-pill" id="journalIndicatorsBtn" title="Индикаторы"><i class="ri-eye-line"></i><span>Индикаторы</span></button>
+        <button type="button" class="ochart-pill" id="journalIndicatorsBtn" title="Индикаторы" data-i18n-title><i class="ri-eye-line"></i><span data-i18n>Индикаторы</span></button>
       </div>
-      <span class="ochart-hint">Колесо мыши — масштаб, зажать и тащить — панорама, тащить за шкалу цены/времени — растяжение</span>
+      <span class="ochart-hint" data-i18n>Колесо мыши — масштаб, зажать и тащить — панорама, тащить за шкалу цены/времени — растяжение</span>
       <div class="ochart-topbar-right">
-        <button type="button" class="ochart-tool" id="journalZoomOut" title="Отдалить"><i class="ri-zoom-out-line"></i></button>
-        <button type="button" class="ochart-tool" id="journalZoomIn" title="Приблизить"><i class="ri-zoom-in-line"></i></button>
+        <button type="button" class="ochart-tool" id="journalZoomOut" title="Отдалить" data-i18n-title><i class="ri-zoom-out-line"></i></button>
+        <button type="button" class="ochart-tool" id="journalZoomIn" title="Приблизить" data-i18n-title><i class="ri-zoom-in-line"></i></button>
         <span class="ochart-sep"></span>
-        <button type="button" class="ochart-tool" id="journalSettingsBtn" title="Настройки графика (индикаторы)"><i class="ri-settings-3-line"></i></button>
-        <button type="button" class="ochart-tool" id="journalScreenshot" title="Сохранить скриншот графика"><i class="ri-camera-line"></i></button>
-        <button type="button" class="ochart-tool" id="journalFullscreen" title="Полноэкранный режим"><i class="ri-fullscreen-line"></i></button>
+        <button type="button" class="ochart-tool" id="journalSettingsBtn" title="Настройки графика (индикаторы)" data-i18n-title><i class="ri-settings-3-line"></i></button>
+        <button type="button" class="ochart-tool" id="journalScreenshot" title="Сохранить скриншот графика" data-i18n-title><i class="ri-camera-line"></i></button>
+        <button type="button" class="ochart-tool" id="journalFullscreen" title="Полноэкранный режим" data-i18n-title><i class="ri-fullscreen-line"></i></button>
         <span class="ochart-sep"></span>
-        <button type="button" class="ochart-tool" id="journalClearDrawings" title="Очистить все построения"><i class="ri-delete-bin-line"></i></button>
-        <button type="button" class="ochart-tool" id="journalResetView" title="Сбросить масштаб"><i class="ri-crop-2-line"></i></button>
+        <button type="button" class="ochart-tool" id="journalClearDrawings" title="Очистить все построения" data-i18n-title><i class="ri-delete-bin-line"></i></button>
+        <button type="button" class="ochart-tool" id="journalResetView" title="Сбросить масштаб" data-i18n-title><i class="ri-crop-2-line"></i></button>
       </div>
     </div>
     <div class="ochart-indicators-panel" id="journalIndicatorsPanel">
       <div class="ochart-ind-row" data-ind="volume">
-        <button type="button" class="ochart-ind-eye active" title="Показать/скрыть"><i class="ri-eye-line"></i></button>
-        <span>Объём (VOLG)</span>
+        <button type="button" class="ochart-ind-eye active" title="Показать/скрыть" data-i18n-title><i class="ri-eye-line"></i></button>
+        <span data-i18n>Объём (VOLG)</span>
       </div>
       <div class="ochart-ind-row" data-ind="entryexit">
-        <button type="button" class="ochart-ind-eye active" title="Показать/скрыть"><i class="ri-eye-line"></i></button>
-        <span>Точки входа/выхода</span>
+        <button type="button" class="ochart-ind-eye active" title="Показать/скрыть" data-i18n-title><i class="ri-eye-line"></i></button>
+        <span data-i18n>Точки входа/выхода</span>
       </div>
     </div>
     <div class="journal-modal-body">
       <div class="ochart-vtoolbar" id="journalVToolbar">
-        <button type="button" class="ochart-tool active" data-jtool="cursor" title="Курсор / панорама (зажмите и тащите)"><i class="ri-cursor-line"></i></button>
+        <button type="button" class="ochart-tool active" data-jtool="cursor" title="Курсор / панорама (зажмите и тащите)" data-i18n-title><i class="ri-cursor-line"></i></button>
         <span class="ochart-vsep"></span>
-        <button type="button" class="ochart-tool" data-jtool="hline" title="Уровень (горизонтальная линия)"><i class="ri-subtract-line"></i></button>
-        <button type="button" class="ochart-tool" data-jtool="trend" title="Отрезок (трендовая линия между двумя точками)"><i class="ri-slideshow-line"></i></button>
-        <button type="button" class="ochart-tool" data-jtool="ray" title="Луч (бесконечен в одну сторону)"><i class="ri-arrow-right-up-line"></i></button>
-        <button type="button" class="ochart-tool" data-jtool="xline" title="Прямая (бесконечна в обе стороны)"><i class="ri-expand-diagonal-line"></i></button>
-        <button type="button" class="ochart-tool" data-jtool="ruler" title="Линейка (замер цены/времени)"><i class="ri-ruler-2-line"></i></button>
+        <button type="button" class="ochart-tool" data-jtool="hline" title="Уровень (горизонтальная линия)" data-i18n-title><i class="ri-subtract-line"></i></button>
+        <button type="button" class="ochart-tool" data-jtool="trend" title="Отрезок (трендовая линия между двумя точками)" data-i18n-title><i class="ri-slideshow-line"></i></button>
+        <button type="button" class="ochart-tool" data-jtool="ray" title="Луч (бесконечен в одну сторону)" data-i18n-title><i class="ri-arrow-right-up-line"></i></button>
+        <button type="button" class="ochart-tool" data-jtool="xline" title="Прямая (бесконечна в обе стороны)" data-i18n-title><i class="ri-expand-diagonal-line"></i></button>
+        <button type="button" class="ochart-tool" data-jtool="ruler" title="Линейка (замер цены/времени)" data-i18n-title><i class="ri-ruler-2-line"></i></button>
       </div>
       <div class="journal-chart-wrap" id="journalChartWrap">
         <canvas id="journalChartCanvas"></canvas>
