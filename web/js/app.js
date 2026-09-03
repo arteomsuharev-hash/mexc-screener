@@ -18,7 +18,7 @@ const LEV_RE = /(UP|DOWN|BULL|BEAR|3L|3S|5L|5S)USDT$/;
 // собственный WS-мост ниже по файлу); в обычной веб-версии (без desktop-обёртки) его нет, тогда
 // берём запасную строку — держите её в СИНХРОНЕ с "version" в desktop/neutralino.config.json при
 // каждом релизе, иначе версия в интерфейсе разойдётся с реальной.
-const APP_VERSION = (typeof window.NL_APPVERSION === 'string' && window.NL_APPVERSION) || '1.6.2';
+const APP_VERSION = (typeof window.NL_APPVERSION === 'string' && window.NL_APPVERSION) || '1.7.0';
 // ЗАПОЛНИТЕ после создания GitHub-репозитория и первого релиза (см. docs/updates.md) — до этого
 // кнопка "Проверить обновления" будет честно показывать понятную ошибку, а не тихо молчать или
 // стучаться в несуществующий адрес.
@@ -62,14 +62,24 @@ const I18N_EN_BLOCKS = {
   'profiles-strategy-note':
     '<strong>About the strategies.</strong> The screener has no order-book-depth subscription across every ' +
     'market pair at once — that\'s architecturally impossible for thousands of pairs simultaneously ' +
-    '(MEXC caps ~30 streams per WebSocket connection). So "Algorithms", "Inefficiencies" and especially ' +
-    '"Density Breakout" are heuristics on tick data (price, 24h volume, turnover volume/speed, and ' +
-    'volatility over the last 5–60s), not a precise read of real limit-order walls. When the "Density ' +
-    'Breakout" strategy is active and a coin\'s chart is open, a "Density" panel appears above the chart ' +
-    'showing an approximate calm price zone before the spike and the level where it happened — that\'s ' +
-    'also a tick-based heuristic, not a map of real order-book walls. Before entering a trade, check that ' +
-    'pair\'s real order book manually — the "Open in terminal" button by the chart links to the real MEXC ' +
-    'terminal with the full order book.',
+    '(MEXC caps ~30 streams per WebSocket connection). So "Algorithms" and "Inefficiencies" are heuristics ' +
+    'on tick data (price, 24h volume, turnover volume/speed, and volatility over the last 5–60s), not a ' +
+    'precise read of real limit-order walls. "Size" is the exception for coins in the deep-analysis ' +
+    'watchlist (see "Patterns", typically the top ~20 most active coins right now + the open coin/favorites): ' +
+    'for those, the signal is built on the REAL order book — looking for a large standing order (a "wall") ' +
+    'noticeably bigger than nearby levels, close to the current price, that price has been approaching for ' +
+    'several snapshots in a row. For coins outside the watchlist, "Size" still runs on the tick-based ' +
+    'approximation (a lull, then a sharp volume spike) — honestly a less precise signal. When the "Size" ' +
+    'strategy is active and a coin\'s chart is open, a "Density" panel appears above the chart — for ' +
+    'watchlist coins that\'s the real wall level, for the rest it\'s the approximate tick-based zone. Before ' +
+    'entering a trade, check that pair\'s real order book manually — the "Open in terminal" button by the ' +
+    'chart links to the real MEXC terminal with the full order book.',
+  'listings-honesty-note':
+    '<strong>How this works.</strong> Binance Futures publishes new contracts in advance with a "pending" ' +
+    'status and an exact start time — those get an honest countdown below. Neither MEXC Spot nor Binance ' +
+    'Spot exposes any such field — a pair there simply appears in the tradable list with no warning, so the ' +
+    'only honest approach is to catch the MOMENT it appears (this page checks both exchanges every 45 ' +
+    'seconds), not promise a made-up countdown.',
   'acct-security-note':
     '<strong>How this works and what matters.</strong> The screener has no server of its own — the keys you ' +
     'enter are stored only in this browser/app (localStorage) and go straight to the MEXC API, signed ' +
@@ -146,7 +156,7 @@ const I18N_EN = {
   'Профиль: CUSTOM': 'Profile: CUSTOM', 'Профиль: BALANCED': 'Profile: BALANCED',
   'Профиль: AGGRESSIVE': 'Profile: AGGRESSIVE', 'Профиль: CONSERVATIVE': 'Profile: CONSERVATIVE',
   'Профиль: MOVERS': 'Profile: MOVERS', 'Стратегия: АЛГОРИТМЫ': 'Strategy: ALGORITHMS',
-  'Стратегия: НЕЭФФЕКТИВНОСТИ': 'Strategy: INEFFICIENCIES', 'Стратегия: ПРОБОЙ ПЛОТНОСТЕЙ': 'Strategy: DENSITY BREAKOUT',
+  'Стратегия: НЕЭФФЕКТИВНОСТИ': 'Strategy: INEFFICIENCIES', 'Стратегия: САЙЗ': 'Strategy: SIZE',
   'Стандарт': 'Standard', 'Стратегии': 'Strategies',
   'Таблица': 'Table', 'Сетка': 'Grid', 'Поиск: BTC, PEPE...': 'Search: BTC, PEPE...',
   'Загрузка рынка MEXC...': 'Loading MEXC market...',
@@ -158,6 +168,14 @@ const I18N_EN = {
   'Все': 'All', 'Все биржи': 'All exchanges', 'Спот': 'Spot', 'Фьючерсы': 'Futures', 'выбрать рынок': 'choose market',
   'Нет пар с движением ≥': 'No pairs moved ≥', 'за 24ч.': 'over 24h.',
   'Рост': 'Gainers', 'Падение': 'Losers', 'Порог': 'Threshold',
+  // --- Листинги (боковая вкладка «Листинги» — новые пары на MEXC/Binance) ---
+  'Листинги': 'Listings',
+  'Как это работает.': 'How this works.',
+  'У Binance Futures новые контракты заранее видны в публичном API со статусом «ожидает торгов» и точным временем старта — по ним ниже честный обратный отсчёт. У MEXC Spot и Binance Spot такого поля в принципе нет ни у одной биржи — там пара просто появляется в списке торгуемых без предупреждения, и единственный честный способ — заметить её МОМЕНТ появления (страница проверяет обе биржи каждые 45 секунд), а не обещать выдуманный отсчёт.':
+    'Binance Futures publishes new contracts in advance with a "pending" status and an exact start time — those get an honest countdown below. Neither MEXC Spot nor Binance Spot exposes any such field — a pair there simply appears in the tradable list with no warning, so the only honest approach is to catch the MOMENT it appears (this page checks both exchanges every 45 seconds), not promise a made-up countdown.',
+  'Пока новых листингов не найдено — страница проверяет MEXC и Binance каждые 45с.': 'No new listings found yet — this page checks MEXC and Binance every 45s.',
+  'до листинга': 'until listing', 'запаздывает — ещё не запущен': 'running late — not live yet',
+  'листинг обнаружен': 'listing detected', 'назад': 'ago',
   // --- Таймфреймы ---
   '1м': '1m', '5м': '5m', '15м': '15m', '30м': '30m', '1ч': '1h', '4ч': '4h', '1д': '1D',
   // --- График ---
@@ -205,9 +223,9 @@ const I18N_EN = {
   '3. Неэффективности': '3. Inefficiencies',
   'Резкий сдвиг цены за последние 5с на средней/тонкой ликвидности — вероятный локальный перекос цены, интересный для быстрой отработки.':
     'A sharp price move over the last 5s on medium/thin liquidity — a likely local price dislocation, interesting for a quick play.',
-  '4. Пробой плотностей': '4. Density breakout',
-  'Объём за последние 5с в разы выше обычного темпа суток («объём проедают») + цена уже пошла — прокси пробоя плотности/крупной заявки с последующим импульсом.':
-    '5s volume many times above the usual daily pace ("volume is being eaten through") + price already moving — a proxy for a density/large-order breakout followed by momentum.',
+  '4. Сайз': '4. Size',
+  'Для монет из watchlist глубокого анализа (Tier 2) — реальная стоящая стена в стакане, к которой приближается цена. Для остальных — прокси по тикам: объём за 5с в разы выше обычного темпа суток + цена уже пошла.':
+    'For coins in the deep-analysis watchlist (Tier 2) — a real standing wall in the order book that price is approaching. For the rest — a tick-based proxy: 5s volume many times above the usual daily pace + price already moving.',
   // --- Настройки ---
   'Отображение': 'Display', 'Обновление аналитики и оповещений (сек)': 'Analytics & alerts refresh (sec)',
   '5 сек': '5 sec', '10 сек': '10 sec', '30 сек': '30 sec', '60 сек': '60 sec',
@@ -264,13 +282,13 @@ const I18N_EN = {
   'Реализованных сделок пока нет ни по одной известной монете. Если нужная монета уже полностью продана — найдите её через поиск выше, чтобы добавить в журнал.':
     'No realized trades yet for any known coin. If a coin you need has already been fully sold, find it via the search above to add it to the journal.',
   // --- Стратегии (STRATEGY_DEFS.label/.short — используются в strategyHintText на скринере) ---
-  'Алгоритмы': 'Algorithms', 'Неэффективности': 'Inefficiencies', 'Пробой плотностей': 'Density breakout',
+  'Алгоритмы': 'Algorithms', 'Неэффективности': 'Inefficiencies', 'Сайз': 'Size',
   'Равномерный оборот на всех окнах при сдержанном движении цены — признак маркет-мейкера/бота.':
     'Steady turnover across all windows with restrained price movement — a sign of a market-maker/bot.',
   'Резкое движение цены БЕЗ подтверждающего объёма — расхождение цены и оборота.':
     'A sharp price move WITHOUT confirming volume — a divergence between price and turnover.',
-  'Затишье, затем резкий всплеск объёма выше обычного темпа суток + цена пошла и не откатилась мгновенно.':
-    'A lull, then a sharp volume spike above the usual daily pace + price moved and didn\'t instantly retrace.',
+  'Watchlist-монеты: реальная стена в стакане рядом с ценой. Остальные: затишье, затем резкий всплеск объёма + цена пошла и не откатилась мгновенно.':
+    'Watchlist coins: a real order book wall near price. Others: a lull, then a sharp volume spike + price moved and didn\'t instantly retrace.',
   // --- Детекторы паттернов (DETECTOR_DEFS.label) ---
   'Идентичные размеры сделок': 'Identical trade sizes', 'Идентичные интервалы': 'Identical intervals',
   'Всплеск без продолжения': 'Burst with no follow-through', 'Цикличность': 'Cyclicity',
@@ -715,28 +733,32 @@ const STRATEGY_DEFS = {
     }
   },
   density: {
-    label: 'Пробой плотностей',
-    badge: 'BREAK',
-    short: 'Затишье, затем резкий всплеск объёма выше обычного темпа суток + цена пошла и не откатилась мгновенно.',
-    desc: 'Точного анализа плотностей/лимитных стен из стакана скринер не делает (нет подписки на depth ' +
-      'по всем парам рынка сразу — физический лимит MEXC на потоки соединения). Вместо этого — приближение ' +
-      'по модели объёмного профиля: настоящий пробой плотности (high-volume node) выглядит как ЗАТИШЬЕ ' +
-      '(консолидация у уровня — цена почти не двигалась 30-60с назад) с последующим РЕЗКИМ всплеском объёма ' +
-      'именно в последние 5с. Поэтому, помимо всплеска объёма за 5с сильно выше обычного темпа суток ' +
-      '(burst-ratio, верхние ~15% ЛИКВИДНОГО рынка, адаптивно, — мёртвые пары с объёмом ниже 20K USDT в ' +
-      'выдачу не попадают вообще, у них ratio скачет от пары центовых сделок и ничего не значит) и заметного ' +
-      'текущего движения цены, дополнительно проверяем, что движение ДО всплеска (в промежутке 60с→30с назад) ' +
-      'было спокойным — иначе это, скорее, монета, которая уже была волатильна всю последнюю минуту, а не ' +
-      'чистый пробой уровня. И последний фильтр — подтверждение пробоя: сверяем направление последних ~2с ' +
-      'движения с направлением всего 5с-всплеска; если цена уже разворачивается против него — это, скорее, ' +
-      'фитиль/ложный прокол уровня (не было настоящего "поглощения" плотности), а не устойчивый пробой, и ' +
-      'такая монета в выдачу не попадает.',
+    label: 'Сайз',
+    badge: 'SIZE',
+    short: 'Watchlist-монеты: реальная стена в стакане рядом с ценой. Остальные: затишье, затем резкий всплеск объёма + цена пошла и не откатилась мгновенно.',
+    desc: 'Для монет из watchlist глубокого анализа (Tier 2, см. стр. «Паттерны» — обычно топ-20 самых ' +
+      'активных монет прямо сейчас + открытая монета/избранное) сигнал строится на РЕАЛЬНОМ стакане: ищем ' +
+      'уровень цены, где стоит заявка заметно (в разы) крупнее соседних — настоящая "стена" — недалеко от ' +
+      'текущей цены, к которой цена устойчиво приближается несколько снимков подряд (см. ' +
+      'MexcCore.detectStandingWall). Для остальных пар подписки на стакан нет (физический лимит MEXC на ' +
+      'потоки соединения — тысячи пар одновременно не потянуть), поэтому там по-прежнему приближение по ' +
+      'модели объёмного профиля: ЗАТИШЬЕ (цена почти не двигалась 30-60с назад) с последующим РЕЗКИМ ' +
+      'всплеском объёма именно в последние 5с (burst-ratio, верхние ~15% ЛИКВИДНОГО рынка, адаптивно — ' +
+      'мёртвые пары с объёмом ниже 20K USDT в выдачу не попадают), плюс подтверждение: направление последних ' +
+      '~2с должно совпадать с направлением всего 5с-всплеска, иначе это, скорее, фитиль, а не устойчивый пробой.',
     match: function (c, s) {
+      const wall = detectStandingWall(c.symbol); // null для не-watchlist монет (нет подписки на стакан) — см. её же комментарий
+      c.__wallEvent = wall;
+      if (wall) return true;
       const burst = burstRatio(c);
       const wasCalm = c.preMove == null || c.preMove <= s.vol30sCalm * 1.4;
       return c.vol24 >= STRATEGY_MIN_LIQUID_VOL24 && burst >= s.burstSpike && c.vol5s >= Math.max(0.02, s.vol30sCalm * 0.5) && wasCalm && !c.reverting;
     },
     score: function (c) {
+      // Реальный сигнал по стакану всегда ранжируется выше тикового приближения — он честнее и это
+      // ощутимо более редкий, специфичный сигнал (не столько "монет прошли фильтр", сколько "монет,
+      // где реально стоит стена рядом с ценой").
+      if (c.__wallEvent) return 1000 + c.__wallEvent.confidencePct;
       const calmBonus = c.preMove != null ? 1 / (1 + c.preMove) : 0.5;
       return burstRatio(c) * (1 + c.vol5s) * (1 + calmBonus);
     }
@@ -3248,6 +3270,17 @@ function detectZoneReturn(symbol) {
   if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
   return ev;
 }
+// Единственный ВПЕРЁД смотрящий (не постфактум) детектор стакана — см. комментарий у
+// MexcCore.detectStandingWall. Используется и здесь (Паттерны, Tier 2 UI), и напрямую из
+// STRATEGY_DEFS.density.match() на скринере — для watchlist-монет "Сайз" теперь опирается на
+// РЕАЛЬНЫЙ стакан вместо тиковой эвристики (см. её же комментарий).
+function detectStandingWall(symbol) {
+  const ev = MexcCore.detectStandingWall(tier2Depth.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.standingWall.minRepeats, lookback: 20, minWallRatio: 3, maxDistancePct: 1.5
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
 
 const DETECTOR_DEFS = {
   repeatSize: { label: 'Идентичные размеры сделок', badge: 'SIZE', category: 'repeat', minRepeats: 5, detect: detectRepeatedTradeSizes },
@@ -3261,7 +3294,8 @@ const DETECTOR_DEFS = {
   absorption: { label: 'Поглощение плотности', badge: 'ABSORB', category: 'depth', minRepeats: 20, detect: detectAbsorption },
   fakeLiquidity: { label: 'Возможная фейковая ликвидность', badge: 'FAKE?', category: 'heuristic-lowconf', minRepeats: 20, detect: detectFakeLiquidity },
   exhaustion: { label: 'Истощение импульса', badge: 'EXHAUST', category: 'inefficiency', minRepeats: 3, detect: detectExhaustion },
-  zoneReturn: { label: 'Повторная реакция на зону', badge: 'ZONE', category: 'repeat', minRepeats: 5, detect: detectZoneReturn }
+  zoneReturn: { label: 'Повторная реакция на зону', badge: 'ZONE', category: 'repeat', minRepeats: 5, detect: detectZoneReturn },
+  standingWall: { label: 'Стоящая стена в стакане', badge: 'WALL', category: 'depth', minRepeats: 10, detect: detectStandingWall }
 };
 
 // Человекочитаемое объяснение "почему сработало" — та же идея, что explainCoinForStrategy() у
@@ -3326,6 +3360,12 @@ function explainPatternEvent(ev) {
     return 'Цена ' + ev.repeatCount + ' раз возвращалась к зоне ' + fmtPrice(ev.zonePrice) + ' и каждый раз отскакивала ' +
       'в среднем на ' + ev.avgReactionPct + '% — похоже на устойчивый уровень поддержки/сопротивления. Confidence ' +
       ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'standingWall') {
+    return 'На ' + (ev.side === 'ask' ? 'продажу' : 'покупку') + ' у уровня ' + fmtPrice(ev.priceLevel) + ' стоит стена ' +
+      'в ' + ev.wallRatio + '× больше типичного соседнего уровня (≈$' + ev.volumeUsd.toLocaleString('ru-RU') + '), в ' +
+      ev.distancePct + '% от текущей цены — и цена к ней устойчиво приближается. Если стену пробьют, движение, скорее ' +
+      'всего, продолжится в сторону пробоя (' + ev.direction + '). Confidence ' + ev.confidencePct + '%.';
   }
   return '';
 }
@@ -3902,6 +3942,7 @@ function switchPage(pageId) {
   if (pageId === 'favorites') updateFavoritesPage();
   if (pageId === 'analytics') updateAnalytics();
   if (pageId === 'alerts') updateAlerts();
+  if (pageId === 'listings') updateListingsPage();
   if (pageId === 'profiles') updateProfilesPage();
   if (pageId === 'patterns') { renderDetectorFilterRow(); updatePatternsPage(); }
   if (pageId === 'account') refreshAccountBalancesIfConnected();
@@ -4019,15 +4060,20 @@ function updateDensityLevelsPanel(c) {
   if (!c || activeStrategy !== 'density') { bar.classList.remove('visible'); return; }
   const zoneText = document.getElementById('densityZoneText');
   const breakText = document.getElementById('densityBreakText');
+  const wall = detectStandingWall(c.symbol); // не-null только для watchlist-монет с реальной подпиской на стакан
   if (zoneText) {
-    // c.zoneHigh > c.zoneLow (строго) — НАЙДЕННЫЙ баг: у самой "идеальной" для этой стратегии
-    // ситуации — совершенно плоской, спокойной досплесковой фазы (та же цена и 60с, и 30с назад,
-    // ровно то, что текст ниже описывает как "движение было спокойным: 0.00%") — zoneLow и zoneHigh
-    // ЧИСЛЕННО РАВНЫ (min/max одной и той же цены). Строгое ">" тогда ложно проваливалось в ветку
-    // "копим данные…", хотя данные уже есть — просто зона выродилась в одну точку. Теперь такой
-    // случай показывается как "≈цена" вместо противоречивого "копим данные" рядом с уже готовым
-    // объяснением пробоя.
-    if (c.zoneLow != null && c.zoneHigh != null) {
+    if (wall) {
+      // Watchlist-монета с реальной стеной — показываем настоящий уровень стакана, а не тиковое приближение.
+      zoneText.innerHTML = '<span class="lvl-tag">стена:</span>' + fmtPrice(wall.priceLevel) +
+        ' (' + (wall.side === 'ask' ? 'ask' : 'bid') + ', ' + wall.wallRatio + '×)';
+    } else if (c.zoneLow != null && c.zoneHigh != null) {
+      // c.zoneHigh > c.zoneLow (строго) — НАЙДЕННЫЙ баг: у самой "идеальной" для этой стратегии
+      // ситуации — совершенно плоской, спокойной досплесковой фазы (та же цена и 60с, и 30с назад,
+      // ровно то, что текст ниже описывает как "движение было спокойным: 0.00%") — zoneLow и zoneHigh
+      // ЧИСЛЕННО РАВНЫ (min/max одной и той же цены). Строгое ">" тогда ложно проваливалось в ветку
+      // "копим данные…", хотя данные уже есть — просто зона выродилась в одну точку. Теперь такой
+      // случай показывается как "≈цена" вместо противоречивого "копим данные" рядом с уже готовым
+      // объяснением пробоя.
       zoneText.innerHTML = '<span class="lvl-tag">зона:</span>' +
         (c.zoneHigh > c.zoneLow ? fmtPrice(c.zoneLow) + '–' + fmtPrice(c.zoneHigh) : '≈' + fmtPrice(c.zoneLow));
     } else {
@@ -4063,14 +4109,23 @@ function explainCoinForStrategy(c, key, s) {
       'заявка на тонком участке книги ордеров, а не устойчивый спрос/предложение.';
   }
   if (key === 'density') {
+    // STRATEGY_DEFS.density.match() (вызван строкой выше как matched) уже посчитал c.__wallEvent —
+    // не пересчитываем detectStandingWall второй раз, просто читаем свежий результат.
+    if (c.__wallEvent) {
+      const w = c.__wallEvent;
+      return 'Совпадает с профилем — реальная стена в стакане. На ' + (w.side === 'ask' ? 'продажу' : 'покупку') +
+        ' у ' + fmtPrice(w.priceLevel) + ' стоит заявка в ' + w.wallRatio + '× больше типичного соседнего уровня ' +
+        '(≈$' + w.volumeUsd.toLocaleString('ru-RU') + '), в ' + w.distancePct + '% от текущей цены — и цена к ней ' +
+        'устойчиво приближается несколько снимков стакана подряд. Confidence ' + w.confidencePct + '%.';
+    }
     const calmText = c.preMove != null ? pctText(c.preMove) : 'нет данных';
     const revertText = c.reverting
       ? ' Но в последние ~2с цена уже разворачивается против этого всплеска — больше похоже на фитиль/ложный ' +
         'прокол уровня, чем на устойчивый пробой, поэтому в выдачу она не попадёт.'
       : (matched ? ' Разворота против движения в последние ~2с не видно — похоже на устойчивый пробой.' : '');
-    return prefix + 'Перед всплеском (60с→30с назад) движение было спокойным: ' + calmText + '. За последние 5с ' +
-      'объём резко вырос — в ' + burst.toFixed(1) + '× от обычного дневного темпа этой монеты, и цена пошла на ' +
-      pctText(c.vol5s) + '.' + revertText;
+    return prefix + '(тиковое приближение — монета вне watchlist глубокого анализа). Перед всплеском ' +
+      '(60с→30с назад) движение было спокойным: ' + calmText + '. За последние 5с объём резко вырос — в ' +
+      burst.toFixed(1) + '× от обычного дневного темпа этой монеты, и цена пошла на ' + pctText(c.vol5s) + '.' + revertText;
   }
   return '';
 }
@@ -7532,6 +7587,256 @@ async function fetchPublicText(url) {
     return native.body;
   }
 }
+
+// ============================================================================
+// ЛИСТИНГИ — боковая вкладка «Листинги» (см. #page-listings в index.html). Показывает новые
+// торговые пары на MEXC и Binance. Два ЧЕСТНО разных механизма — у бирж просто нет единого способа
+// заранее знать о листинге:
+//
+// 1) Binance Futures — единственное место, где реально можно посчитать обратный отсчёт: у ещё не
+//    запущенных контрактов в /fapi/v1/exchangeInfo стоит status="PENDING_TRADING" и заполнено поле
+//    onboardDate (эпоха мс, официально запланированное время старта торгов) — проверено вживую
+//    прямым запросом к API перед тем, как писать этот код, поле реальное. onboardDate иногда
+//    сдвигается (Binance может задержать запуск) — поэтому перепроверяем на каждом опросе, а не
+//    один раз при первом обнаружении.
+// 2) MEXC Spot и Binance Spot — такого поля нет вообще ни у одной из бирж: exchangeInfo отдаёт
+//    только уже ТОРГУЮЩИЕСЯ пары. Единственный честный способ — периодически сверять список
+//    торгуемых пар с сохранённым списком с прошлого опроса и ловить момент, когда там появляется
+//    то, чего не было — то есть узнавать о листинге В МОМЕНТ (или в первые ~45с после), а не
+//    заранее. Отсюда два разных вида карточек: "до листинга: 8м 12с" (только Binance Futures) и
+//    "листинг обнаружен N назад" (MEXC/Binance spot).
+// ============================================================================
+const LISTING_POLL_MS = 45000;
+const LISTING_SPOT_SOURCES = {
+  MEXC: { url: 'https://api.mexc.com/api/v3/exchangeInfo', isTradable: function (s) { return String(s.status) === '1'; } },
+  BINANCE: { url: 'https://api.binance.com/api/v3/exchangeInfo', isTradable: function (s) { return s.status === 'TRADING'; } }
+};
+const BINANCE_FUT_EXCHANGEINFO_URL = 'https://fapi.binance.com/fapi/v1/exchangeInfo';
+const LISTING_BADGE_TEXT = { MEXC: 'MEXC', BINANCE: 'BIN', BINANCEFUT: 'FUT' };
+const LISTING_BASELINE_KEY = { MEXC: 'mexc_listing_baseline_mexc', BINANCE: 'mexc_listing_baseline_binance' };
+const LISTING_EVENTS_KEY = 'mexc_listing_events';
+const LISTING_EVENTS_MAX = 300;
+const LISTING_EVENTS_MAX_AGE_MS = 14 * 24 * 3600 * 1000; // 14 дней — хватит полистать историю, не раздувая localStorage
+const LISTING_FRESH_MS = 30 * 60 * 1000; // "новое" в бейдже сайдбара — обнаружено за последние 30 минут
+
+let listingBaseline = { MEXC: null, BINANCE: null };          // null = ещё не инициализирован в этой сессии; иначе Set торгуемых пар
+let listingBaselineSeeded = { MEXC: false, BINANCE: false };  // true = базовый список уже полон (либо загружен с диска, либо только что впервые построен) — дальше сравнение честное
+
+let listingEvents = (function loadListingEvents() {
+  try {
+    const raw = localStorage.getItem(LISTING_EVENTS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+})();
+let listingEventsSeq = listingEvents.reduce(function (m, e) { return Math.max(m, e.id || 0); }, 0);
+
+function saveListingEvents() {
+  const now = Date.now();
+  listingEvents = listingEvents.filter(function (e) { return now - e.detectedAt < LISTING_EVENTS_MAX_AGE_MS; });
+  if (listingEvents.length > LISTING_EVENTS_MAX) listingEvents = listingEvents.slice(-LISTING_EVENTS_MAX);
+  try { persistSet(LISTING_EVENTS_KEY, JSON.stringify(listingEvents)); } catch (e) {}
+}
+
+function loadListingBaselineSet(exch) {
+  try {
+    const raw = localStorage.getItem(LISTING_BASELINE_KEY[exch]);
+    if (raw) { const arr = JSON.parse(raw); if (Array.isArray(arr)) return new Set(arr); }
+  } catch (e) {}
+  return null;
+}
+function saveListingBaselineSet(exch) {
+  try { persistSet(LISTING_BASELINE_KEY[exch], JSON.stringify(Array.from(listingBaseline[exch]))); } catch (e) {}
+}
+
+function registerJustListed(exch, symbol) {
+  const base = symbol.replace(/USDT$/, '');
+  listingEvents.push({
+    id: ++listingEventsSeq, exchange: exch, market: 'SPOT', symbol: symbol, baseAsset: base,
+    kind: 'justListed', onboardDate: null, detectedAt: Date.now(), wentLiveAt: Date.now()
+  });
+  saveListingEvents();
+}
+
+// Проверяет список торгуемых пар одной биржи (MEXC или Binance spot) и ловит НОВЫЕ по сравнению с
+// сохранённым базовым списком. Первый прогон (нет сохранённого списка на диске вообще) — НЕ считает
+// ничего новым, просто фиксирует ВЕСЬ текущий рынок как точку отсчёта (иначе при первом же запуске
+// приложения весь рынок — тысячи пар — выглядел бы как "листинг только что").
+async function pollSpotListings(exch) {
+  const src = LISTING_SPOT_SOURCES[exch];
+  const body = await fetchPublicText(src.url);
+  const data = JSON.parse(body);
+  const current = new Set();
+  (data.symbols || []).forEach(function (s) {
+    if (s.quoteAsset !== 'USDT' || !src.isTradable(s)) return;
+    current.add(s.symbol);
+  });
+  if (listingBaseline[exch] === null) {
+    const saved = loadListingBaselineSet(exch);
+    listingBaseline[exch] = saved || new Set();
+    listingBaselineSeeded[exch] = !!saved;
+  }
+  const baseline = listingBaseline[exch];
+  if (!listingBaselineSeeded[exch]) {
+    current.forEach(function (s) { baseline.add(s); });
+    listingBaselineSeeded[exch] = true;
+    saveListingBaselineSet(exch);
+    return;
+  }
+  let changed = false;
+  current.forEach(function (s) {
+    if (baseline.has(s)) return;
+    baseline.add(s);
+    changed = true;
+    registerJustListed(exch, s);
+  });
+  if (changed) saveListingBaselineSet(exch);
+}
+
+// Binance Futures — единственная биржа/рынок из трёх, где есть настоящее время старта заранее (см.
+// комментарий в начале секции). upcoming-события обновляются на КАЖДОМ опросе (не только при первом
+// обнаружении) — onboardDate у биржи иногда сдвигается, счётчик должен оставаться честным.
+async function pollBinanceFuturesListings() {
+  const body = await fetchPublicText(BINANCE_FUT_EXCHANGEINFO_URL);
+  const data = JSON.parse(body);
+  const now = Date.now();
+  (data.symbols || []).forEach(function (s) {
+    if (s.quoteAsset !== 'USDT') return;
+    const existingUpcoming = listingEvents.find(function (e) { return e.kind === 'upcoming' && e.exchange === 'BINANCEFUT' && e.symbol === s.symbol; });
+    if (s.status === 'PENDING_TRADING' && s.onboardDate) {
+      if (existingUpcoming) {
+        existingUpcoming.onboardDate = s.onboardDate;
+      } else {
+        listingEvents.push({
+          id: ++listingEventsSeq, exchange: 'BINANCEFUT', market: 'FUTURES', symbol: s.symbol, baseAsset: s.baseAsset,
+          kind: 'upcoming', onboardDate: s.onboardDate, detectedAt: now, wentLiveAt: null
+        });
+      }
+    } else if (s.status === 'TRADING' && existingUpcoming) {
+      // Была в upcoming, теперь реально торгуется — переводим карточку в "уже залистилась".
+      existingUpcoming.kind = 'justListed';
+      existingUpcoming.wentLiveAt = now;
+    }
+  });
+  saveListingEvents();
+}
+
+function updateListingsNavBadge() {
+  const badge = document.getElementById('navListingBadge');
+  if (!badge) return;
+  const now = Date.now();
+  const freshCount = listingEvents.filter(function (e) { return now - e.detectedAt < LISTING_FRESH_MS; }).length;
+  badge.textContent = freshCount;
+  badge.style.display = freshCount > 0 ? '' : 'none';
+}
+
+function renderListingsPageIfActive() {
+  const page = document.getElementById('page-listings');
+  if (page && page.classList.contains('active')) updateListingsPage();
+  updateListingsNavBadge();
+}
+
+async function pollAllListings() {
+  try { await pollSpotListings('MEXC'); } catch (e) { logW('Listings', 'MEXC: ' + e.message); }
+  try { await pollSpotListings('BINANCE'); } catch (e) { logW('Listings', 'Binance Spot: ' + e.message); }
+  try { await pollBinanceFuturesListings(); } catch (e) { logW('Listings', 'Binance Futures: ' + e.message); }
+  renderListingsPageIfActive();
+}
+setInterval(pollAllListings, LISTING_POLL_MS);
+pollAllListings(); // сразу при старте, не ждём первого интервала
+
+function fmtCountdown(ms) {
+  if (ms <= 0) return null;
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const sec = totalSec % 60;
+  return (h > 0 ? h + 'ч ' : '') + m + 'м ' + sec + 'с';
+}
+function fmtAgoShort(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return s + 'с';
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + 'м';
+  const h = Math.floor(m / 60);
+  return h + 'ч';
+}
+
+// Фиксированный набор вкладок (не через renderFlatExchFilter — тот скрывает себя и сбрасывает
+// фильтр, если нет ПОДКЛЮЧЁННОЙ по API-ключу биржи; листинги — публичные данные, не завязаны на
+// подключение аккаунта, должны быть видны всегда).
+let listingsExchangeFilter = 'ALL'; // 'ALL' | 'MEXC' | 'BINANCE' | 'BINANCEFUT'
+const LISTINGS_FILTER_TABS = ['ALL', 'MEXC', 'BINANCE', 'BINANCEFUT'];
+function renderListingsExchFilter() {
+  const box = document.getElementById('listingsExchFilter');
+  if (!box) return;
+  box.innerHTML = LISTINGS_FILTER_TABS.map(function (ex) {
+    if (ex === 'ALL') return '<div class="exch-switch-btn exch-switch-all' + (listingsExchangeFilter === 'ALL' ? ' active' : '') + '" data-fexch="ALL">' + t('Все') + '</div>';
+    return '<div class="exch-switch-btn exch-switch-' + ex.replace(/FUT$/, '').toLowerCase() + (listingsExchangeFilter === ex ? ' active' : '') +
+      '" data-fexch="' + ex + '" title="' + (EXCHANGE_SWITCH_TITLES[ex] || ex) + '">' + EXCHANGE_SWITCH_LABELS[ex] + '</div>';
+  }).join('');
+  if (!box.dataset.wired) {
+    box.dataset.wired = '1';
+    box.addEventListener('click', function (e) {
+      const btn = e.target.closest('[data-fexch]');
+      if (!btn || listingsExchangeFilter === btn.dataset.fexch) return;
+      listingsExchangeFilter = btn.dataset.fexch;
+      updateListingsPage();
+    });
+  }
+}
+
+function updateListingsPage() {
+  renderListingsExchFilter();
+  const now = Date.now();
+  let items = listingEvents.slice();
+  if (listingsExchangeFilter !== 'ALL') items = items.filter(function (e) { return e.exchange === listingsExchangeFilter; });
+  items.sort(function (a, b) {
+    if (a.kind !== b.kind) return a.kind === 'upcoming' ? -1 : 1;
+    if (a.kind === 'upcoming') return (a.onboardDate - now) - (b.onboardDate - now);
+    return b.detectedAt - a.detectedAt;
+  });
+  items = items.slice(0, 100);
+  const countBadge = document.getElementById('listingsCountBadge');
+  if (countBadge) countBadge.textContent = items.length;
+  const box = document.getElementById('listingsList');
+  if (!box) return;
+  if (!items.length) {
+    box.innerHTML = '<div class="empty-state"><i class="ri-rocket-2-line"></i>' + t('Пока новых листингов не найдено — страница проверяет MEXC и Binance каждые 45с.') + '</div>';
+    return;
+  }
+  box.innerHTML = items.map(function (e, i) {
+    const pair = e.baseAsset + '/USDT';
+    const badgeText = LISTING_BADGE_TEXT[e.exchange] || e.exchange;
+    const colorCls = e.exchange.replace(/FUT$/, '').toLowerCase();
+    let statusHtml, cls;
+    if (e.kind === 'upcoming') {
+      const msLeft = e.onboardDate - now;
+      const countdown = fmtCountdown(msLeft);
+      cls = 'listing-row-upcoming' + (msLeft > 0 && msLeft <= 60000 ? ' listing-row-imminent' : msLeft > 0 && msLeft <= 300000 ? ' listing-row-soon' : '');
+      statusHtml = countdown
+        ? '<span class="listing-row-countdown"><i class="ri-timer-flash-line"></i> ' + t('до листинга') + ': ' + countdown + '</span>'
+        : '<span class="listing-row-countdown listing-row-overdue">' + t('запаздывает — ещё не запущен') + '</span>';
+    } else {
+      cls = 'listing-row-just';
+      statusHtml = '<span class="listing-row-ago"><i class="ri-flashlight-line"></i> ' + t('листинг обнаружен') + ' ' + fmtAgoShort(now - e.detectedAt) + ' ' + t('назад') + '</span>';
+    }
+    return '<div class="listing-row ' + cls + '" style="animation-delay:' + (Math.min(i, 20) * 22) + 'ms">' +
+      '<span class="exch-tag exch-tag-' + colorCls + '">' + badgeText + '</span>' +
+      '<div class="listing-row-coin"><strong>' + pair + '</strong></div>' +
+      statusHtml +
+      '</div>';
+  }).join('');
+}
+
+// Тикает раз в секунду, пока страница открыта — обратный отсчёт у upcoming-карточек живой, не
+// дожидается следующего 45с-опроса биржи.
+setInterval(function () {
+  const page = document.getElementById('page-listings');
+  if (page && page.classList.contains('active') && listingEvents.some(function (e) { return e.kind === 'upcoming'; })) {
+    updateListingsPage();
+  }
+}, 1000);
 
 let externalTickerTimers = {}; // id -> setInterval-хендл, см. start/stopExternalTickerPolling
 const EXTERNAL_TICKER_POLL_MS = 4000;

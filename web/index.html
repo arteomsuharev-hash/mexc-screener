@@ -31,6 +31,7 @@
       <a class="nav-item" data-page="favorites"><i class="ri-star-line"></i><span data-i18n>Избранное</span><span class="nav-badge" id="navFavBadge">0</span></a>
       <a class="nav-item" data-page="alerts"><i class="ri-notification-3-line"></i><span data-i18n>Оповещения</span><span class="nav-badge" id="navAlertBadge">0</span></a>
       <a class="nav-item" data-page="analytics"><i class="ri-bar-chart-box-line"></i><span data-i18n>Аналитика</span></a>
+      <a class="nav-item" data-page="listings"><i class="ri-rocket-2-line"></i><span data-i18n>Листинги</span><span class="nav-badge" id="navListingBadge" style="display:none;">0</span></a>
       <div class="nav-section" data-i18n>Аккаунт</div>
       <a class="nav-item" data-page="account"><i class="ri-key-2-line"></i><span data-i18n>Настройки аккаунта</span><span class="nav-dot" id="navAccountDot" title="Не подключено" data-i18n-title></span></a>
       <a class="nav-item" data-page="finres"><i class="ri-funds-line"></i><span data-i18n>Финрез</span></a>
@@ -120,7 +121,7 @@
               <optgroup label="Стратегии" data-i18n-label>
                 <option value="algo" data-i18n>Стратегия: АЛГОРИТМЫ</option>
                 <option value="ineff" data-i18n>Стратегия: НЕЭФФЕКТИВНОСТИ</option>
-                <option value="density" data-i18n>Стратегия: ПРОБОЙ ПЛОТНОСТЕЙ</option>
+                <option value="density" data-i18n>Стратегия: САЙЗ</option>
               </optgroup>
             </select>
             <div class="view-toggle">
@@ -333,6 +334,26 @@
       <div class="alerts-list" id="alertsList"></div>
     </div>
 
+    <div class="page" id="page-listings">
+      <div class="alerts-toolbar">
+        <div class="alerts-toolbar-left">
+          <h2 data-i18n>Листинги</h2>
+          <span class="alerts-count-badge" id="listingsCountBadge">0</span>
+        </div>
+        <div class="alerts-toolbar-right">
+          <div class="analytics-exch-filter" id="listingsExchFilter"></div>
+        </div>
+      </div>
+      <div class="profile-strategy-note" style="margin:0 20px 14px;" data-i18n-block data-i18n-key="listings-honesty-note">
+        <strong>Как это работает.</strong> У Binance Futures новые контракты заранее видны в публичном API
+        со статусом «ожидает торгов» и точным временем старта — по ним ниже честный обратный отсчёт. У MEXC
+        Spot и Binance Spot такого поля в принципе нет ни у одной биржи — там пара просто появляется в
+        списке торгуемых без предупреждения, и единственный честный способ — заметить её МОМЕНТ появления
+        (страница проверяет обе биржи каждые 45 секунд), а не обещать выдуманный отсчёт.
+      </div>
+      <div class="alerts-list" id="listingsList"></div>
+    </div>
+
     <div class="page" id="page-analytics">
       <div class="analytics-exch-filter" id="analyticsExchFilter" style="display:none;"></div>
       <div class="analytics-grid">
@@ -441,22 +462,26 @@
           </div>
           <div class="profile-strategy-card" data-profile="density">
             <span class="card-active-badge"><i class="ri-checkbox-circle-fill"></i> <span data-i18n>АКТИВЕН</span></span>
-            <div class="card-top"><span class="card-icon"><i class="ri-crosshair-line"></i></span><h4><span data-i18n>4. Пробой плотностей</span> <span class="card-count" id="cardCountDensity">— монет</span></h4></div>
-            <p data-i18n>Объём за последние 5с в разы выше обычного темпа суток («объём проедают») + цена уже пошла — прокси пробоя плотности/крупной заявки с последующим импульсом.</p>
+            <div class="card-top"><span class="card-icon"><i class="ri-crosshair-line"></i></span><h4><span data-i18n>4. Сайз</span> <span class="card-count" id="cardCountDensity">— монет</span></h4></div>
+            <p data-i18n>Для монет из watchlist глубокого анализа (Tier 2) — реальная стоящая стена в стакане, к которой приближается цена. Для остальных — прокси по тикам: объём за 5с в разы выше обычного темпа суток + цена уже пошла.</p>
           </div>
         </div>
 
         <div class="profile-strategy-note" data-i18n-block data-i18n-key="profiles-strategy-note">
           <strong>Важно про стратегии.</strong> У скринера нет подписки на стакан (order book depth) по всем
           парам рынка одновременно — это архитектурно невозможно для тысяч пар сразу (у MEXC лимит ~30
-          потоков на одно WebSocket-соединение). Поэтому «Алгоритмы», «Неэффективности» и особенно
-          «Пробой плотностей» — это эвристики на тиковых данных (цена, объём 24ч, объём/скорость оборота и
-          волатильность за последние 5–60с), а не точный анализ лимитных стен из стакана. Когда активна
-          стратегия «Пробой плотностей» и открыт график монеты, над графиком показывается панель «Плотность»
-          с приблизительной ценовой зоной затишья перед всплеском и уровнем, где он произошёл — это тоже
-          эвристика по тикам, а не разметка настоящих стен из стакана. Перед входом в сделку стакан конкретной
-          пары стоит проверить вручную — кнопка «Открыть в терминале» у графика ведёт на реальный терминал
-          MEXC с полным стаканом.
+          потоков на одно WebSocket-соединение). Поэтому «Алгоритмы» и «Неэффективности» — это эвристики на
+          тиковых данных (цена, объём 24ч, объём/скорость оборота и волатильность за последние 5–60с), а не
+          точный анализ лимитных стен из стакана. «Сайз» — исключение для монет из watchlist глубокого
+          анализа (см. «Паттерны», обычно топ-20 самых активных монет прямо сейчас + открытая монета/избранное):
+          для них сигнал строится на РЕАЛЬНОМ стакане — ищем крупную стоящую заявку («стену»), заметно выше
+          соседних уровней, недалеко от текущей цены, к которой цена уже приближается несколько снимков
+          подряд. Для монет вне watchlist «Сайз» по-прежнему работает на приближении по тикам (затишье, затем
+          резкий всплеск объёма) — это честно другой, менее точный сигнал. Когда активна стратегия «Сайз» и
+          открыт график монеты, над графиком показывается панель «Плотность» — для watchlist-монет там уровень
+          реальной стены, для остальных — приблизительная зона по тикам. Перед входом в сделку стакан
+          конкретной пары стоит проверить вручную — кнопка «Открыть в терминале» у графика ведёт на реальный
+          терминал MEXC с полным стаканом.
         </div>
       </div>
     </div>
