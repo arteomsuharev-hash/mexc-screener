@@ -525,6 +525,28 @@ body {
   color: var(--text-secondary); cursor: pointer; border-radius: 4px;
 }
 .view-btn.active { background: var(--bg-hover); color: #fff; }
+
+/* Переключатель "какие биржи показывать" в тулбаре скринера — по умолчанию скрыт (см. exchangeSwitch
+   в index.html), появляется, как только подключена хотя бы одна биржа помимо MEXC (см.
+   renderExchangeSwitch в app.js). Кружки с буквой вместо реальных лого бирж — не тянем внешние
+   бренд-ассеты, тот же язык, что и у coin-icon (цветной кружок + буква) уже везде в этом приложении. */
+.exchange-switch { display: flex; align-items: center; gap: 3px; padding: 2px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 6px; }
+.exch-switch-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 24px; border-radius: 4px; cursor: pointer;
+  font-size: 10px; font-weight: 700; color: #fff; border: 1.5px solid transparent;
+  opacity: .5; transition: opacity .15s, border-color .15s;
+}
+.exch-switch-btn:hover { opacity: .8; }
+.exch-switch-btn.active { opacity: 1; border-color: var(--text-primary); }
+.exch-switch-btn.exch-switch-all {
+  width: auto; padding: 0 10px; background: transparent; color: var(--text-secondary);
+  font-size: 11px; font-weight: 600; border: 1.5px solid transparent;
+}
+.exch-switch-btn.exch-switch-all.active { color: var(--text-primary); border-color: var(--border-color); opacity: 1; }
+.exch-switch-btn.exch-switch-mexc { background: var(--blue); }
+.exch-switch-btn.exch-switch-binance { background: #F0B90B; color: #1a1a1a; }
+.exch-switch-btn.exch-switch-okx { background: #000; }
 .search-box { position: relative; }
 .search-box input {
   background: var(--bg-card); border: 1px solid var(--border-color);

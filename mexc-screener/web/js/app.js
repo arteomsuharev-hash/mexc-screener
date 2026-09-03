@@ -156,6 +156,7 @@ const I18N_EN = {
   'Волат. 60с': '60s Volat.', 'Сигнал': 'Signal',
   // --- Инфо-панель монеты ---
   'Мои открытые ордера': 'My open orders',
+  'Все': 'All', 'Все биржи': 'All exchanges',
   // --- Таймфреймы ---
   '1м': '1m', '5м': '5m', '15м': '15m', '30м': '30m', '1ч': '1h', '4ч': '4h', '1д': '1D',
   // --- График ---
@@ -449,6 +450,9 @@ let updateIntervalId = null;
 let updateIntervalMs = 10000;
 let isLoading = false;
 let searchQuery = '';
+// 'ALL' | 'MEXC' | 'BINANCE' | 'OKX' — переключатель "какие биржи показывать" в тулбаре скринера
+// (см. renderExchangeSwitch/exchangeSwitch), учитывается в coinPassesFilters().
+let activeExchangeFilter = 'ALL';
 let sortField = 'vol24';
 let sortAsc = false;
 let viewMode = 'list';
@@ -1252,6 +1256,7 @@ function parseFilterVal(id) {
 }
 
 function coinPassesFilters(c) {
+  if (activeExchangeFilter !== 'ALL' && (c.exchange || 'MEXC') !== activeExchangeFilter) return false;
   const q = searchQuery.toLowerCase();
   if (q && c.symbol.toLowerCase().indexOf(q) === -1 && c.baseAsset.toLowerCase().indexOf(q) === -1) return false;
   if (activeStrategy && STRATEGY_DEFS[activeStrategy]) {
@@ -7164,6 +7169,57 @@ function setExchangeStatus(id, state, msg) {
   }
 }
 
+// Переключатель бирж в тулбаре скринера (#exchangeSwitch, см. index.html) — кружки с буквой вместо
+// названия (см. .exch-switch-btn в styles.css: не тянем внешние бренд-ассеты логотипов, тот же
+// визуальный язык, что и у coin-icon везде в этом приложении). MEXC всегда доступна (её тикеры идут
+// по публичному WS независимо от того, подключен ли API-ключ аккаунта — см. accountConnected — это
+// про баланс/сделки, не про рыночные данные); Binance/OKX появляются в переключателе, только когда
+// реально подключены (см. connectExchange/disconnectExchange), иначе выбирать там нечего.
+const EXCHANGE_SWITCH_LABELS = { MEXC: 'M', BINANCE: 'B', OKX: 'O' };
+
+function renderExchangeSwitch() {
+  const box = document.getElementById('exchangeSwitch');
+  if (!box) return;
+  const connected = ['MEXC'].concat(
+    Object.keys(EXCHANGE_CONNECTORS)
+      .filter(function (id) { return exchangeConnections[id] && exchangeConnections[id].connected; })
+      .map(function (id) { return EXCHANGE_CONNECTORS[id].label.toUpperCase(); })
+  );
+  if (connected.length <= 1) {
+    box.style.display = 'none';
+    // Отключили единственную дополнительную биржу, пока фильтр стоял именно на ней — сбрасываем на
+    // "Все", иначе таблица молча осталась бы пустой без видимого способа это исправить (переключатель
+    // сам сейчас скрывается).
+    if (activeExchangeFilter !== 'ALL' && activeExchangeFilter !== 'MEXC') {
+      activeExchangeFilter = 'ALL';
+      renderTable();
+    }
+    return;
+  }
+  box.style.display = 'flex';
+  const buttons = ['ALL'].concat(connected);
+  box.innerHTML = buttons.map(function (ex) {
+    if (ex === 'ALL') {
+      return '<div class="exch-switch-btn exch-switch-all' + (activeExchangeFilter === 'ALL' ? ' active' : '') +
+        '" data-exchange="ALL" title="' + t('Все биржи') + '">' + t('Все') + '</div>';
+    }
+    return '<div class="exch-switch-btn exch-switch-' + ex.toLowerCase() + (activeExchangeFilter === ex ? ' active' : '') +
+      '" data-exchange="' + ex + '" title="' + ex + '">' + EXCHANGE_SWITCH_LABELS[ex] + '</div>';
+  }).join('');
+}
+
+(function wireExchangeSwitchClick() {
+  const box = document.getElementById('exchangeSwitch');
+  if (!box) return;
+  box.addEventListener('click', function (e) {
+    const btn = e.target.closest('.exch-switch-btn[data-exchange]');
+    if (!btn || activeExchangeFilter === btn.dataset.exchange) return;
+    activeExchangeFilter = btn.dataset.exchange;
+    renderExchangeSwitch();
+    renderTable();
+  });
+})();
+
 // Обобщённый аналог mexcSignedRequest (см. её же комментарий) — тот же приём "сначала fetch() из
 // браузера, при провале (CORS/сеть) — в обход через curl.exe", только параметризован коннектором
 // конкретной биржи вместо жёстко зашитого MEXC.
@@ -7235,6 +7291,7 @@ async function connectExchange(id, silent) {
     if (connector.needsPassphrase) persistSet('exch_' + id + '_api_passphrase', passphrase);
     setExchangeStatus(id, 'connected');
     startExternalTickerPolling(id);
+    renderExchangeSwitch();
   } catch (e) {
     exchangeConnections[id].connected = false;
     setExchangeStatus(id, 'error', e.message);
@@ -7253,6 +7310,7 @@ function disconnectExchange(id) {
   document.getElementById(id + 'ApiSecret').value = '';
   if (connector.needsPassphrase) document.getElementById(id + 'ApiPassphrase').value = '';
   setExchangeStatus(id, 'disconnected');
+  renderExchangeSwitch();
 }
 
 function restoreSavedExchangeAndConnect(id) {
