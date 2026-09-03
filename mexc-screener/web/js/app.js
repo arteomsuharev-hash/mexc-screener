@@ -450,6 +450,14 @@ let viewMode = 'list';
 // "уезжала" из-под курсора от постоянной пересортировки по объёму/цене. См. applySortOnly() и
 // делегированные mouseover/mouseout на #tableBody/#gridView в конце файла.
 let tableHoverFreezeSymbol = null;
+// Пока идёт заморозка (см. выше) — снимок ТОЧНОГО списка видимых монет (символы, тот же порядок,
+// та же длина), сделанный в момент начала наведения. Одной заморозки порядка внутри allCoins
+// недостаточно: если под курсором активен фильтр/стратегия на "живых" полях (объём, изменение и
+// т.п.), сама принадлежность монеты текущему видимому срезу может измениться на лету — тогда
+// строки всё равно "прыгают" (появляются/пропадают/сдвигаются), просто по другой причине, чем
+// пересортировка. Пока заморожено — состав и порядок видимых строк не меняются вообще, обновляются
+// только значения в ячейках (см. renderTable()). Сбрасывается в null, как только курсор уходит.
+let frozenVisibleSymbols = null;
 let ws = null;
 let wsReconnectAttempts = 0;
 let lastMiniTickerAt = 0; // для watchdog'а "сокет открыт, но молчит" — см. connectWs()
@@ -1229,7 +1237,18 @@ function renderTable() {
   const tbody = document.getElementById('tableBody');
   const grid = document.getElementById('gridView');
   const filtered = getFilteredCoins();
-  const visible = filtered.slice(0, maxPairs);
+  let visible;
+  if (tableHoverFreezeSymbol) {
+    // Курсор на строке — фиксируем ТОЧНЫЙ состав и порядок видимых строк на момент начала наведения
+    // (см. объявление frozenVisibleSymbols), а не только относительный порядок внутри allCoins.
+    // Иначе монета, переставшая на тик проходить фильтр (объём/изменение и т.п. живые поля), пропадала
+    // бы из списка прямо под курсором, и все строки ниже неё всё равно "прыгали" бы вверх.
+    if (!frozenVisibleSymbols) frozenVisibleSymbols = filtered.slice(0, maxPairs).map(function (c) { return c.symbol; });
+    visible = frozenVisibleSymbols.map(function (sym) { return coinMap.get(sym); }).filter(Boolean);
+  } else {
+    frozenVisibleSymbols = null;
+    visible = filtered.slice(0, maxPairs);
+  }
   // Первая отрисовка таблицы (пустая на старте) — плитки строк проигрывают лёгкую анимацию
   // появления; на всех последующих (живых) обновлениях анимация не переигрывается, чтобы не мигало.
   const isFirstFill = tbody.children.length === 0 || tbody.querySelector('.empty-state');
@@ -7930,6 +7949,7 @@ window.__injectFakePatternEvent = function (partial) {
 };
 
 window.__tableHoverFreeze = function () { return tableHoverFreezeSymbol; };
+window.__frozenVisibleSymbols = function () { return frozenVisibleSymbols; };
 
 // Диагностика "Финрез не показывает историю сделок" из консоли разработчика — без этого хука
 // внутреннее состояние (knownSymbols, lastBalanceState и т.д.) недоступно снаружи, т.к. весь app.js
