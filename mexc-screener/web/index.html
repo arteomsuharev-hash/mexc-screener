@@ -313,9 +313,22 @@
     </div>
 
     <div class="page" id="page-alerts">
-      <div style="padding:16px 20px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
-        <h2 style="font-size:18px; font-weight:600;" data-i18n>Оповещения по движению 24ч</h2>
-        <div class="analytics-exch-filter" id="alertsExchFilter" style="padding:0; display:none;"></div>
+      <div class="alerts-toolbar">
+        <div class="alerts-toolbar-left">
+          <h2 data-i18n>Оповещения по движению 24ч</h2>
+          <span class="alerts-count-badge" id="alertsCountBadge">0</span>
+        </div>
+        <div class="alerts-toolbar-right">
+          <div class="alerts-dir-filter" id="alertsDirFilter"></div>
+          <div class="analytics-exch-filter" id="alertsExchFilter" style="padding:0; display:none;"></div>
+          <div class="alerts-threshold">
+            <span data-i18n>Порог</span>
+            <button type="button" class="alerts-thr-btn" id="alertsThrMinus" aria-label="-">−</button>
+            <input type="number" id="priceAlertThreshold" value="8" step="0.5" min="0.5" max="500">
+            <span>%</span>
+            <button type="button" class="alerts-thr-btn" id="alertsThrPlus" aria-label="+">+</button>
+          </div>
+        </div>
       </div>
       <div class="alerts-list" id="alertsList"></div>
     </div>
@@ -469,10 +482,6 @@
           <div class="setting-row">
             <span class="setting-label" data-i18n>Максимум пар в таблице</span>
             <div class="setting-control"><input type="number" id="maxPairs" value="400" min="20" max="2000"></div>
-          </div>
-          <div class="setting-row">
-            <span class="setting-label" data-i18n>Порог оповещения |изм. 24ч| (%)</span>
-            <div class="setting-control"><input type="number" id="priceAlertThreshold" value="8" step="0.1"></div>
           </div>
         </div>
         <div class="settings-group">

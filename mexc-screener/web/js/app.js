@@ -157,6 +157,7 @@ const I18N_EN = {
   'Мои открытые ордера': 'My open orders',
   'Все': 'All', 'Все биржи': 'All exchanges', 'Спот': 'Spot', 'Фьючерсы': 'Futures', 'выбрать рынок': 'choose market',
   'Нет пар с движением ≥': 'No pairs moved ≥', 'за 24ч.': 'over 24h.',
+  'Рост': 'Gainers', 'Падение': 'Losers', 'Порог': 'Threshold',
   // --- Таймфреймы ---
   '1м': '1m', '5м': '5m', '15м': '15m', '30м': '30m', '1ч': '1h', '4ч': '4h', '1д': '1D',
   // --- График ---
@@ -3784,14 +3785,46 @@ function renderAlertsExchFilter() {
     updateAlerts);
 }
 
+// Рост/Падение/Все — отдельный от биржевого фильтр направления движения: раньше растущие и падающие
+// пары были свалены в один список, отсортированный только по силе движения, из-за чего его было
+// неудобно сканировать глазами ("а где вообще падения?"). Своя маленькая пилюльная лента рядом с
+// биржевым фильтром, тот же паттерн wireAlertsDirFilter/dataset.wired, что и у renderFlatExchFilter.
+let alertsDirFilter = 'ALL'; // 'ALL' | 'UP' | 'DOWN'
+const ALERTS_DIR_OPTIONS = [
+  { id: 'ALL', label: 'Все', icon: '' },
+  { id: 'UP', label: 'Рост', icon: 'ri-arrow-up-line' },
+  { id: 'DOWN', label: 'Падение', icon: 'ri-arrow-down-line' }
+];
+function renderAlertsDirFilter() {
+  const box = document.getElementById('alertsDirFilter');
+  if (!box) return;
+  box.innerHTML = ALERTS_DIR_OPTIONS.map(function (o) {
+    return '<div class="alerts-dir-btn alerts-dir-' + o.id.toLowerCase() + (alertsDirFilter === o.id ? ' active' : '') + '" data-dir="' + o.id + '">' +
+      (o.icon ? '<i class="' + o.icon + '"></i>' : '') + t(o.label) + '</div>';
+  }).join('');
+  if (!box.dataset.wired) {
+    box.dataset.wired = '1';
+    box.addEventListener('click', function (e) {
+      const btn = e.target.closest('[data-dir]');
+      if (!btn || alertsDirFilter === btn.dataset.dir) return;
+      alertsDirFilter = btn.dataset.dir;
+      updateAlerts();
+    });
+  }
+}
+
 function updateAlerts() {
   renderAlertsExchFilter();
+  renderAlertsDirFilter();
   const thr = num(document.getElementById('priceAlertThreshold').value) || 8;
   const allHits = allCoins.filter(function (c) { return Math.abs(c.change24) >= thr; });
   document.getElementById('navAlertBadge').textContent = allHits.length;
-  const hits = (alertsExchangeFilter === 'ALL' ? allHits : allHits.filter(function (c) { return (c.exchange || 'MEXC') === alertsExchangeFilter; }))
-    .sort(function (a, b) { return Math.abs(b.change24) - Math.abs(a.change24); })
-    .slice(0, 30);
+  let hits = alertsExchangeFilter === 'ALL' ? allHits : allHits.filter(function (c) { return (c.exchange || 'MEXC') === alertsExchangeFilter; });
+  if (alertsDirFilter === 'UP') hits = hits.filter(function (c) { return c.change24 >= 0; });
+  else if (alertsDirFilter === 'DOWN') hits = hits.filter(function (c) { return c.change24 < 0; });
+  hits = hits.sort(function (a, b) { return Math.abs(b.change24) - Math.abs(a.change24); }).slice(0, 30);
+  const countBadge = document.getElementById('alertsCountBadge');
+  if (countBadge) countBadge.textContent = hits.length;
   const box = document.getElementById('alertsList');
   if (!hits.length) {
     box.innerHTML = '<div class="empty-state"><i class="ri-notification-off-line"></i>' + t('Нет пар с движением ≥') + ' ' + thr + '% ' + t('за 24ч.') + '</div>';
@@ -3801,14 +3834,48 @@ function updateAlerts() {
   box.innerHTML = hits.map(function (c, i) {
     const up = c.change24 >= 0;
     const barPct = Math.min(100, Math.abs(c.change24) / maxAbs * 100);
-    return '<div class="alert-row" style="animation-delay:' + (i * 22) + 'ms">' +
+    return '<div class="alert-row" style="animation-delay:' + (i * 22) + 'ms" data-symbol="' + c.symbol + '">' +
       '<span class="alert-row-bar" style="height:' + barPct.toFixed(0) + '%;top:auto;bottom:0;background:var(' + (up ? '--green' : '--red') + ')"></span>' +
       '<span class="alert-row-num">' + (i + 1) + '</span>' +
       '<div class="coin-icon" style="background:' + c.color + '">' + c.baseAsset.charAt(0) + '</div>' +
-      '<strong>' + coinDisplayLabel(c) + '</strong><span>' + fmtPrice(c.price) + '</span>' +
-      '<span class="' + (up ? 'price-up' : 'price-down') + '">' + (up ? '+' : '') + c.change24.toFixed(2) + '%</span></div>';
+      '<div class="alert-row-coin"><strong>' + coinDisplayLabel(c) + '</strong><span class="alert-row-price">' + fmtPrice(c.price) + '</span></div>' +
+      '<span class="alert-row-change ' + (up ? 'price-up' : 'price-down') + '"><i class="ri-arrow-' + (up ? 'up' : 'down') + '-line"></i> ' + (up ? '+' : '') + c.change24.toFixed(2) + '%</span>' +
+      '<i class="ri-arrow-right-s-line alert-row-chevron"></i></div>';
   }).join('');
+  wireAlertRowClicks();
 }
+
+// Клик по строке — открыть эту монету в скринере, тот же паттерн, что у .fav-card в "Избранном".
+// Делегированный слушатель на контейнере (переживает переотрисовку innerHTML) навешивается один раз.
+function wireAlertRowClicks() {
+  const box = document.getElementById('alertsList');
+  if (!box || box.dataset.wired) return;
+  box.dataset.wired = '1';
+  box.addEventListener('click', function (e) {
+    const row = e.target.closest('.alert-row');
+    if (!row) return;
+    selectCoin(row.dataset.symbol, true);
+    switchPage('screener');
+  });
+}
+
+// Порог оповещения теперь редактируется прямо на странице (стрелки +/- и само поле) — сразу
+// перерисовывает список, не дожидаясь ближайшего тика автообновления аналитики/оповещений.
+(function wireAlertsThreshold() {
+  const input = document.getElementById('priceAlertThreshold');
+  const minusBtn = document.getElementById('alertsThrMinus');
+  const plusBtn = document.getElementById('alertsThrPlus');
+  if (!input) return;
+  function step(delta) {
+    const cur = num(input.value) || 8;
+    const next = Math.max(0.5, Math.round((cur + delta) * 10) / 10);
+    input.value = next;
+    updateAlerts();
+  }
+  if (minusBtn) minusBtn.addEventListener('click', function () { step(-0.5); });
+  if (plusBtn) plusBtn.addEventListener('click', function () { step(0.5); });
+  input.addEventListener('input', updateAlerts);
+})();
 
 function switchPage(pageId) {
   document.querySelectorAll('.page').forEach(function (p) { p.classList.remove('active'); });
@@ -4548,20 +4615,28 @@ function mexcUsdtPrice(asset) {
 // ("BTC/USDT") для MEXC, префиксованный ("BINANCE:BTC/USDT") для любой другой (см. upsertExternalCoin);
 // EXCHANGE_CONNECTORS[id].exchangeTags[0] — спотовый тег, не фьючерсный (Финрез сейчас только про
 // спотовый баланс/сделки, см. комментарий у switchFinresExchange).
-function financeCoinFor(asset) {
-  if (finresActiveExchange === 'mexc') return coinMap.get(asset + '/USDT');
-  const connector = EXCHANGE_CONNECTORS[finresActiveExchange];
-  const spotTag = connector ? connector.exchangeTags[0] : finresActiveExchange.toUpperCase();
+// exchangeIdOverride — опционально: используется finresLoadRealizedCore, чтобы фоновая загрузка,
+// начатая для одной биржи, не "поплыла" на другую биржу, если пользователь переключится в Финрезе
+// прямо посреди неё (finresActiveExchange к этому моменту уже может указывать на другую биржу —
+// см. комментарий у finresLoadRealized/applyFinresLoadResult). Без override — как и раньше, текущая
+// активная биржа Финреза.
+function financeCoinFor(asset, exchangeIdOverride) {
+  const exchangeId = exchangeIdOverride || finresActiveExchange;
+  if (exchangeId === 'mexc') return coinMap.get(asset + '/USDT');
+  const connector = EXCHANGE_CONNECTORS[exchangeId];
+  const spotTag = connector ? connector.exchangeTags[0] : exchangeId.toUpperCase();
   return coinMap.get(spotTag + ':' + asset + '/USDT');
 }
 
-// То же самое, что mexcUsdtPrice, но для ТЕКУЩЕЙ активной биржи Финреза — mexcUsdtPrice сам остаётся
-// нетронутым, эта обёртка используется только в двух местах Финреза, которым реально нужна цена
-// ЛЮБОЙ активной биржи — renderAccountBalances и finresLoadRealizedCore; по всем остальным вызовам
-// (включая __fakeFinresLogin) mexcUsdtPrice продолжает означать ровно то же, что и раньше.
-function financeUsdtPrice(asset) {
-  if (finresActiveExchange === 'mexc') return mexcUsdtPrice(asset);
-  const c = financeCoinFor(asset);
+// То же самое, что mexcUsdtPrice, но для ТЕКУЩЕЙ (или явно переданной, см. financeCoinFor) активной
+// биржи Финреза — mexcUsdtPrice сам остаётся нетронутым, эта обёртка используется только в двух
+// местах Финреза, которым реально нужна цена ЛЮБОЙ активной биржи — renderAccountBalances и
+// finresLoadRealizedCore; по всем остальным вызовам (включая __fakeFinresLogin) mexcUsdtPrice
+// продолжает означать ровно то же, что и раньше.
+function financeUsdtPrice(asset, exchangeIdOverride) {
+  const exchangeId = exchangeIdOverride || finresActiveExchange;
+  if (exchangeId === 'mexc') return mexcUsdtPrice(asset);
+  const c = financeCoinFor(asset, exchangeId);
   if (c && c.price) return c.price;
   if (STABLECOINS.hasOwnProperty(asset)) return STABLECOINS[asset];
   return null;
@@ -5450,7 +5525,7 @@ function computeDailyRealizedPnlMap(trades) {
 function renderBalanceCalendar(animate) {
   if (finresRealized && !finresRealized.loading) renderBalanceCalendarWithTrades(finresRealized.trades, animate);
   finresLoadRealized(false).then(function (data) {
-    if (finresTab !== 'pnl') return;
+    if (finresTab !== 'pnl' || data !== finresRealized) return; // не та вкладка ИЛИ пользователь уже переключил биржу Финреза
     renderBalanceCalendarWithTrades(data.trades, animate);
   });
 }
@@ -5610,7 +5685,10 @@ function renderFinresOverview(el, animate) {
     el.innerHTML = '<div class="finres-empty"><i class="ri-loader-4-line spin-icon"></i>' + t('Загрузка истории сделок по монетам из баланса...') + '</div>';
   }
   finresLoadRealized(false).then(function (data) {
-    if (finresTab !== 'overview') return; // юзер уже переключился на другую вкладку
+    // юзер уже переключился на другую вкладку ИЛИ (data !== finresRealized) на другую биржу Финреза —
+    // без второй проверки медленно грузящаяся MEXC могла дозагрузиться уже после переключения на
+    // Binance и перерисовать этот блок её собственными цифрами поверх Binance.
+    if (finresTab !== 'overview' || data !== finresRealized) return;
     renderFinresOverviewContent(el, data, animate);
   });
   if (wasLoaded) renderFinresOverviewContent(el, finresRealized, animate);
@@ -5803,7 +5881,7 @@ function buildFinresPnlStatsHtml(data) {
 function renderFinresPnlStats(animate) {
   animate = animate !== false;
   finresLoadRealized(false).then(function (data) {
-    if (finresTab !== 'pnl') return;
+    if (finresTab !== 'pnl' || data !== finresRealized) return; // не та вкладка ИЛИ уже другая биржа Финреза
     const grid = document.getElementById('finresPnlStatsGrid');
     if (!grid) return;
     grid.classList.toggle('no-anim', !animate);
@@ -5963,7 +6041,7 @@ function renderFinresTradesTab(el, animate) {
   finresTradesLimit = 25;
   const wasLoaded = finresRealized && !finresRealized.loading;
   finresLoadRealized(false).then(function (data) {
-    if (finresTab !== 'trades') return;
+    if (finresTab !== 'trades' || data !== finresRealized) return; // не та вкладка ИЛИ уже другая биржа Финреза
     renderFinresTradesTable(data);
   });
   if (wasLoaded) renderFinresTradesTable(finresRealized);
@@ -6051,7 +6129,7 @@ function wireFinresCoinSearch() {
     // Новый символ мог добавиться впервые — форсируем перезагрузку кэша реализованных сделок, чтобы
     // он тут же попал в таблицу/статистику, а не ждал следующего естественного обновления.
     finresLoadRealized(true).then(function (data) {
-      if (finresTab === 'trades') renderFinresTradesTable(data);
+      if (finresTab === 'trades' && data === finresRealized) renderFinresTradesTable(data);
     });
   });
 }
@@ -6457,7 +6535,7 @@ function renderFinresRiskTab(el, animate) {
     '</div>';
 
   finresLoadRealized(false).then(function (data) {
-    if (finresTab !== 'risk') return;
+    if (finresTab !== 'risk' || data !== finresRealized) return; // не та вкладка ИЛИ уже другая биржа Финреза
     const grid = document.getElementById('finresRiskTradeStats');
     if (grid) grid.innerHTML = renderFinresRiskTradeStatsHtml(data, false);
     const openGrid = document.getElementById('finresOpenRiskStats');
@@ -6661,6 +6739,9 @@ function renderFinresHero() {
   // Точечно обновляем ТОЛЬКО плитки 1Д/1Н/1М свежими сделками — без полного повторного рендера
   // hero-панели (finresLoadRealized сам решит, нужен ли реальный сетевой запрос, см. её 60с-кэш).
   finresLoadRealized(false).then(function (data) {
+    // data !== finresRealized значит эта загрузка стартовала для биржи, которая к моменту ответа уже
+    // не активна в Финрезе (пользователь успел переключиться) — её результат сюда не подставляем.
+    if (data !== finresRealized) return;
     const gridEl = document.querySelector('#finresHeroBar .balance-stats-grid');
     if (!gridEl || !finresActiveExchangeConnected() || !lastBalanceState) return;
     gridEl.innerHTML = buildBalanceStatsGridHtml(data.trades, lastBalanceState.priced.length, lastBalanceState.dust.length);
@@ -6774,7 +6855,7 @@ function lightRefreshFinresContent() {
     renderFinresPnlStats(false);
   } else if (finresTab === 'trades') {
     finresLoadRealized(false).then(function (data) {
-      if (finresTab !== 'trades') return;
+      if (finresTab !== 'trades' || data !== finresRealized) return; // не та вкладка ИЛИ уже другая биржа Финреза
       if (document.getElementById('finresTradesTableCard')) renderFinresTradesTable(data);
     });
   } else if (finresTab === 'assets') {
@@ -6997,21 +7078,31 @@ const FINRES_LOAD_CONCURRENCY = 5;
 // одновременно, см. её комментарий) и считает реализованный PnL. Чистая "рабочая" часть загрузки —
 // НЕ трогает finresRealized/флаг loading сама, этим управляет обёртка finresLoadRealized() ниже
 // (см. её комментарий про самовосстановление после сбоя).
-async function finresLoadRealizedCore() {
+//
+// exchangeId/balanceState/knownSymbolsSnapshot передаются явно (а не читаются из finresActiveExchange/
+// lastBalanceState/knownSymbols на лету) — НАЙДЕННЫЙ баг: эта функция асинхронная и делает десятки
+// await между запросами по разным монетам, а переключение вкладки Финреза (switchFinresExchange)
+// меняет finresActiveExchange/lastBalanceState/knownSymbols мгновенно и синхронно. Раньше более
+// поздние итерации цикла ниже внезапно начинали слать запросы под уже ДРУГУЮ, только что выбранную
+// биржу (finresActiveExchange в fetchMyTrades/financeUsdtPrice читался в момент каждой итерации, а не
+// один раз в начале) — список монет при этом оставался от старой биржи. Явные параметры, захваченные
+// один раз в finresLoadRealized() до старта, делают весь проход самодостаточным и невосприимчивым к
+// переключению биржи посреди загрузки.
+async function finresLoadRealizedCore(exchangeId, balanceState, knownSymbolsSnapshot) {
   // Символы для запроса — объединение ТЕКУЩЕГО баланса и всего, что когда-либо было "замечено"
   // (knownSymbols, см. выше): так полностью закрытая (проданная в ноль) позиция не выпадает из
   // статистики, если её видели в балансе раньше или искали вручную на вкладке "Сделки".
-  const priced = (lastBalanceState && lastBalanceState.priced) || [];
+  const priced = (balanceState && balanceState.priced) || [];
   const targetMap = {};
   priced.forEach(function (r) {
     // Стейблкоины (USDT/USDC/FDUSD/...) в балансе не имеют осмысленной "истории сделок против USDT" —
     // конструировать для них raw-символ через assetToRawSymbol бессмысленно (на споте MEXC такой пары,
     // как правило, просто нет) и раньше приводило к лишнему запросу, падающему с "Invalid symbol".
     if (STABLECOINS.hasOwnProperty(r.asset)) return;
-    const c = financeCoinFor(r.asset);
+    const c = financeCoinFor(r.asset, exchangeId);
     targetMap[r.asset] = (c && c.raw) || assetToRawSymbol(r.asset);
   });
-  Object.keys(knownSymbols).forEach(function (asset) { targetMap[asset] = knownSymbols[asset]; });
+  Object.keys(knownSymbolsSnapshot).forEach(function (asset) { targetMap[asset] = knownSymbolsSnapshot[asset]; });
   const targets = Object.keys(targetMap).map(function (asset) { return { asset: asset, raw: targetMap[asset] }; });
 
   const allRealized = [];
@@ -7027,7 +7118,7 @@ async function finresLoadRealizedCore() {
     while (nextIndex < targets.length) {
       const t = targets[nextIndex++];
       try {
-        const trades = await withRetry(function () { return fetchMyTrades(t.raw, 1000, finresActiveExchange); }, 3, [1000, 3000, 8000], 'Finrez:' + t.asset, function (err) {
+        const trades = await withRetry(function () { return fetchMyTrades(t.raw, 1000, exchangeId); }, 3, [1000, 3000, 8000], 'Finrez:' + t.asset, function (err) {
           return !/invalid symbol/i.test((err && err.message) || '');
         });
         bySymbol[t.asset] = trades;
@@ -7039,7 +7130,7 @@ async function finresLoadRealizedCore() {
         const openPos = computeOpenPositionForSymbol(trades);
         if (openPos) {
           const priceRow = priced.filter(function (r) { return r.asset === t.asset; })[0];
-          const currentPrice = priceRow ? priceRow.price : financeUsdtPrice(t.asset);
+          const currentPrice = priceRow ? priceRow.price : financeUsdtPrice(t.asset, exchangeId);
           if (currentPrice != null) {
             const value = openPos.qty * currentPrice;
             const unrealizedPnl = value - openPos.costBasis;
@@ -7082,33 +7173,60 @@ async function finresLoadRealizedCore() {
 // последующие попытки обновиться (авто-тик раз в 3с, форс при возврате видимости окна, теперь и
 // кнопка «Обновить») просто молча возвращали замороженный объект и ничего не перезапускали. Именно
 // так выглядело бы "Финрез слетел и больше не оживает" — без единой ошибки в консоли.
-// Теперь единственный признак "уже грузится" — сам промис finresLoadPromise, который гарантированно
-// обнуляется в .finally() при ЛЮБОМ исходе (успех/ошибка/что угодно ещё), поэтому зависнуть навсегда
-// он не может: следующий же вызов (даже без force) увидит finresLoadPromise === null и запустит
-// новую попытку.
-let finresLoadPromise = null;
+// Теперь единственный признак "уже грузится" — сам промис (см. finresLoadPromises ниже), который
+// гарантированно удаляется из карты в .finally() при ЛЮБОМ исходе (успех/ошибка/что угодно ещё),
+// поэтому зависнуть навсегда он не может: следующий же вызов (даже без force) увидит, что слота для
+// этой биржи нет, и запустит новую попытку.
+// Ключ — id биржи, значение — Promise её текущей фоновой загрузки (или отсутствует, если сейчас
+// ничего не грузится). Раньше был один общий finresLoadPromise на все биржи разом — из-за этого
+// "идёт загрузка" одной биржи ошибочно считалось идущей загрузкой другой при переключении Финреза
+// туда-обратно. Отдельный слот на каждую биржу устраняет и это, и не мешает им грузиться параллельно
+// (например, фоновая MEXC ещё не успела ответить, пока уже открыт Binance).
+let finresLoadPromises = {};
+
+// Применяет результат уже завершённой загрузки: если её биржа (exchangeId) всё ещё активна в
+// Финрезе — обновляет ЖИВОЙ finresRealized как раньше; если пользователь уже успел переключиться на
+// другую биржу — кладёт результат в её снимок (finresSnapshots), откуда он подхватится сам при
+// следующем переключении назад, вместо того чтобы перетереть данные биржи, которую видит пользователь
+// ПРЯМО СЕЙЧАС (тот самый баг: медленно грузящаяся MEXC дозагружалась уже после переключения на
+// Binance и перетирала его finresRealized своими цифрами).
+function applyFinresLoadResult(exchangeId, result) {
+  if (finresActiveExchange === exchangeId) {
+    finresRealized = result;
+  } else if (finresSnapshots[exchangeId]) {
+    finresSnapshots[exchangeId].finresRealized = result;
+  }
+  return result;
+}
 
 async function finresLoadRealized(force) {
   if (__designTestMode) return finresRealized;
-  if (finresLoadPromise) return finresLoadPromise;
+  const exchangeId = finresActiveExchange;
+  if (finresLoadPromises[exchangeId]) return finresLoadPromises[exchangeId];
   if (!force && finresRealized && !finresRealized.loading && (Date.now() - finresRealized.loadedAt) < 60000) return finresRealized;
   // Пока грузим — не стираем уже показанные данные в пустоту (раньше именно так и делали), а просто
   // помечаем их как "обновляются": если экран уже что-то показывал, он и продолжит это показывать,
   // пока не придёт свежий ответ.
   finresRealized = Object.assign({ trades: [], bySymbol: {}, openPositions: [], loadedAt: 0, error: null }, finresRealized, { loading: true });
-  finresLoadPromise = finresLoadRealizedCore()
-    .then(function (result) { finresRealized = result; return result; })
+  // Баланс/известные символы захватываем ОДИН РАЗ здесь, до старта — см. комментарий у
+  // finresLoadRealizedCore про то, почему им нельзя читать live-глобалы посреди асинхронного прохода.
+  const balanceStateAtStart = lastBalanceState;
+  const knownSymbolsAtStart = Object.assign({}, knownSymbols);
+  const promise = finresLoadRealizedCore(exchangeId, balanceStateAtStart, knownSymbolsAtStart)
+    .then(function (result) { return applyFinresLoadResult(exchangeId, result); })
     .catch(function (e) {
       // Не должно происходить (вся сетевая логика уже ловит свои ошибки по каждой монете отдельно
       // внутри цикла), но если что-то всё же бросит исключение выше — честно показываем это как
       // ошибку загрузки, а не оставляем интерфейс замороженным в состоянии "загрузка" навсегда.
       const msg = (e && e.message) || 'Неизвестная ошибка загрузки Финреза';
       logE('Finrez', 'finresLoadRealizedCore выбросил исключение целиком (неожиданно, все per-symbol ошибки должны ловиться внутри цикла): ' + msg);
-      finresRealized = Object.assign({}, finresRealized, { loading: false, error: msg });
-      return finresRealized;
+      const base = (finresActiveExchange === exchangeId ? finresRealized : (finresSnapshots[exchangeId] && finresSnapshots[exchangeId].finresRealized)) ||
+        { trades: [], bySymbol: {}, openPositions: [], loadedAt: 0 };
+      return applyFinresLoadResult(exchangeId, Object.assign({}, base, { loading: false, error: msg }));
     })
-    .finally(function () { finresLoadPromise = null; });
-  return finresLoadPromise;
+    .finally(function () { delete finresLoadPromises[exchangeId]; });
+  finresLoadPromises[exchangeId] = promise;
+  return promise;
 }
 
 function finresFilterByPeriod(trades, periodKey) {
@@ -7787,7 +7905,9 @@ function switchFinresExchange(id) {
     finresSnapshots[id] = snap;
   }
   applyFinresSnapshot(snap);
-  finresLoadPromise = null; // "идёт загрузка" не переносится с одной биржи на другую
+  // Больше не нужно сбрасывать flag "идёт загрузка" вручную — finresLoadPromises теперь per-биржевая
+  // карта (см. её комментарий), у каждой биржи свой независимый слот, переключение само по себе на
+  // них не влияет.
   // Очищаем DOM, чтобы следующий рендер посчитался "первой отрисовкой" и заново честно проиграл
   // анимации появления (renderFinresHero сама решает это по наличию .balance-hero в DOM, см.
   // комментарий у неё — а не по JS-флагу, поэтому очистки DOM достаточно, ничего больше сбрасывать не нужно).
