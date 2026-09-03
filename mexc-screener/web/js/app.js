@@ -176,6 +176,7 @@ const I18N_EN = {
   'Пока новых листингов не найдено — страница проверяет MEXC и Binance каждые 45с.': 'No new listings found yet — this page checks MEXC and Binance every 45s.',
   'до листинга': 'until listing', 'запаздывает — ещё не запущен': 'running late — not live yet',
   'листинг обнаружен': 'listing detected', 'назад': 'ago',
+  'Скопировать название монеты': 'Copy coin name', 'Скопировано': 'Copied',
   // --- Таймфреймы ---
   '1м': '1m', '5м': '5m', '15м': '15m', '30м': '30m', '1ч': '1h', '4ч': '4h', '1д': '1D',
   // --- График ---
@@ -7883,8 +7884,34 @@ function updateListingsPage() {
       '<span class="exch-tag exch-tag-' + colorCls + '">' + badgeText + '</span>' +
       '<div class="listing-row-coin"><strong>' + pair + '</strong></div>' +
       st.statusHtml +
+      '<button type="button" class="listing-row-copy" data-copy="' + e.baseAsset + '" title="' + t('Скопировать название монеты') + '"><i class="ri-file-copy-line"></i></button>' +
       '</div>';
   }).join('');
+  wireListingRowCopy();
+}
+
+// Клик по кнопке-копирования — кладёт название монеты (базовый актив, например "GAIB") в буфер
+// обмена, тот же паттерн copy+toast, что и у copySymbolForVataga выше. Делегированный слушатель на
+// контейнере переживает переотрисовку innerHTML — вешаем один раз.
+function copyListingSymbol(baseAsset) {
+  const announce = function () { showAppToast(t('Скопировано') + ': ' + baseAsset); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(baseAsset).then(announce).catch(function () { fallbackCopyText(baseAsset); announce(); });
+  } else {
+    fallbackCopyText(baseAsset);
+    announce();
+  }
+}
+function wireListingRowCopy() {
+  const box = document.getElementById('listingsList');
+  if (!box || box.dataset.copyWired) return;
+  box.dataset.copyWired = '1';
+  box.addEventListener('click', function (e) {
+    const btn = e.target.closest('.listing-row-copy');
+    if (!btn) return;
+    e.stopPropagation();
+    copyListingSymbol(btn.dataset.copy);
+  });
 }
 
 // Тикает раз в секунду, пока страница открыта — обратный отсчёт у upcoming-карточек живой, не
