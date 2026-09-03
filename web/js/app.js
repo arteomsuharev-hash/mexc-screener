@@ -18,7 +18,7 @@ const LEV_RE = /(UP|DOWN|BULL|BEAR|3L|3S|5L|5S)USDT$/;
 // собственный WS-мост ниже по файлу); в обычной веб-версии (без desktop-обёртки) его нет, тогда
 // берём запасную строку — держите её в СИНХРОНЕ с "version" в desktop/neutralino.config.json при
 // каждом релизе, иначе версия в интерфейсе разойдётся с реальной.
-const APP_VERSION = (typeof window.NL_APPVERSION === 'string' && window.NL_APPVERSION) || '1.3.0';
+const APP_VERSION = (typeof window.NL_APPVERSION === 'string' && window.NL_APPVERSION) || '1.4.0';
 // ЗАПОЛНИТЕ после создания GitHub-репозитория и первого релиза (см. docs/updates.md) — до этого
 // кнопка "Проверить обновления" будет честно показывать понятную ошибку, а не тихо молчать или
 // стучаться в несуществующий адрес.
@@ -155,7 +155,7 @@ const I18N_EN = {
   'Волат. 60с': '60s Volat.', 'Сигнал': 'Signal',
   // --- Инфо-панель монеты ---
   'Мои открытые ордера': 'My open orders',
-  'Все': 'All', 'Все биржи': 'All exchanges',
+  'Все': 'All', 'Все биржи': 'All exchanges', 'Спот': 'Spot', 'Фьючерсы': 'Futures', 'выбрать рынок': 'choose market',
   // --- Таймфреймы ---
   '1м': '1m', '5м': '5m', '15м': '15m', '30м': '30m', '1ч': '1h', '4ч': '4h', '1д': '1D',
   // --- График ---
@@ -567,6 +567,13 @@ function getCoinColor(symbol) {
 // жёлтым, что и обычный Binance (exch-tag-binance, суффикс FUT снят только у класса цвета) — это та
 // же биржа, просто другой рынок — но подписывается отдельно "FUT", не "BIN", чтобы не перепутать со спотом.
 const EXCHANGE_BADGE_TEXT = { BINANCE: 'BIN', BINANCEFUT: 'FUT', OKX: 'OKX' };
+
+// Подпись под названием монеты в инфо-панели справа ("MEXC Spot"/"Binance Futures"/...) — раньше
+// была жёстко "MEXC Spot" всегда, даже для монет с других бирж/рынков (см. updateInfoPanel).
+const EXCHANGE_SUB_LABEL = { MEXC: 'MEXC Spot', BINANCE: 'Binance Spot', BINANCEFUT: 'Binance Futures', OKX: 'OKX Spot' };
+function exchangeSubLabel(c) {
+  return EXCHANGE_SUB_LABEL[c.exchange || 'MEXC'] || (c.exchange + ' Spot');
+}
 
 function coinDisplayLabel(c) {
   if (!c.exchange || c.exchange === 'MEXC') return c.symbol;
@@ -2466,6 +2473,7 @@ function updateInfoPanel() {
   const c = coinMap.get(currentCoin.symbol) || currentCoin;
   currentCoin = c;
   document.getElementById('infoCoinName').innerHTML = coinDisplayLabel(c);
+  document.getElementById('infoCoinSub').textContent = exchangeSubLabel(c);
   document.getElementById('infoCoinIcon').textContent = c.baseAsset.charAt(0);
   document.getElementById('infoCoinIcon').style.background = c.color;
   document.getElementById('infoPrice').textContent = fmtPrice(c.price);
@@ -3665,25 +3673,79 @@ function updateFavoritesPage() {
   });
 }
 
-function updateAnalytics() {
-  function list(arr, fmt) {
-    return arr.map(function (c) {
-      return '<div class="rank-row"><span>' + coinDisplayLabel(c) + '</span><span>' + fmt(c) + '</span></div>';
-    }).join('') || '<div class="rank-row">Нет данных</div>';
+// Какая биржа сейчас выбрана в фильтре страницы "Аналитика" (см. analyticsExchFilter) — раньше все
+// 4 панели ранжировали allCoins целиком, вперемешку показывая монеты сразу всех подключённых бирж
+// (MEXC/Binance-спот/Binance-фьючерсы/OKX) в одном списке, что при нескольких подключённых биржах
+// быстро превращалось в нечитаемую кашу из разноцветных бейджей. По умолчанию — "Все", как и раньше.
+let analyticsExchangeFilter = 'ALL';
+
+function renderAnalyticsExchFilter() {
+  const box = document.getElementById('analyticsExchFilter');
+  if (!box) return;
+  const connectedIds = Object.keys(EXCHANGE_CONNECTORS).filter(function (id) { return exchangeConnections[id] && exchangeConnections[id].connected; });
+  if (!connectedIds.length) {
+    box.style.display = 'none';
+    analyticsExchangeFilter = 'ALL'; // нечего фильтровать — единственная биржа снова MEXC
+    return;
   }
-  const copy = allCoins.slice();
-  document.getElementById('topGainers').innerHTML = list(copy.slice().sort(function (a, b) { return b.change24 - a.change24; }).slice(0, 8), function (c) {
-    return '<span class="price-up">+' + c.change24.toFixed(2) + '%</span>';
+  box.style.display = 'flex';
+  const tags = ['MEXC'].concat(connectedIds.reduce(function (acc, id) { return acc.concat(EXCHANGE_CONNECTORS[id].exchangeTags); }, []));
+  const buttons = ['ALL'].concat(tags);
+  box.innerHTML = buttons.map(function (ex) {
+    if (ex === 'ALL') {
+      return '<div class="exch-switch-btn exch-switch-all' + (analyticsExchangeFilter === 'ALL' ? ' active' : '') + '" data-aexch="ALL">' + t('Все') + '</div>';
+    }
+    return '<div class="exch-switch-btn exch-switch-' + ex.toLowerCase() + (analyticsExchangeFilter === ex ? ' active' : '') +
+      '" data-aexch="' + ex + '" title="' + (EXCHANGE_SWITCH_TITLES[ex] || ex) + '">' + EXCHANGE_SWITCH_LABELS[ex] + '</div>';
+  }).join('');
+}
+
+(function wireAnalyticsExchFilter() {
+  const box = document.getElementById('analyticsExchFilter');
+  if (!box) return;
+  box.addEventListener('click', function (e) {
+    const btn = e.target.closest('[data-aexch]');
+    if (!btn || analyticsExchangeFilter === btn.dataset.aexch) return;
+    analyticsExchangeFilter = btn.dataset.aexch;
+    updateAnalytics();
   });
-  document.getElementById('topLosers').innerHTML = list(copy.slice().sort(function (a, b) { return a.change24 - b.change24; }).slice(0, 8), function (c) {
-    return '<span class="price-down">' + c.change24.toFixed(2) + '%</span>';
-  });
-  document.getElementById('topVolume').innerHTML = list(copy.slice().sort(function (a, b) { return b.vol24 - a.vol24; }).slice(0, 8), function (c) {
-    return fmtNum(c.vol24);
-  });
-  document.getElementById('topVolat').innerHTML = list(copy.slice().sort(function (a, b) { return b.vol60s - a.vol60s; }).slice(0, 8), function (c) {
-    return c.vol60s.toFixed(3) + '%';
-  });
+})();
+
+function updateAnalytics() {
+  renderAnalyticsExchFilter();
+  // Полоска относительной "тяжести" значения внутри своей восьмёрки (не просто число — сразу видно,
+  // насколько первое место оторвалось от остальных) + номер места + шаг анимации появления при каждой
+  // смене списка (то же ощущение, что и у staggered-плиток в Финрезе).
+  function list(arr, fmt, valueOf, barVar) {
+    if (!arr.length) return '<div class="rank-row rank-row-empty">' + t('Нет данных') + '</div>';
+    const maxVal = Math.max.apply(null, arr.map(function (c) { return Math.abs(valueOf(c)); })) || 1;
+    return arr.map(function (c, i) {
+      const pct = Math.min(100, Math.abs(valueOf(c)) / maxVal * 100);
+      return '<div class="rank-row" style="animation-delay:' + (i * 28) + 'ms">' +
+        '<span class="rank-num">' + (i + 1) + '</span>' +
+        '<span class="rank-coin">' + coinDisplayLabel(c) + '</span>' +
+        '<span class="rank-value">' + fmt(c) + '</span>' +
+        '<span class="rank-bar-track"><span class="rank-bar-fill" style="width:' + pct.toFixed(1) + '%;background:var(' + barVar + ')"></span></span>' +
+      '</div>';
+    }).join('');
+  }
+  const copy = (analyticsExchangeFilter === 'ALL' ? allCoins : allCoins.filter(function (c) { return (c.exchange || 'MEXC') === analyticsExchangeFilter; })).slice();
+  document.getElementById('topGainers').innerHTML = list(
+    copy.slice().sort(function (a, b) { return b.change24 - a.change24; }).slice(0, 8),
+    function (c) { return '<span class="price-up">+' + c.change24.toFixed(2) + '%</span>'; },
+    function (c) { return c.change24; }, '--green');
+  document.getElementById('topLosers').innerHTML = list(
+    copy.slice().sort(function (a, b) { return a.change24 - b.change24; }).slice(0, 8),
+    function (c) { return '<span class="price-down">' + c.change24.toFixed(2) + '%</span>'; },
+    function (c) { return c.change24; }, '--red');
+  document.getElementById('topVolume').innerHTML = list(
+    copy.slice().sort(function (a, b) { return b.vol24 - a.vol24; }).slice(0, 8),
+    function (c) { return fmtNum(c.vol24); },
+    function (c) { return c.vol24; }, '--blue');
+  document.getElementById('topVolat').innerHTML = list(
+    copy.slice().sort(function (a, b) { return b.vol60s - a.vol60s; }).slice(0, 8),
+    function (c) { return c.vol60s.toFixed(3) + '%'; },
+    function (c) { return c.vol60s; }, '--orange');
 }
 
 function updateAlerts() {
@@ -7267,16 +7329,18 @@ function setExchangeStatus(id, state, msg) {
 // тот же жёлтый, что и у обычного Binance — это та же биржа, просто другой рынок.
 const EXCHANGE_SWITCH_LABELS = { MEXC: 'M', BINANCE: 'B', BINANCEFUT: 'F', OKX: 'O' };
 const EXCHANGE_SWITCH_TITLES = { MEXC: 'MEXC', BINANCE: 'Binance Spot', BINANCEFUT: 'Binance Futures', OKX: 'OKX' };
+const EXCHANGE_MARKET_LABEL = { BINANCE: 'Спот', BINANCEFUT: 'Фьючерсы' };
+
+// Какая группа переключателя сейчас раскрыта (см. .exch-switch-submenu в styles.css) — только одна
+// одновременно, id коннектора ('binance'/'okx') или null, если ни одна не раскрыта. У группы с
+// ОДНИМ рынком (MEXC, пока и OKX) выдвигать нечего — клик по ней сразу фильтрует, без ленты.
+let exchSwitchOpenGroup = null;
 
 function renderExchangeSwitch() {
   const box = document.getElementById('exchangeSwitch');
   if (!box) return;
-  const connected = ['MEXC'].concat(
-    Object.keys(EXCHANGE_CONNECTORS)
-      .filter(function (id) { return exchangeConnections[id] && exchangeConnections[id].connected; })
-      .reduce(function (acc, id) { return acc.concat(EXCHANGE_CONNECTORS[id].exchangeTags); }, [])
-  );
-  if (connected.length <= 1) {
+  const connectedIds = Object.keys(EXCHANGE_CONNECTORS).filter(function (id) { return exchangeConnections[id] && exchangeConnections[id].connected; });
+  if (!connectedIds.length) {
     box.style.display = 'none';
     // Отключили единственную дополнительную биржу, пока фильтр стоял именно на ней — сбрасываем на
     // "Все", иначе таблица молча осталась бы пустой без видимого способа это исправить (переключатель
@@ -7286,30 +7350,85 @@ function renderExchangeSwitch() {
       renderTable();
       applyConnectionBadge();
     }
+    exchSwitchOpenGroup = null;
     return;
   }
   box.style.display = 'flex';
-  const buttons = ['ALL'].concat(connected);
-  box.innerHTML = buttons.map(function (ex) {
-    if (ex === 'ALL') {
-      return '<div class="exch-switch-btn exch-switch-all' + (activeExchangeFilter === 'ALL' ? ' active' : '') +
-        '" data-exchange="ALL" title="' + t('Все биржи') + '">' + t('Все') + '</div>';
+
+  // groupId — ключ EXCHANGE_CONNECTORS ('mexc'/'binance'/'okx') или "all"/"mexc" для встроенных
+  // одиночных кнопок; tags — все рыночные теги этой группы (['BINANCE'] или ['BINANCE','BINANCEFUT']).
+  function groupHtml(groupId, tags) {
+    const mainTag = tags[0];
+    const isMulti = tags.length > 1;
+    if (!isMulti) {
+      return '<div class="exch-switch-btn exch-switch-' + mainTag.toLowerCase() + (activeExchangeFilter === mainTag ? ' active' : '') +
+        '" data-group="' + groupId + '" data-exchange="' + mainTag + '" title="' + (EXCHANGE_SWITCH_TITLES[mainTag] || mainTag) + '">' +
+        EXCHANGE_SWITCH_LABELS[mainTag] + '</div>';
     }
-    return '<div class="exch-switch-btn exch-switch-' + ex.toLowerCase() + (activeExchangeFilter === ex ? ' active' : '') +
-      '" data-exchange="' + ex + '" title="' + (EXCHANGE_SWITCH_TITLES[ex] || ex) + '">' + EXCHANGE_SWITCH_LABELS[ex] + '</div>';
-  }).join('');
+    const groupActive = tags.indexOf(activeExchangeFilter) !== -1;
+    const open = exchSwitchOpenGroup === groupId;
+    return '<div class="exch-switch-group' + (open ? ' open' : '') + '">' +
+      '<div class="exch-switch-btn exch-switch-' + mainTag.toLowerCase() + (groupActive ? ' group-active' : '') +
+        '" data-group="' + groupId + '" title="' + (EXCHANGE_SWITCH_TITLES[mainTag] || mainTag) + ' — ' + t('выбрать рынок') + '">' +
+        EXCHANGE_SWITCH_LABELS[mainTag] + '</div>' +
+      '<div class="exch-switch-submenu">' + tags.map(function (tag) {
+        return '<div class="exch-switch-subbtn' + (activeExchangeFilter === tag ? ' active' : '') + '" data-exchange="' + tag + '">' +
+          t(EXCHANGE_MARKET_LABEL[tag] || tag) + '</div>';
+      }).join('') + '</div>' +
+    '</div>';
+  }
+
+  // "Все" не описана в EXCHANGE_SWITCH_LABELS/TITLES (не настоящая биржа) — собираем её кнопку вручную,
+  // а не тянем через общий groupHtml(), чтобы не заводить фиктивные записи в тех картах ради одной кнопки.
+  let html = '<div class="exch-switch-btn exch-switch-all' + (activeExchangeFilter === 'ALL' ? ' active' : '') +
+    '" data-group="all" data-exchange="ALL" title="' + t('Все биржи') + '">' + t('Все') + '</div>';
+  html += groupHtml('mexc', ['MEXC']);
+  connectedIds.forEach(function (id) { html += groupHtml(id, EXCHANGE_CONNECTORS[id].exchangeTags); });
+  box.innerHTML = html;
 }
 
 (function wireExchangeSwitchClick() {
   const box = document.getElementById('exchangeSwitch');
   if (!box) return;
   box.addEventListener('click', function (e) {
-    const btn = e.target.closest('.exch-switch-btn[data-exchange]');
-    if (!btn || activeExchangeFilter === btn.dataset.exchange) return;
-    activeExchangeFilter = btn.dataset.exchange;
+    const subBtn = e.target.closest('.exch-switch-subbtn[data-exchange]');
+    if (subBtn) {
+      activeExchangeFilter = subBtn.dataset.exchange;
+      exchSwitchOpenGroup = null; // выбор сделан — задвигаем ленту обратно
+      renderExchangeSwitch();
+      renderTable();
+      applyConnectionBadge();
+      return;
+    }
+    const btn = e.target.closest('.exch-switch-btn[data-group]');
+    if (!btn) return;
+    const exch = btn.dataset.exchange; // задан только у однорыночных групп (см. groupHtml выше)
+    if (exch) {
+      if (activeExchangeFilter !== exch) {
+        activeExchangeFilter = exch;
+        renderTable();
+        applyConnectionBadge();
+      }
+      exchSwitchOpenGroup = null;
+    } else {
+      // Мультирыночная группа (Binance) — сама по себе ничего не фильтрует, только
+      // раскрывает/задвигает свою ленту "Спот/Фьючерсы"; выбор — за клик по ленте выше.
+      const group = btn.dataset.group;
+      exchSwitchOpenGroup = (exchSwitchOpenGroup === group) ? null : group;
+    }
     renderExchangeSwitch();
-    renderTable();
-    applyConnectionBadge();
+  });
+  // Клик мимо переключателя — задвигаем открытую ленту, тот же принцип, что у обычного dropdown.
+  // ВАЖНО: composedPath(), а не box.contains(e.target) — тот же клик по кнопке группы ВЫШЕ уже успел
+  // пересобрать box.innerHTML (открыв ленту), из-за чего e.target к этому моменту — уже отсоединённый
+  // от DOM старый узел, и box.contains(e.target) ложно вернул бы false для клика ВНУТРИ переключателя,
+  // тут же закрывая ленту, которую только что открыли. composedPath() фиксирует путь на момент
+  // диспатча события, до какой-либо последующей замены DOM, поэтому не подвержен этой гонке.
+  document.addEventListener('click', function (e) {
+    if (exchSwitchOpenGroup && e.composedPath().indexOf(box) === -1) {
+      exchSwitchOpenGroup = null;
+      renderExchangeSwitch();
+    }
   });
 })();
 
