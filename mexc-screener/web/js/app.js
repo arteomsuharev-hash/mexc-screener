@@ -4005,9 +4005,19 @@ function updateDensityLevelsPanel(c) {
   const zoneText = document.getElementById('densityZoneText');
   const breakText = document.getElementById('densityBreakText');
   if (zoneText) {
-    zoneText.innerHTML = (c.zoneLow != null && c.zoneHigh != null && c.zoneHigh > c.zoneLow)
-      ? '<span class="lvl-tag">зона:</span>' + fmtPrice(c.zoneLow) + '–' + fmtPrice(c.zoneHigh)
-      : '<span class="lvl-tag">зона:</span>копим данные…';
+    // c.zoneHigh > c.zoneLow (строго) — НАЙДЕННЫЙ баг: у самой "идеальной" для этой стратегии
+    // ситуации — совершенно плоской, спокойной досплесковой фазы (та же цена и 60с, и 30с назад,
+    // ровно то, что текст ниже описывает как "движение было спокойным: 0.00%") — zoneLow и zoneHigh
+    // ЧИСЛЕННО РАВНЫ (min/max одной и той же цены). Строгое ">" тогда ложно проваливалось в ветку
+    // "копим данные…", хотя данные уже есть — просто зона выродилась в одну точку. Теперь такой
+    // случай показывается как "≈цена" вместо противоречивого "копим данные" рядом с уже готовым
+    // объяснением пробоя.
+    if (c.zoneLow != null && c.zoneHigh != null) {
+      zoneText.innerHTML = '<span class="lvl-tag">зона:</span>' +
+        (c.zoneHigh > c.zoneLow ? fmtPrice(c.zoneLow) + '–' + fmtPrice(c.zoneHigh) : '≈' + fmtPrice(c.zoneLow));
+    } else {
+      zoneText.innerHTML = '<span class="lvl-tag">зона:</span>копим данные…';
+    }
   }
   if (breakText) breakText.innerHTML = '<span class="lvl-tag">пробой:</span>' + fmtPrice(c.price);
   bar.classList.add('visible');
