@@ -258,6 +258,12 @@ body {
    этого раунда живёт только здесь, видна над всеми вкладками Финреза сразу. */
 .finres-hero-bar { padding: 20px 26px 4px; flex-shrink: 0; }
 .finres-hero-bar:empty { padding: 0; }
+/* Переключатель "чей Финрез сейчас показан" — крупнее и заметнее, чем такой же (тот же .exch-switch-btn)
+   в тулбаре скринера, т.к. тут он один на всю страницу, а не рядом с другими элементами тулбара. */
+.finres-exchange-tabs { margin: 18px 26px 0; padding: 3px; align-self: flex-start; }
+.finres-exchange-tabs .exch-switch-btn { width: 32px; height: 28px; font-size: 12px; }
+.finres-exchange-tabs .exch-switch-btn.connected { box-shadow: 0 0 0 1.5px var(--green); }
+.finres-exchange-tabs .exch-switch-btn.active.connected { box-shadow: 0 0 0 1.5px var(--green), inset 0 0 0 1.5px var(--text-primary); }
 
 .finres-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
 .finres-head h2 { font-size: 19px; font-weight: 700; color: var(--text-primary); }
