@@ -487,10 +487,14 @@ body {
 
 /* FILTER BAR */
 .filter-bar {
-  min-height: 64px;
+  /* Строка 1 (редизайн 2026-09, по образцу макета): быстрые таблетки-алгоритмы + поиск, в один
+     ряд, поиск прижат к правому краю. Плотная сетка операторов/значений фильтров живёт ниже,
+     в .table-toolbar (строка 2) — так порядок совпадает с макетом ("плашки+поиск" над
+     "дропдауны+Применить"), а сама логика фильтров не меняется ни на бит. */
+  min-height: 48px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
-  display: flex; align-items: center; flex-wrap: wrap;
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
   padding: 8px 16px; gap: 10px; flex-shrink: 0;
 }
 .filter-group { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
@@ -555,12 +559,16 @@ body {
 
 .content { flex: 1; overflow: hidden; position: relative; display: flex; flex-direction: column; min-height: 0; }
 .table-toolbar {
-  height: 48px; background: var(--bg-primary);
+  /* Строка 2 (редизайн 2026-09): дропдауны/операторы фильтров + "Применить" справа, под
+     плашками+поиском (см. .filter-bar выше). Плотная сетка контролов — min-height вместо
+     фиксированной, чтобы toolbar-left/-right (flex-wrap: wrap ниже) могли честно перенестись на
+     вторую строку на узких экранах, а не обрезаться. */
+  min-height: 48px; background: var(--bg-primary);
   border-bottom: 1px solid var(--border-color);
   display: flex; align-items: center; justify-content: space-between;
-  padding: 0 16px; flex-shrink: 0;
+  padding: 8px 16px; gap: 10px; flex-shrink: 0; flex-wrap: wrap;
 }
-.toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .profile-select {
   background: var(--bg-card); border: 1px solid var(--border-color);
   color: var(--text-primary); padding: 5px 10px; border-radius: 4px;
@@ -772,7 +780,7 @@ body {
 /* Таблетки быстрых фильтров над таблицей (редизайн 2026-09, по образцу макета) — реальный
    дополнительный фильтр (см. algoCategoryPillMatches в app.js), НЕ дублирует и не заменяет
    выпадающий список "Профиль/Стратегия" ниже — работает как AND поверх него. */
-.algo-pill-row { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 16px 0; }
+.algo-pill-row { display: flex; gap: 8px; flex-wrap: wrap; padding: 0; }
 .algo-pill {
   background: transparent; border: 1px solid var(--border-color); color: var(--text-secondary);
   padding: 6px 16px; border-radius: 999px; font-size: 12px; font-weight: 600; cursor: pointer;

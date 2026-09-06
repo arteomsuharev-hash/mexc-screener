@@ -104,45 +104,6 @@
 
     <div class="page active" id="page-screener">
       <div class="filter-bar">
-        <div class="filter-group">
-          <span class="filter-label" data-i18n>Объём 24ч</span>
-          <select class="filter-select" id="filterVol24Op"><option value=">=" selected>&ge;</option><option value=">">&gt;</option><option value="<=">&le;</option><option value="<">&lt;</option></select>
-          <input class="filter-input wide" id="filterVol24" value="100000" placeholder="USDT">
-        </div>
-        <div class="filter-group">
-          <span class="filter-label" data-i18n>Объём 5с</span>
-          <select class="filter-select" id="filterVol5Op"><option value=">=" selected>&ge;</option><option value=">">&gt;</option><option value="<=">&le;</option><option value="<">&lt;</option></select>
-          <input class="filter-input" id="filterVol5" value="" placeholder="любой" data-i18n-placeholder>
-        </div>
-        <div class="filter-group">
-          <span class="filter-label" data-i18n>Волат. 5с %</span>
-          <select class="filter-select" id="filterVol5sOp"><option value=">=" selected>&ge;</option><option value=">">&gt;</option><option value="<=">&le;</option><option value="<">&lt;</option></select>
-          <input class="filter-input" id="filterVol5s" value="" placeholder="любая" data-i18n-placeholder>
-        </div>
-        <div class="filter-group">
-          <span class="filter-label" data-i18n>Волат. 30с %</span>
-          <select class="filter-select" id="filterVol30sOp"><option value=">=" selected>&ge;</option><option value=">">&gt;</option><option value="<=">&le;</option><option value="<">&lt;</option></select>
-          <input class="filter-input" id="filterVol30s" value="" placeholder="любая" data-i18n-placeholder>
-        </div>
-        <div class="filter-group">
-          <span class="filter-label" data-i18n>Изм. 24ч %</span>
-          <select class="filter-select" id="filterChgOp"><option value=">=" selected>&ge;</option><option value=">">&gt;</option><option value="<=">&le;</option><option value="<">&lt;</option></select>
-          <input class="filter-input" id="filterChg" value="" placeholder="любое" data-i18n-placeholder>
-        </div>
-        <div class="filter-group">
-          <span class="filter-label" data-i18n>Цена</span>
-          <input class="filter-input" id="filterPriceFrom" value="" placeholder="от" style="width:80px" data-i18n-placeholder>
-          <span class="filter-label">—</span>
-          <input class="filter-input" id="filterPriceTo" value="" placeholder="до" style="width:80px" data-i18n-placeholder>
-        </div>
-        <label class="filter-live"><input type="checkbox" id="liveFilters" checked> <span data-i18n>Живые</span></label>
-        <span class="filter-count" id="filterCount">0 / 0</span>
-        <button class="filter-btn" id="resetFilters"><i class="ri-refresh-line"></i> <span data-i18n>Сбросить</span></button>
-        <button class="filter-btn primary" id="applyFilters"><i class="ri-filter-3-line"></i> <span data-i18n>Применить</span></button>
-        <button class="filter-btn" id="refreshData"><i class="ri-refresh-line"></i> <span data-i18n>Обновить</span></button>
-      </div>
-
-      <div class="content" id="screenerContent">
         <div class="algo-pill-row" id="algoPillRow">
           <button type="button" class="algo-pill active" data-algo-pill="all" data-i18n>Все</button>
           <button type="button" class="algo-pill" data-algo-pill="algo" data-i18n>Алгоритмы</button>
@@ -152,8 +113,13 @@
           <button type="button" class="algo-pill" data-algo-pill="reversal" data-i18n>Развороты</button>
           <button type="button" class="algo-pill" data-algo-pill="cycle" data-i18n>Циклы</button>
         </div>
+        <div class="search-box"><i class="ri-search-line"></i><input id="searchInput" placeholder="Поиск: BTC, PEPE..." data-i18n-placeholder></div>
+      </div>
+
+      <div class="content" id="screenerContent">
         <div class="table-toolbar">
           <div class="toolbar-left">
+            <div class="exchange-switch" id="exchangeSwitch" style="display:none;"></div>
             <select class="profile-select" id="profileSelect">
               <optgroup label="Стандарт" data-i18n-label>
                 <option value="custom" data-i18n>Профиль: CUSTOM</option>
@@ -172,11 +138,45 @@
               <button class="view-btn active" id="viewList" title="Таблица" data-i18n-title><i class="ri-list-check"></i></button>
               <button class="view-btn" id="viewGrid" title="Сетка" data-i18n-title><i class="ri-grid-fill"></i></button>
             </div>
-            <div class="exchange-switch" id="exchangeSwitch" style="display:none;"></div>
+            <div class="filter-group">
+              <span class="filter-label" data-i18n>Объём 24ч</span>
+              <select class="filter-select" id="filterVol24Op"><option value=">=" selected>&ge;</option><option value=">">&gt;</option><option value="<=">&le;</option><option value="<">&lt;</option></select>
+              <input class="filter-input wide" id="filterVol24" value="100000" placeholder="USDT">
+            </div>
+            <div class="filter-group">
+              <span class="filter-label" data-i18n>Объём 5с</span>
+              <select class="filter-select" id="filterVol5Op"><option value=">=" selected>&ge;</option><option value=">">&gt;</option><option value="<=">&le;</option><option value="<">&lt;</option></select>
+              <input class="filter-input" id="filterVol5" value="" placeholder="любой" data-i18n-placeholder>
+            </div>
+            <div class="filter-group">
+              <span class="filter-label" data-i18n>Цена</span>
+              <input class="filter-input" id="filterPriceFrom" value="" placeholder="от" style="width:70px" data-i18n-placeholder>
+              <span class="filter-label">—</span>
+              <input class="filter-input" id="filterPriceTo" value="" placeholder="до" style="width:70px" data-i18n-placeholder>
+            </div>
+            <div class="filter-group">
+              <span class="filter-label" data-i18n>Волат. 5с %</span>
+              <select class="filter-select" id="filterVol5sOp"><option value=">=" selected>&ge;</option><option value=">">&gt;</option><option value="<=">&le;</option><option value="<">&lt;</option></select>
+              <input class="filter-input" id="filterVol5s" value="" placeholder="любая" data-i18n-placeholder>
+            </div>
+            <div class="filter-group">
+              <span class="filter-label" data-i18n>Волат. 30с %</span>
+              <select class="filter-select" id="filterVol30sOp"><option value=">=" selected>&ge;</option><option value=">">&gt;</option><option value="<=">&le;</option><option value="<">&lt;</option></select>
+              <input class="filter-input" id="filterVol30s" value="" placeholder="любая" data-i18n-placeholder>
+            </div>
+            <div class="filter-group">
+              <span class="filter-label" data-i18n>Изм. 24ч %</span>
+              <select class="filter-select" id="filterChgOp"><option value=">=" selected>&ge;</option><option value=">">&gt;</option><option value="<=">&le;</option><option value="<">&lt;</option></select>
+              <input class="filter-input" id="filterChg" value="" placeholder="любое" data-i18n-placeholder>
+            </div>
           </div>
           <div class="toolbar-right">
-            <div class="search-box"><i class="ri-search-line"></i><input id="searchInput" placeholder="Поиск: BTC, PEPE..." data-i18n-placeholder></div>
+            <label class="filter-live"><input type="checkbox" id="liveFilters" checked> <span data-i18n>Живые</span></label>
+            <span class="filter-count" id="filterCount">0 / 0</span>
             <button class="view-btn" id="settingsBtn"><i class="ri-settings-4-line"></i></button>
+            <button class="filter-btn" id="resetFilters"><i class="ri-refresh-line"></i> <span data-i18n>Сбросить</span></button>
+            <button class="filter-btn" id="refreshData"><i class="ri-refresh-line"></i> <span data-i18n>Обновить</span></button>
+            <button class="filter-btn primary" id="applyFilters"><i class="ri-filter-3-line"></i> <span data-i18n>Применить</span></button>
           </div>
         </div>
         <div class="strategy-hint-bar" id="strategyHintBar">
