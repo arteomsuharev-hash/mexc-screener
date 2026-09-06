@@ -1,28 +1,35 @@
 /* ... весь ваш CSS без изменений ... */
 :root {
-  /* Зелёная неоновая тема (редизайн 2026-09, по образцу пользовательского макета) — те же имена
-     переменных, что и раньше, просто новые значения, поэтому всё, что уже написано через var(--...),
-     подхватывает новый вид без переписывания каждого правила. */
-  --bg-primary: #050b08;
-  --bg-secondary: #08150f;
-  --bg-card: #0d1f17;
-  --bg-hover: #123023;
-  --border-color: #1c4433;
-  --text-primary: #eafff2;
-  --text-secondary: #8fd6b2;
-  --text-muted: #547a68;
-  /* "Кислотнее" по фидбэку — более насыщенный, чистый неоновый зелёный (был мягче/мятнее). */
-  --green: #12ff5e;
+  /* Тёмная "moodboard" тема (редизайн 2026-09-2, по образцу присланных постеров: сакура/иероглиф
+     на почти-чёрном, ч/б "NIHILISM", розово-лавандовый "VISION", неоновая магента "METAVERSE",
+     "Yokai" и "B&Y") — почти-чёрный фон с лёгким сливовым оттенком вместо зелёного, акцент
+     магента/роза + лавандовый вместо зелёного/голубого бренд-акцента. --green/--red НЕ трогаем —
+     это финансовая семантика (рост/падение, LONG/SHORT), а не бренд-цвет, её смена запутала бы
+     чтение сигналов. --blue переопределён на лавандовый — он и раньше был "вторичный акцент/активная
+     вкладка" по всему приложению (Финрез/Профили/Паттерны и т.д.), не ценовая семантика, поэтому
+     одна смена значения безопасно перекрашивает все те места разом. */
+  --bg-primary: #0a0710;
+  --bg-secondary: #0f0a17;
+  --bg-card: #170e21;
+  --bg-hover: #26162f;
+  --border-color: #2b1c38;
+  --text-primary: #f3ecf5;
+  --text-secondary: #b6a2c2;
+  --text-muted: #6c5c78;
+  --green: #1fdb74;
   --red: #ff3d63;
   --orange: #ffb238;
-  --blue: #22d3ee;
-  --neon: #12ff5e;
-  --neon-glow: rgba(18, 255, 94, .4);
-  --neon-glow-soft: rgba(18, 255, 94, .18);
+  --blue: #c084fc;
+  --accent: #ec4899;
+  --accent-soft: #c084fc;
+  --neon: #ec4899;
+  --neon-glow: rgba(236, 72, 153, .38);
+  --neon-glow-soft: rgba(236, 72, 153, .16);
   --sidebar-width: 248px;
   --header-height: 56px;
   --font-main: 'Inter', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+  --font-display: 'Oswald', 'Inter', sans-serif;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
@@ -38,13 +45,17 @@ body {
      background-attachment, не двигается при скролле контента, и достаточно тускло, чтобы не мешать
      чтению данных поверх (контент всегда рисуется в своих собственных непрозрачных панелях). */
   background-color: var(--bg-primary);
+  /* Мягкие розово-лавандовые дальние "прожекторы" вместо сетки (по образцу присланных постеров —
+     там фон почти чёрный с мягким блюром/glow, без технической сетки терминала). */
   background-image:
-    radial-gradient(ellipse 900px 500px at 8% -10%, rgba(18,255,94,.05), transparent 60%),
-    radial-gradient(ellipse 700px 500px at 100% 110%, rgba(34,211,238,.04), transparent 60%),
-    repeating-linear-gradient(0deg, rgba(18,255,94,.025) 0px, rgba(18,255,94,.025) 1px, transparent 1px, transparent 48px),
-    repeating-linear-gradient(90deg, rgba(18,255,94,.025) 0px, rgba(18,255,94,.025) 1px, transparent 1px, transparent 48px);
+    radial-gradient(ellipse 1000px 560px at 6% -12%, rgba(236,72,153,.07), transparent 60%),
+    radial-gradient(ellipse 800px 560px at 100% 112%, rgba(192,132,252,.06), transparent 60%),
+    radial-gradient(ellipse 700px 500px at 55% 45%, rgba(236,72,153,.025), transparent 65%);
   background-attachment: fixed;
 }
+/* Заголовки страниц (Графики/Паттерны/Аналитика/...) — тот же условный display-шрифт, что и у
+   логотипа, вместо обычного Inter, по образцу постеров с крупной жирной типографикой. */
+h2 { font-family: var(--font-display); letter-spacing: .3px; }
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #2B3139; border-radius: 2px; }
@@ -79,6 +90,16 @@ body {
   background: linear-gradient(180deg, transparent, rgba(255,255,255,.06), transparent);
   pointer-events: none;
 }
+/* Едва заметный фоновый иероглиф (по образцу референсов: сакура+"愛" глоу за "LOVE", "妖怪" в
+   логотипе Yokai) — чистая типографика (символ языка, не персонаж), очень тускло, не мешает читать
+   пункты меню поверх. */
+.sidebar::before {
+  content: '侍';
+  position: absolute; top: -30px; left: 50%; transform: translateX(-50%);
+  font-size: 220px; line-height: 1; font-family: var(--font-display), serif;
+  color: var(--accent); opacity: .09; text-shadow: 0 0 60px var(--accent);
+  pointer-events: none; user-select: none;
+}
 .sidebar.collapsed { width: 68px; }
 .logo {
   padding: 18px 16px 16px;
@@ -94,7 +115,8 @@ body {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  filter: drop-shadow(0 0 6px rgba(255,255,255,.4)) drop-shadow(0 0 14px rgba(255,255,255,.22));
+  color: var(--accent);
+  filter: drop-shadow(0 0 6px var(--neon-glow)) drop-shadow(0 0 14px var(--neon-glow-soft));
 }
 .logo-icon svg { width: 32px; height: 32px; display: block; }
 .logo-text {
@@ -103,8 +125,12 @@ body {
   overflow: hidden;
   transition: opacity .2s, transform .28s;
 }
-.logo-title { font-size: 13px; font-weight: 700; letter-spacing: .8px; color: var(--text-primary); }
-.logo-sub { font-size: 9px; color: var(--text-muted); letter-spacing: 1.6px; text-transform: uppercase; font-weight: 600; margin-top: 3px; }
+.logo-title {
+  font-family: var(--font-display); font-size: 16px; font-weight: 600; letter-spacing: .6px;
+  color: var(--text-primary); text-transform: uppercase; font-style: italic;
+  text-shadow: 0 0 16px var(--neon-glow-soft);
+}
+.logo-sub { font-size: 9px; color: var(--text-muted); letter-spacing: 2.2px; text-transform: uppercase; font-weight: 600; margin-top: 3px; }
 .nav { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 10px 8px; }
 .nav-section {
   font-size: 10px;
@@ -132,11 +158,11 @@ body {
 .nav-item:hover { background: var(--neon-glow-soft); color: var(--text-primary); transform: translateX(2px); }
 .nav-item.active {
   background: var(--neon-glow-soft);
-  color: var(--green);
+  color: var(--accent);
   font-weight: 600;
   box-shadow: inset 0 0 0 1px var(--neon-glow), 0 0 16px -4px var(--neon-glow);
 }
-.nav-item.active i { color: var(--green); text-shadow: 0 0 8px var(--neon-glow); }
+.nav-item.active i { color: var(--accent); text-shadow: 0 0 8px var(--neon-glow); }
 .nav-item.active::before { display: none; }
 .nav-badge {
   margin-left: auto;
@@ -208,7 +234,7 @@ body {
   width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
   background: radial-gradient(circle, var(--neon-glow-soft), transparent 70%);
   box-shadow: inset 0 0 0 1px var(--border-color), 0 0 16px -6px var(--neon-glow);
-  color: var(--green); font-size: 20px;
+  color: var(--accent); font-size: 20px;
 }
 .sidebar-mascot-bubble {
   background: var(--bg-card); border: 1px solid var(--border-color);
@@ -526,9 +552,9 @@ body {
   color: var(--text-secondary); padding: 6px 12px; border-radius: 4px;
   font-size: 12px; cursor: pointer; transition: all .15s; white-space: nowrap;
 }
-.filter-btn:hover { border-color: var(--green); color: var(--text-primary); }
+.filter-btn:hover { border-color: var(--accent); color: var(--text-primary); }
 .filter-btn.primary {
-  background: var(--green); border-color: var(--green); color: #04140c; font-weight: 700;
+  background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700;
   display: flex; align-items: center; gap: 6px;
   box-shadow: 0 0 18px -5px var(--neon-glow);
 }
@@ -683,8 +709,8 @@ body {
 .page-nav:hover, .page-num:hover { background: var(--bg-hover); color: var(--text-primary); }
 .page-nav[disabled] { opacity: .35; cursor: default; pointer-events: none; }
 .page-num.active {
-  background: rgba(0,192,118,.14); border-color: var(--green); color: var(--green); font-weight: 700;
-  box-shadow: 0 0 10px -3px rgba(0,192,118,.5);
+  background: var(--neon-glow-soft); border-color: var(--accent); color: var(--accent); font-weight: 700;
+  box-shadow: 0 0 10px -3px var(--neon-glow);
 }
 .page-ellipsis { color: var(--text-muted); font-size: 11px; padding: 0 2px; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -730,7 +756,7 @@ body {
   -webkit-backdrop-filter: blur(10px) saturate(1.7) brightness(1.06);
   border-radius: 10px;
 }
-.data-table tr.selected { background: var(--neon-glow-soft); box-shadow: inset 3px 0 0 var(--green); }
+.data-table tr.selected { background: var(--neon-glow-soft); box-shadow: inset 3px 0 0 var(--accent); }
 @keyframes rowEnterIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 .data-table tr.row-enter { animation: rowEnterIn .3s ease both; }
 .cell-price { position: relative; }
@@ -806,9 +832,9 @@ body {
   padding: 6px 16px; border-radius: 999px; font-size: 12px; font-weight: 600; cursor: pointer;
   transition: all .15s;
 }
-.algo-pill:hover { border-color: var(--green); color: var(--text-primary); }
+.algo-pill:hover { border-color: var(--accent); color: var(--text-primary); }
 .algo-pill.active {
-  background: var(--green); border-color: var(--green); color: #04140c;
+  background: var(--accent); border-color: var(--accent); color: #fff;
   box-shadow: 0 0 18px -5px var(--neon-glow);
 }
 
