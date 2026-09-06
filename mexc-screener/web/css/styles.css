@@ -11,13 +11,14 @@
   --text-primary: #eafff2;
   --text-secondary: #8fd6b2;
   --text-muted: #547a68;
-  --green: #35ff8d;
-  --red: #ff5470;
+  /* "Кислотнее" по фидбэку — более насыщенный, чистый неоновый зелёный (был мягче/мятнее). */
+  --green: #12ff5e;
+  --red: #ff3d63;
   --orange: #ffb238;
   --blue: #22d3ee;
-  --neon: #35ff8d;
-  --neon-glow: rgba(53, 255, 141, .35);
-  --neon-glow-soft: rgba(53, 255, 141, .16);
+  --neon: #12ff5e;
+  --neon-glow: rgba(18, 255, 94, .4);
+  --neon-glow-soft: rgba(18, 255, 94, .18);
   --sidebar-width: 248px;
   --header-height: 56px;
   --font-main: 'Inter', system-ui, -apple-system, sans-serif;
@@ -696,6 +697,20 @@ body {
 .dot-wait { background: var(--text-muted); }
 .signal-strategy { background: rgba(30,128,255,.12); color: var(--blue); box-shadow: 0 0 12px -5px rgba(30,128,255,.65); }
 .dot-strategy { background: var(--blue); box-shadow: 0 0 6px 1px rgba(30,128,255,.6); }
+/* Бейджи алгоритмов в строке таблицы (см. algoBadgesCellHtml) — компактные цветные "таблетки",
+   цвет по направлению сигнала (LONG зелёный/SHORT красный/BOTH нейтральный синий), полный текст
+   объяснения — во всплывающей подсказке (title), чтобы не раздувать саму ячейку. */
+.algo-badges { display: flex; gap: 3px; flex-wrap: wrap; max-width: 150px; }
+.algo-badges-empty { color: var(--text-muted); }
+.algo-badge {
+  display: inline-block; padding: 1px 6px; border-radius: 999px;
+  font-size: 10px; font-weight: 700; font-family: var(--font-mono);
+  white-space: nowrap; cursor: default;
+}
+.algo-badge.up { background: rgba(18,255,94,.14); color: var(--green); box-shadow: inset 0 0 0 1px rgba(18,255,94,.3); }
+.algo-badge.down { background: rgba(255,61,99,.14); color: var(--red); box-shadow: inset 0 0 0 1px rgba(255,61,99,.3); }
+.algo-badge.neutral { background: rgba(34,211,238,.14); color: var(--blue); box-shadow: inset 0 0 0 1px rgba(34,211,238,.3); }
+
 .profile-nav-pills { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 22px; }
 .profile-nav-pill {
   border: 1px solid var(--border-color); border-radius: 20px; padding: 6px 14px; font-size: 12px;
@@ -1247,35 +1262,44 @@ body {
   border: 1px solid var(--border-color);
   border-radius: 16px;
   box-shadow: 0 0 0 1px var(--neon-glow-soft), 0 0 24px -10px var(--neon-glow);
-  display: flex; flex-direction: column; height: auto; min-height: 0; overflow-y: auto;
+  /* height:100% (не auto!) — по умолчанию грид уже растягивает элемент на всю клетку, но auto тут
+     явно ломал это (сайзинг по контенту вместо доступной высоты), из-за чего .chart-area{flex:1}
+     ниже было НЕЧЕГО растягивать: колонка сама уже "сколько нужно" под контент. min-height:0 —
+     чтобы flex-дети могли сжиматься и работал именно ВНУТРЕННИЙ скролл (у .trades-panel/.algo-panel
+     ниже), а не рост всей карточки с overflow на ней самой. */
+  display: flex; flex-direction: column; height: 100%; min-height: 0; overflow-y: auto;
 }
 .coin-info {
-  width: auto; padding: 16px;
+  width: auto; padding: 12px 16px;
   border-right: none; border-bottom: 1px solid var(--border-color);
   display: flex; flex-direction: column; flex-shrink: 0;
 }
-.coin-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.coin-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .coin-header .coin-icon { width: 32px; height: 32px; font-size: 14px; }
 .coin-title { font-size: 16px; font-weight: 700; }
 .coin-sub {
   font-size: 11px; color: var(--text-muted); background: var(--bg-card);
   padding: 2px 6px; border-radius: 3px; margin-left: auto;
 }
-.coin-price { font-size: 26px; font-weight: 700; font-family: var(--font-mono); margin-bottom: 4px; }
-.coin-change { font-size: 14px; font-weight: 600; margin-bottom: 16px; }
-.info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: auto; }
+.coin-price { font-size: 24px; font-weight: 700; font-family: var(--font-mono); margin-bottom: 2px; }
+.coin-change { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+.info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: auto; }
 .info-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
 .info-value { font-size: 13px; font-weight: 600; font-family: var(--font-mono); }
 
-.chart-area { flex: 1; display: flex; flex-direction: column; border-right: none; min-width: 0; min-height: 320px; }
+.chart-area { flex: 5 1 0; display: flex; flex-direction: column; border-right: none; min-width: 0; min-height: 460px; }
 .chart-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 16px; border-bottom: 1px solid var(--border-color); gap: 10px;
+  /* Раньше рассчитан на широкую горизонтальную нижнюю панель — в узкой правой колонке (редизайн
+     2026-09) 7 кнопок таймфрейма + цена + кнопка "Открыть на бирже" переносились на несколько
+     строк и раздували высоту шапки графика (169px в самом узком случае), отъедая место у самого
+     графика. flex-wrap + более компактные .tf-btn ниже держат высоту в разумных пределах. */
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  padding: 6px 10px; border-bottom: 1px solid var(--border-color); gap: 6px;
 }
-.timeframes { display: flex; gap: 2px; flex-wrap: wrap; }
+.timeframes { display: flex; gap: 1px; flex-wrap: wrap; }
 .tf-btn {
-  padding: 3px 10px; background: transparent; border: none;
-  color: var(--text-muted); font-size: 11px; cursor: pointer;
+  padding: 2px 6px; background: transparent; border: none;
+  color: var(--text-muted); font-size: 10px; cursor: pointer;
   border-radius: 3px; font-family: var(--font-mono); font-weight: 500;
 }
 .tf-btn:hover, .tf-btn.active { color: #fff; background: var(--bg-hover); }
@@ -1422,7 +1446,15 @@ body {
 .chart-tip-change.down { color: var(--red); }
 .filter-btn.active { border-color: var(--blue); color: #fff; background: rgba(30,128,255,.12); box-shadow: 0 0 14px -4px rgba(30,128,255,.45); }
 
-.right-panel { width: 300px; display: flex; flex-direction: column; flex-shrink: 0; background: linear-gradient(180deg, rgba(255,255,255,.015), transparent 140px); }
+.right-panel {
+  width: auto; display: flex; flex-direction: column; flex-shrink: 0;
+  background: linear-gradient(180deg, rgba(255,255,255,.015), transparent 140px);
+  /* Раньше без ограничения по высоте .right-panel (сделки + шкала алгоритмов) забирал себе
+     сколько угодно места в вертикальной колонке справа — график сжимался до пары сотен пикселей.
+     Капаем высоту и даём свой скролл, чтобы график (.chart-area, flex:3) стабильно получал
+     основную часть пространства независимо от количества сделок в ленте. */
+  max-height: 210px; overflow-y: auto;
+}
 .trades-panel { flex: 1; border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column; overflow: hidden; }
 .panel-title {
   padding: 10px 16px; font-size: 11px; font-weight: 600;

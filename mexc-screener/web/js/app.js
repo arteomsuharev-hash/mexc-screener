@@ -1436,6 +1436,28 @@ function setMetricValue(id, value) {
   }
 }
 
+// Бейджи алгоритмов прямо в строке таблицы (редизайн 2026-09, по образцу пользовательского
+// макета) — переиспользует уже посчитанный activePatternEvents (тот же живой срез Tier-2, что
+// приводит в действие мост Tier1<->Tier2 и стр. «Паттерны»), НЕ отдельный проход детекторов.
+// Честно показывает бейджи только для монет, что реально в Tier-2 watchlist (MEXC ИЛИ Binance,
+// activePatternEvents уже несёт биржу прямо в ev.symbol) — для остальных строк тире, а не
+// выдуманные значки только чтобы визуально "заполнить" колонку.
+const ALGO_BADGES_MAX_PER_ROW = 3;
+function algoBadgesCellHtml(symbol) {
+  const evs = [];
+  for (let i = 0; i < activePatternEvents.length && evs.length < ALGO_BADGES_MAX_PER_ROW; i++) {
+    if (activePatternEvents[i].symbol === symbol) evs.push(activePatternEvents[i]);
+  }
+  if (!evs.length) return '<span class="algo-badges-empty">—</span>';
+  return '<div class="algo-badges">' + evs.map(function (ev) {
+    const def = DETECTOR_DEFS[ev.detectorKey];
+    const dirCls = ev.direction === 'LONG' ? 'up' : ev.direction === 'SHORT' ? 'down' : 'neutral';
+    let text;
+    try { text = explainPatternEvent(ev).replace(/"/g, '&quot;'); } catch (e) { text = ''; }
+    return '<span class="algo-badge ' + dirCls + '" title="' + text + '">' + ((def && def.badge) || ev.detectorKey) + '</span>';
+  }).join('') + '</div>';
+}
+
 function renderTable() {
   const tbody = document.getElementById('tableBody');
   const grid = document.getElementById('gridView');
@@ -1470,12 +1492,12 @@ function renderTable() {
   document.getElementById('navFavBadge').textContent = allCoins.filter(function (c) { return c.fav; }).length;
 
   if (!allCoins.length) {
-    tbody.innerHTML = '<tr><td colspan="11" class="empty-state"><i class="ri-database-2-line"></i>Нет данных MEXC. Ожидание WebSocket...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12" class="empty-state"><i class="ri-database-2-line"></i>Нет данных MEXC. Ожидание WebSocket...</td></tr>';
     grid.innerHTML = '';
     return;
   }
   if (!visible.length) {
-    tbody.innerHTML = '<tr><td colspan="11" class="empty-state"><i class="ri-filter-off-line"></i>Нет пар по текущим фильтрам. Сбросьте фильтры или подождите накопления 5с-метрик.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12" class="empty-state"><i class="ri-filter-off-line"></i>Нет пар по текущим фильтрам. Сбросьте фильтры или подождите накопления 5с-метрик.</td></tr>';
     grid.innerHTML = '';
     return;
   }
@@ -1500,6 +1522,7 @@ function renderTable() {
       '<td>' + c.vol5s.toFixed(3) + '%</td>' +
       '<td>' + c.vol30s.toFixed(3) + '%</td>' +
       '<td>' + c.vol60s.toFixed(3) + '%</td>' +
+      '<td>' + algoBadgesCellHtml(c.symbol) + '</td>' +
       '<td>' + signalCell + '</td></tr>';
   }).join('');
 
