@@ -729,6 +729,20 @@ body {
 .pattern-log-scope { color: var(--blue); flex-shrink: 0; }
 .pattern-log-msg { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .profile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.graphs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.mini-chart-card {
+  border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-card);
+  cursor: pointer; transition: border-color .15s, transform .1s; overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.mini-chart-card:hover { border-color: var(--blue); transform: translateY(-1px); }
+.mini-chart-head { display: flex; align-items: center; gap: 6px; padding: 6px 8px; font-size: 11px; font-family: var(--font-mono); }
+.mini-chart-symbol { font-weight: 600; color: var(--text-primary); }
+.mini-chart-price { margin-left: auto; }
+.mini-chart-change { min-width: 52px; text-align: right; }
+.mini-chart-price.up, .mini-chart-change.up { color: var(--green); }
+.mini-chart-price.down, .mini-chart-change.down { color: var(--red); }
+.mini-chart-canvas { width: 100%; height: 130px; display: block; }
 .profile-strategy-card {
   position: relative; border: 1px solid var(--border-color); border-radius: 10px; padding: 16px 18px 18px;
   cursor: pointer; transition: border-color .15s, background .15s, transform .1s; display: flex; flex-direction: column; gap: 8px;

@@ -2280,6 +2280,137 @@ function drawCandleChart(canvas, candles) {
   };
 }
 
+// Упрощённый рендерер для сетки мини-графиков (стр. «Графики», по мотивам разбора GodsEye,
+// 2026-09) — сознательно НЕ переиспользует drawCandleChart напрямую: тот завязан на глобальное
+// состояние одного-единственного "своего" графика (зум/пан ownChartView, инструменты построений,
+// MA-тумблер и т.д.), которое не должно шариться между N одновременно открытыми мини-карточками.
+// Здесь — всегда весь переданный набор свечей, без зума/пана/построений, плюс пунктирная линия
+// последней цены с бейджем (как в существующем drawCandleChart и как у GodsEye на скриншоте).
+function drawMiniCandleChart(canvas, candles, opts) {
+  opts = opts || {};
+  if (!canvas || !candles || candles.length < 2) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth || 220, h = canvas.clientHeight || 120;
+  if (!w || !h) return;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  const padRight = 42, padTop = 4, padBottom = 2;
+  const plotW = w - padRight;
+  const showVolume = opts.showVolume !== false;
+  const volumeH = showVolume ? Math.round((h - padTop - padBottom) * 0.18) : 0;
+  const plotH = h - padTop - padBottom - volumeH;
+  const volTop = padTop + plotH;
+
+  const slice = candles.slice(-Math.max(20, opts.maxCandles || 96));
+  const n = slice.length;
+  if (n < 2) return;
+
+  let min = Math.min.apply(null, slice.map(function (k) { return k.l; }));
+  let max = Math.max.apply(null, slice.map(function (k) { return k.h; }));
+  if (min === max) { min -= 1; max += 1; }
+  const pricePad = (max - min) * 0.08;
+  min -= pricePad; max += pricePad;
+
+  let maxVol = Math.max.apply(null, slice.map(function (k) { return k.v; }));
+  if (!Number.isFinite(maxVol) || maxVol <= 0) maxVol = 1;
+
+  const slot = plotW / n;
+  const bodyW = Math.max(1, Math.min(6, slot * 0.6));
+  function yOf(v) { return padTop + plotH - ((v - min) / (max - min)) * plotH; }
+  function volYOf(vv) { return volTop + volumeH - (vv / maxVol) * volumeH; }
+
+  ctx.font = '9px var(--font-mono, monospace)';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  [max - pricePad, (min + max) / 2, min + pricePad].forEach(function (v) {
+    const y = yOf(v);
+    ctx.strokeStyle = 'rgba(255,255,255,.05)';
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(plotW, y); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,.35)';
+    ctx.fillText(fmtPrice(v), plotW + 4, y);
+  });
+
+  if (showVolume) {
+    slice.forEach(function (k, i) {
+      const x = i * slot + slot / 2;
+      const up = k.c >= k.o;
+      ctx.fillStyle = up ? 'rgba(38,166,154,.4)' : 'rgba(239,83,80,.4)';
+      const vy = volYOf(k.v);
+      ctx.fillRect(x - bodyW / 2, vy, bodyW, (volTop + volumeH) - vy);
+    });
+  }
+
+  slice.forEach(function (k, i) {
+    const x = i * slot + slot / 2;
+    const up = k.c >= k.o;
+    const color = up ? OCHART_UP : OCHART_DOWN;
+    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, yOf(k.h)); ctx.lineTo(x, yOf(k.l)); ctx.stroke();
+    const yo = yOf(k.o), yc = yOf(k.c);
+    const top = Math.min(yo, yc), bh = Math.max(1, Math.abs(yc - yo));
+    ctx.fillRect(x - bodyW / 2, top, bodyW, bh);
+  });
+
+  // Пунктирная линия последней цены + бейдж на оси — тот же приём, что в drawCandleChart.
+  const last = slice[n - 1];
+  const lastColor = last.c >= last.o ? OCHART_UP : OCHART_DOWN;
+  const ly = yOf(last.c);
+  ctx.save();
+  ctx.setLineDash([3, 3]);
+  ctx.strokeStyle = lastColor + '8c';
+  ctx.beginPath(); ctx.moveTo(0, ly); ctx.lineTo(plotW, ly); ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle = lastColor;
+  ctx.fillRect(plotW + 1, ly - 7, padRight - 2, 14);
+  ctx.fillStyle = '#0b0e14';
+  ctx.font = 'bold 9px var(--font-mono, monospace)';
+  ctx.fillText(fmtPrice(last.c), plotW + 4, ly);
+
+  // Маркеры алгоритмов (стр. «Паттерны», см. graphsMarkersForSymbol) поверх свечей — необязательные.
+  if (opts.markers && opts.markers.length) drawMiniChartMarkers(ctx, opts.markers, slice, slot, yOf, plotW);
+}
+
+// Рисует найденные алгоритмами события (см. graphsMarkersForSymbol) прямо поверх свечей мини-графика
+// — стрелка вверх/вниз (LONG/SHORT) или точка (BOTH, не направленный сигнал), с коротким бейджем
+// детектора под/над стрелкой. По мотивам разбора GodsEye (там сигналы боты/TWAP/плотности рисуются
+// прямо на свечах, а не только отдельными карточками) — но сознательно без их сложной системы
+// избежания наложений (chart-signal-markers.js): при типичном числе маркеров на мини-графике (0-3)
+// это не нужно, а усложнять код ради гипотетического случая — лишнее.
+function drawMiniChartMarkers(ctx, markers, slice, slot, yOf, plotW) {
+  const t0 = slice[0].t, t1 = slice[slice.length - 1].t;
+  const span = Math.max(1, t1 - t0);
+  markers.forEach(function (m) {
+    if (m.time < t0 || m.time > t1) return; // маркер старше видимого окна графика — не рисуем за его пределами
+    const idx = Math.round(((m.time - t0) / span) * (slice.length - 1));
+    const x = Math.max(0, Math.min(plotW, idx * slot + slot / 2));
+    const y = yOf(m.price);
+    const up = m.direction === 'LONG', down = m.direction === 'SHORT';
+    const color = up ? OCHART_UP : down ? OCHART_DOWN : '#8fcaff';
+    const away = up ? -1 : 1;
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    if (up || down) {
+      ctx.moveTo(x, y + away * 10);
+      ctx.lineTo(x - 4, y + away * 4);
+      ctx.lineTo(x + 4, y + away * 4);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.font = '8px var(--font-mono, monospace)';
+    ctx.textAlign = 'center';
+    ctx.fillText(m.label, x, y + away * (up || down ? 16 : 12));
+    ctx.restore();
+  });
+  ctx.textAlign = 'left'; // сброс — остальной рендер canvas рассчитывает на left по умолчанию
+}
+
 // Взаимодействие с "своим" графиком: наведение (crosshair), колесо мыши (зум к курсору),
 // зажать-и-тащить (панорама либо линейка/трендлиния — в зависимости от активного инструмента
 // ownChartTool), правая кнопка мыши (удалить ближайшее построение). Слушатели вешаются один раз
@@ -4221,6 +4352,154 @@ function updatePatternValidationPanel() {
   }).join('');
 }
 
+// ============================================================================
+// Страница "Графики" — сетка живых мини-графиков свечей (по мотивам разбора стороннего скринера
+// GodsEye, 2026-09: у него "Graph mode" 4x4 живых свечей вместо/рядом с таблицей). Свечи — тот же
+// REST /api/v3/klines, что и у "своего" графика на вкладке монеты (fetchKlines), просто сразу на
+// несколько символов; между REST-обновлениями последняя свеча "дышит" локально по уже живым тикам
+// из coinMap (WS), без лишних сетевых запросов на каждый кадр. Пока только монеты MEXC (собственный
+// REST) — как и весь остальной live-функционал приложения.
+// ============================================================================
+const GRAPHS_REFRESH_MS = 20000; // как часто перезапрашиваем историю свечей по REST
+const GRAPHS_REDRAW_MS = 2000;   // как часто просто перерисовываем уже загруженное (живая цена)
+let graphsCandles = new Map();   // symbol -> candles[] (последний REST-снимок)
+let graphsVisibleSymbols = [];
+let graphsRefreshInFlight = false;
+
+function graphsGridSizeEl() { return document.getElementById('graphsGridSize'); }
+function graphsSortMetricEl() { return document.getElementById('graphsSortMetric'); }
+function graphsTimeframeEl() { return document.getElementById('graphsTimeframe'); }
+
+// Ранжирование — по уже посчитанным полям монеты (объём/изменение/всплеск), те же метрики, что и
+// в остальном приложении (никакой новой "5-минутной" метрики не вводим — 5с/30с/60с всплески уже
+// есть и честно посчитаны по реальному тиковому потоку, см. metricsFromSnaps).
+function computeGraphsVisibleSymbols() {
+  const n = parseInt((graphsGridSizeEl() && graphsGridSizeEl().value) || '16', 10);
+  const metric = (graphsSortMetricEl() && graphsSortMetricEl().value) || 'vol24';
+  const candidates = allCoins.filter(function (c) { return !c.exchange || c.exchange === 'MEXC'; });
+  const sorted = candidates.slice().sort(function (a, b) { return (Number(b[metric]) || 0) - (Number(a[metric]) || 0); });
+  return sorted.slice(0, n).map(function (c) { return c.symbol; });
+}
+
+async function refreshGraphsCandles(symbols) {
+  if (graphsRefreshInFlight || !symbols || !symbols.length) return;
+  graphsRefreshInFlight = true;
+  const tf = (graphsTimeframeEl() && graphsTimeframeEl().value) || '1';
+  try {
+    for (const symbol of symbols) {
+      const page = document.getElementById('page-graphs');
+      if (!page || !page.classList.contains('active')) break; // ушли со страницы — не тратим оставшиеся запросы впустую
+      const coin = coinMap.get(symbol);
+      if (!coin || !coin.raw) continue;
+      try {
+        const candles = await fetchKlines(coin.raw, tf, 200, 'mexc');
+        if (candles && candles.length) graphsCandles.set(symbol, candles);
+      } catch (e) { /* один символ не загрузился — остальные не трогаем */ }
+    }
+  } finally {
+    graphsRefreshInFlight = false;
+  }
+}
+
+function graphsMiniCardHtml(symbol) {
+  const coin = coinMap.get(symbol);
+  const changeCls = coin && coin.change24 >= 0 ? 'up' : 'down';
+  return '<div class="mini-chart-card" data-symbol="' + symbol.replace(/"/g, '&quot;') + '" title="' + t('Открыть график и стакан') + ' ' + symbol.replace(/"/g, '&quot;') + '">' +
+    '<div class="mini-chart-head">' +
+      '<span class="mini-chart-symbol">' + (coin ? coinDisplayLabel(coin) : symbol).replace(/</g, '&lt;') + '</span>' +
+      '<span class="mini-chart-price ' + changeCls + '">' + (coin ? fmtPrice(coin.price) : '—') + '</span>' +
+      '<span class="mini-chart-change ' + changeCls + '">' + (coin && coin.change24 != null ? (coin.change24 >= 0 ? '+' : '') + coin.change24.toFixed(2) + '%' : '') + '</span>' +
+    '</div>' +
+    '<canvas class="mini-chart-canvas"></canvas>' +
+  '</div>';
+}
+
+// Маркеры алгоритмов прямо на мини-графике — переиспользует уже накопленный patternFeed (стр.
+// «Паттерны», см. её же комментарий про накопление вместо мгновенного live-среза), а не отдельный
+// проход детекторов: честно рисуем только для монет, что реально в Tier-2 watchlist (только там
+// есть настоящие детекции по реальным сделкам/стакану) — для остальных пусто, а не выдумываем.
+const GRAPHS_MARKER_MAX_AGE_MS = 15 * 60 * 1000; // тот же горизонт актуальности, что у patternFeed
+function graphsMarkersForSymbol(symbol) {
+  const now = Date.now();
+  const markers = [];
+  patternFeed.forEach(function (entry) {
+    const ev = entry.ev;
+    if (!ev || ev.symbol !== symbol) return;
+    if (now - entry.lastSeenAt > GRAPHS_MARKER_MAX_AGE_MS) return;
+    if (!(ev.priceAtSignal > 0) || !entry.firstSeenAt) return;
+    markers.push({
+      time: entry.firstSeenAt, price: ev.priceAtSignal, direction: ev.direction,
+      label: (DETECTOR_DEFS[ev.detectorKey] || {}).badge || ev.detectorKey
+    });
+  });
+  return markers;
+}
+
+function redrawGraphsGrid() {
+  const page = document.getElementById('page-graphs');
+  if (!page || !page.classList.contains('active')) return;
+  const grid = document.getElementById('graphsGrid');
+  if (!grid) return;
+  grid.querySelectorAll('.mini-chart-card').forEach(function (card) {
+    const symbol = card.dataset.symbol;
+    const candles = graphsCandles.get(symbol);
+    const canvas = card.querySelector('.mini-chart-canvas');
+    const coin = coinMap.get(symbol);
+    if (!candles || candles.length < 2 || !canvas) return;
+    // "Дышащая" последняя свеча — патчим close/high/low живой ценой из WS (coinMap), без нового
+    // REST-запроса на каждый кадр; сам массив candles (кэш) не мутируем, чтобы следующий такой же
+    // патч не накапливал ошибку поверх уже пропатченной копии.
+    const patched = candles.slice();
+    const lastIdx = patched.length - 1;
+    if (coin && coin.price > 0) {
+      const last = patched[lastIdx];
+      patched[lastIdx] = Object.assign({}, last, {
+        c: coin.price, h: Math.max(last.h, coin.price), l: Math.min(last.l, coin.price)
+      });
+    }
+    drawMiniCandleChart(canvas, patched, { markers: graphsMarkersForSymbol(symbol) });
+  });
+}
+
+(function wireGraphsGridClick() {
+  const grid = document.getElementById('graphsGrid');
+  if (!grid) return;
+  grid.addEventListener('click', function (e) {
+    const card = e.target.closest('.mini-chart-card[data-symbol]');
+    if (card) openCoinFromPattern(card.dataset.symbol);
+  });
+})();
+
+function updateGraphsPage() {
+  const page = document.getElementById('page-graphs');
+  if (!page || !page.classList.contains('active')) return;
+  const symbols = computeGraphsVisibleSymbols();
+  const changed = symbols.join(',') !== graphsVisibleSymbols.join(',');
+  graphsVisibleSymbols = symbols;
+  const countEl = document.getElementById('graphsCount');
+  if (countEl) countEl.textContent = symbols.length + ' ' + t('монет');
+  const grid = document.getElementById('graphsGrid');
+  if (grid && changed) {
+    if (!symbols.length) {
+      grid.innerHTML = '<div class="finres-empty" style="grid-column:1/-1;"><i class="ri-layout-grid-line"></i>' +
+        t('Нет монет MEXC, подходящих под текущий выбор.') + '</div>';
+    } else {
+      grid.innerHTML = symbols.map(graphsMiniCardHtml).join('');
+    }
+    refreshGraphsCandles(symbols);
+  }
+  redrawGraphsGrid();
+}
+setInterval(redrawGraphsGrid, GRAPHS_REDRAW_MS);
+setInterval(function () {
+  const page = document.getElementById('page-graphs');
+  if (page && page.classList.contains('active')) refreshGraphsCandles(graphsVisibleSymbols);
+}, GRAPHS_REFRESH_MS);
+['graphsGridSize', 'graphsSortMetric', 'graphsTimeframe'].forEach(function (id) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('change', function () { graphsVisibleSymbols = []; updateGraphsPage(); });
+});
+
 function sortCoins(field) {
   if (sortField === field) sortAsc = !sortAsc;
   else { sortField = field; sortAsc = false; }
@@ -4465,6 +4744,7 @@ function switchPage(pageId) {
   document.querySelectorAll('.nav-item').forEach(function (n) {
     n.classList.toggle('active', n.dataset.page === pageId);
   });
+  if (pageId === 'graphs') updateGraphsPage();
   if (pageId === 'favorites') updateFavoritesPage();
   if (pageId === 'analytics') updateAnalytics();
   if (pageId === 'alerts') updateAlerts();
@@ -10061,6 +10341,8 @@ window.__tier2TradesFor = function (symbol) { return tier2Trades.get(symbol) || 
 window.__tier2DepthFor = function (symbol) { return tier2Depth.get(symbol) || []; };
 window.__patternEvents = function () { return activePatternEvents.map(function (ev) { return Object.assign({ explanation: explainPatternEvent(ev) }, ev); }); };
 window.__patternFeed = function () { return patternFeed.map(function (e) { return Object.assign({ explanation: explainPatternEvent(e.ev), firstSeenAt: e.firstSeenAt, lastSeenAt: e.lastSeenAt }, e.ev); }); };
+window.__drawMiniCandleChart = drawMiniCandleChart; // отладка рендера сетки "Графики" без реальной сети (см. её же комментарий)
+window.__graphsCandlesFor = function (symbol) { return graphsCandles.get(symbol) || null; };
 window.__patternHistory = function () { return patternHistory; };
 window.__sweepPatternOutcomesNow = sweepPatternOutcomes;
 // Только для ручной проверки UI страницы "Паттерны" без ожидания реальных срабатываний детекторов

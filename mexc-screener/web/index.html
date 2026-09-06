@@ -28,6 +28,7 @@
     <nav class="nav">
       <div class="nav-section" data-i18n>Платформа</div>
       <a class="nav-item active" data-page="screener"><i class="ri-dashboard-line"></i><span data-i18n>Скринер</span></a>
+      <a class="nav-item" data-page="graphs"><i class="ri-layout-grid-line"></i><span data-i18n>Графики</span></a>
       <a class="nav-item" data-page="favorites"><i class="ri-star-line"></i><span data-i18n>Избранное</span><span class="nav-badge" id="navFavBadge">0</span></a>
       <a class="nav-item" data-page="alerts"><i class="ri-notification-3-line"></i><span data-i18n>Оповещения</span><span class="nav-badge" id="navAlertBadge">0</span></a>
       <a class="nav-item" data-page="analytics"><i class="ri-bar-chart-box-line"></i><span data-i18n>Аналитика</span></a>
@@ -302,6 +303,32 @@
             <button class="algo-fav" id="addFav"><i class="ri-star-line"></i> <span data-i18n>Добавить в избранное</span></button>
           </div>
         </div>
+      </div>
+    </div>
+
+    <div class="page" id="page-graphs">
+      <div style="padding:16px 20px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <h2 style="font-size:18px; font-weight:600;"><i class="ri-layout-grid-line" style="color:var(--blue);"></i> <span data-i18n>Графики</span></h2>
+        <select class="filter-select" id="graphsGridSize">
+          <option value="4">2×2</option>
+          <option value="9">3×3</option>
+          <option value="16" selected>4×4</option>
+          <option value="25">5×5</option>
+        </select>
+        <select class="filter-select" id="graphsSortMetric">
+          <option value="vol24" selected data-i18n>Объём 24ч</option>
+          <option value="vol5s" data-i18n>Всплеск 5с</option>
+          <option value="change24" data-i18n>Изменение 24ч</option>
+        </select>
+        <select class="filter-select" id="graphsTimeframe">
+          <option value="1" selected>1м</option>
+          <option value="5">5м</option>
+          <option value="15">15м</option>
+        </select>
+        <span style="color:var(--text-muted);font-size:12px;" id="graphsCount"></span>
+      </div>
+      <div style="flex:1; overflow-y:auto; padding:16px 20px;">
+        <div class="graphs-grid" id="graphsGrid"></div>
       </div>
     </div>
 
