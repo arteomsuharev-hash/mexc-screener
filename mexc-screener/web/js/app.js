@@ -2935,6 +2935,12 @@ const watchlistSubscribeQueue = [];
 let watchlistSubscribeQueueTimer = null;
 const watchlistCandidateStreaks = new Map();
 const watchlistEvictStreaks = new Map();
+// Небольшое персистентное состояние между вызовами для двух алгоритмов ("Алгоритмы rebuild",
+// 2026-09), которым честно нужна память дальше одного окна снимков — см. комментарий у
+// MexcCore.detectDensityAbsorptionBreakout/detectFailedBreakout в core-utils.js. Сбрасывается при
+// выходе монеты из watchlist (см. unsubscribeWatchlistSymbol).
+const densityAbsorptionBreakoutState = new Map(); // symbol -> state
+const failedBreakoutState = new Map();            // symbol -> state
 const watchlistCooldowns = new Map(); // symbol -> until (ms) — временно исключена из кандидатов после WATCHLIST_MAX_RECONNECT_FAILS подряд
 
 // Здоровье Tier 2 — счётчики для будущей панели диагностики (этап 7 плана), уже сейчас доступны
@@ -3113,6 +3119,8 @@ function unsubscribeWatchlistSymbol(symbol) {
   try { if (entry.depthWs) { entry.depthWs.onclose = null; entry.depthWs.close(); } } catch (e) {}
   watchlist.delete(symbol);
   watchlistEvictStreaks.delete(symbol);
+  densityAbsorptionBreakoutState.delete(symbol);
+  failedBreakoutState.delete(symbol);
   logI('Watchlist', symbol + ' исключена из глубокого анализа');
 }
 
@@ -3287,6 +3295,76 @@ function detectStandingWall(symbol) {
   return ev;
 }
 
+// ------------------------------------------------------------------------------------------
+// 10 приоритетных алгоритмов из ТЗ пользователя (rebuild "Алгоритмы", 2026-09) — обёртки над
+// чистыми MexcCore.detectX(...) (core-utils.js, юнит-тесты — tests/verify_<algo>.js), тот же
+// wrapper-паттерн, что и у detectStandingWall выше. Два детектора (densityAbsorptionBreakout,
+// failedBreakout) честно нуждаются в состоянии между вызовами — {event, state} контракт, state
+// хранится в densityAbsorptionBreakoutState/failedBreakoutState выше.
+// ------------------------------------------------------------------------------------------
+function detectDensityBreak(symbol) {
+  const ev = MexcCore.detectDensityBreak(tier2Depth.get(symbol), tier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.densityBreak.minRepeats, lookback: 300, minWallRatio: 5, minShrinkRatio: 0.5
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDensityAbsorption(symbol) {
+  const ev = MexcCore.detectDensityAbsorption(tier2Depth.get(symbol), tier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.densityAbsorption.minRepeats, lookback: 300, minWallRatio: 5
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectLiquiditySweep(symbol) {
+  const ev = MexcCore.detectLiquiditySweep(tier2Trades.get(symbol), tier2Depth.get(symbol), { lookback: 200 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectImpulsePullbackContinuation(symbol) {
+  const ev = MexcCore.detectImpulsePullbackContinuation(tier2Trades.get(symbol), { lookback: 300 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPriceVolumeInefficiency(symbol) {
+  const ev = MexcCore.detectPriceVolumeInefficiency(tier2Trades.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDensityAbsorptionBreakout(symbol) {
+  const state = densityAbsorptionBreakoutState.get(symbol) || {};
+  const result = MexcCore.detectDensityAbsorptionBreakout(tier2Depth.get(symbol), tier2Trades.get(symbol), {
+    minWallRatio: 5, maxDistancePct: 1.0, minTestCount: DETECTOR_DEFS.densityAbsorptionBreakout.minRepeats
+  }, state);
+  densityAbsorptionBreakoutState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPumpReversal(symbol) {
+  const ev = MexcCore.detectPumpReversal(tier2Trades.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDumpReversal(symbol) {
+  const ev = MexcCore.detectDumpReversal(tier2Trades.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectCompressionBreak(symbol) {
+  const ev = MexcCore.detectCompressionBreak(tier2Trades.get(symbol), tier2Depth.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectFailedBreakout(symbol) {
+  const state = failedBreakoutState.get(symbol) || {};
+  const result = MexcCore.detectFailedBreakout(tier2Trades.get(symbol), { lookback: 300 }, state);
+  failedBreakoutState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+
 const DETECTOR_DEFS = {
   repeatSize: { label: 'Идентичные размеры сделок', badge: 'SIZE', category: 'repeat', minRepeats: 5, detect: detectRepeatedTradeSizes },
   repeatInterval: { label: 'Идентичные интервалы', badge: 'INTVL', category: 'repeat', minRepeats: 5, detect: detectRepeatedIntervals },
@@ -3300,7 +3378,18 @@ const DETECTOR_DEFS = {
   fakeLiquidity: { label: 'Возможная фейковая ликвидность', badge: 'FAKE?', category: 'heuristic-lowconf', minRepeats: 20, detect: detectFakeLiquidity },
   exhaustion: { label: 'Истощение импульса', badge: 'EXHAUST', category: 'inefficiency', minRepeats: 3, detect: detectExhaustion },
   zoneReturn: { label: 'Повторная реакция на зону', badge: 'ZONE', category: 'repeat', minRepeats: 5, detect: detectZoneReturn },
-  standingWall: { label: 'Стоящая стена в стакане', badge: 'WALL', category: 'depth', minRepeats: 10, detect: detectStandingWall }
+  standingWall: { label: 'Стоящая стена в стакане', badge: 'WALL', category: 'depth', minRepeats: 10, detect: detectStandingWall },
+  // 10 приоритетных алгоритмов из ТЗ пользователя (rebuild "Алгоритмы", 2026-09) — см. wrapper'ы выше.
+  densityBreak: { label: 'Пробой плотности', badge: 'DBREAK', category: 'depth', minRepeats: 30, detect: detectDensityBreak },
+  densityAbsorption: { label: 'Поглощение у плотности', badge: 'DABSORB', category: 'depth', minRepeats: 30, detect: detectDensityAbsorption },
+  liquiditySweep: { label: 'Снятие ликвидности (sweep)', badge: 'SWEEP', category: 'inefficiency', minRepeats: 30, detect: detectLiquiditySweep },
+  impulsePullbackContinuation: { label: 'Импульс → откат → продолжение', badge: 'IPC', category: 'sequence', minRepeats: 40, detect: detectImpulsePullbackContinuation },
+  priceVolumeInefficiency: { label: 'Неэффективность цена/объём', badge: 'PVI', category: 'inefficiency', minRepeats: 40, detect: detectPriceVolumeInefficiency },
+  densityAbsorptionBreakout: { label: 'Пробой после многократного поглощения', badge: 'DABX', category: 'depth', minRepeats: 3, detect: detectDensityAbsorptionBreakout },
+  pumpReversal: { label: 'Разворот/продолжение пампа', badge: 'PUMPX', category: 'inefficiency', minRepeats: 40, detect: detectPumpReversal },
+  dumpReversal: { label: 'Разворот/продолжение дампа', badge: 'DUMPX', category: 'inefficiency', minRepeats: 40, detect: detectDumpReversal },
+  compressionBreak: { label: 'Сжатие → расширение волатильности', badge: 'COMPR', category: 'inefficiency', minRepeats: 60, detect: detectCompressionBreak },
+  failedBreakout: { label: 'Ложный пробой диапазона', badge: 'FAILBRK', category: 'repeat', minRepeats: 40, detect: detectFailedBreakout }
 };
 
 // Человекочитаемое объяснение "почему сработало" — та же идея, что explainCoinForStrategy() у
@@ -3372,6 +3461,54 @@ function explainPatternEvent(ev) {
       ev.distancePct + '% от текущей цены — и цена к ней устойчиво приближается. Если стену пробьют, движение, скорее ' +
       'всего, продолжится в сторону пробоя (' + ev.direction + '). Confidence ' + ev.confidencePct + '%.';
   }
+  if (ev.detectorKey === 'densityBreak') {
+    return 'Стена ' + (ev.side === 'ask' ? 'на продажу' : 'на покупку') + ' у ' + fmtPrice(ev.priceLevel) + ' усохла на ' +
+      ev.shrinkPct + '%, из них ' + ev.eatenRatioPct + '% "съедено" реальными сделками (не просто снята) — цена уже прошла ' +
+      'уровень и не откатывает. Объём подтверждения ≈$' + ev.volumeUsd.toLocaleString('ru-RU') + '. Confidence ' + ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'densityAbsorption') {
+    return 'У уровня ' + fmtPrice(ev.priceLevel) + ' идёт поглощение: агрессивный объём ≈$' + ev.volumeUsd.toLocaleString('ru-RU') +
+      ' при слабом продвижении цены (absorption ratio ' + ev.absorptionRatio + '), от стены осталось ' + ev.remainingLiquidityRatioPct +
+      '%. Текущее состояние: ' + ev.state + ' (это НЕ автоматический сигнал на вход). Confidence ' + ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'liquiditySweep') {
+    return 'Снятие ликвидности: экстремум ' + fmtPrice(ev.sweptLevel) + ' был пробит и тут же отыгран назад (reclaim ' +
+      ev.reclaimPct + '% диапазона), встречный поток истощился на ' + ev.exhaustionRatioPct + '% — похоже на выбивание ' +
+      'стопов/ликвидности, а не продолжение движения. Объём ≈$' + ev.volumeUsd.toLocaleString('ru-RU') + '. Confidence ' + ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'impulsePullbackContinuation') {
+    return 'Импульс ' + ev.impulseMovePct + '% → откат ' + ev.pullbackRatioPct + '% от импульса → продолжение в исходном ' +
+      'направлении с возобновившимся потоком (объём фазы продолжения ≈$' + ev.volumeUsd.toLocaleString('ru-RU') + '). Confidence ' + ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'priceVolumeInefficiency') {
+    return 'Движение цены ' + ev.movePct + '% (z-score ' + ev.priceZ + ') не подтверждено пропорциональным объёмом ' +
+      '(volume z-score ' + ev.volumeZ + ') — тип: ' + ev.inefficiencyType + '. Confidence ' + ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'densityAbsorptionBreakout') {
+    return 'Уровень ' + fmtPrice(ev.priceLevel) + ' протестирован ' + ev.testCount + ' раз за ' + ev.absorptionDurationS +
+      'с, от заявки осталось ' + ev.remainingLiquidityRatioPct + '% — и на этот раз пробит с подтверждающим объёмом ≈$' +
+      ev.volumeUsd.toLocaleString('ru-RU') + '. Confidence ' + ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'pumpReversal') {
+    return ev.pumpType === 'PUMP_REVERSAL'
+      ? ('Памп ' + ev.movePct + '% (z-score ' + ev.moveZ + ') замедляется, покупательное давление падает — признаки истощения. Confidence ' + ev.confidencePct + '%.')
+      : ('Памп ' + ev.movePct + '% (z-score ' + ev.moveZ + ') продолжается, поток покупок не ослабевает — признаков разворота нет, ' +
+        'это PUMP_CONTINUATION, не сигнал на шорт. Confidence ' + ev.confidencePct + '% (потолок ' + ev.maxConfidence + '%).');
+  }
+  if (ev.detectorKey === 'dumpReversal') {
+    return ev.dumpType === 'DUMP_REVERSAL'
+      ? ('Дамп ' + ev.movePct + '% (z-score ' + ev.moveZ + ') замедляется, давление продавцов падает — признаки истощения. Confidence ' + ev.confidencePct + '%.')
+      : ('Дамп ' + ev.movePct + '% (z-score ' + ev.moveZ + ') продолжается, поток продаж не ослабевает — признаков разворота нет, ' +
+        'это DUMP_CONTINUATION, не сигнал на лонг. Confidence ' + ev.confidencePct + '% (потолок ' + ev.maxConfidence + '%).');
+  }
+  if (ev.detectorKey === 'compressionBreak') {
+    return 'Волатильность была на ' + ev.volatilityPercentile + '-м перцентиле собственной истории монеты (сжатие), затем — ' +
+      'расширение с volume z-score ' + ev.volumeZ + ' и пробоем диапазона сжатия. Confidence ' + ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'failedBreakout') {
+    return 'Цена проколола диапазон за уровень ' + fmtPrice(ev.level) + ', но вернулась внутрь диапазона с подтверждающим ' +
+      'встречным объёмом ≈$' + ev.reclaimVolumeUsd.toLocaleString('ru-RU') + ' — похоже на ложный пробой. Confidence ' + ev.confidencePct + '%.';
+  }
   return '';
 }
 
@@ -3403,6 +3540,41 @@ function savePatternHistory() {
   try { persistSet(PATTERN_HISTORY_KEY, JSON.stringify(patternHistory)); } catch (e) { /* переживём без сохранения между сессиями */ }
 }
 
+// Веса скоринга 10 новых алгоритмов (rebuild "Алгоритмы", 2026-09) — другой словарь факторов
+// (context/trigger/flow/orderbook/volume/history), явно запрошенный пользователем, а не
+// PATTERN_SCORE_WEIGHTS 13 исходных детекторов (repeatability/stability/...). Без этой развилки
+// registerPatternEvent/подтверждение ниже применили бы к их factors чужие веса молча (NaN-риска
+// нет — scorePatternEvent клампит отсутствующие ключи к 0, но score вышел бы неверным).
+const NEW_ALGO_DETECTOR_KEYS = new Set([
+  'densityBreak', 'densityAbsorption', 'liquiditySweep', 'impulsePullbackContinuation',
+  'priceVolumeInefficiency', 'densityAbsorptionBreakout', 'pumpReversal', 'dumpReversal',
+  'compressionBreak', 'failedBreakout'
+]);
+function patternWeightsFor(detectorKey) {
+  return NEW_ALGO_DETECTOR_KEYS.has(detectorKey) ? MexcCore.ALGO_SCORE_WEIGHTS : undefined;
+}
+
+// DATA QUALITY (ТЗ) — протухшие данные (WS тихо завис) или аномальный снимок стакана (bid>=ask,
+// спред за гранью разумного) не должны порождать сигнал вообще, ни у старых, ни у новых детекторов.
+// Дешёвая, общая для всех детекторов проверка — считается один раз на монету за цикл, не 23 раза.
+const PATTERN_MAX_DATA_AGE_MS = 15000;
+const PATTERN_MAX_SPREAD_PCT = 5;
+function symbolDataIsFresh(symbol, now) {
+  const trades = tier2Trades.get(symbol);
+  const depth = tier2Depth.get(symbol);
+  const lastTradeAt = (trades && trades.length) ? trades[trades.length - 1].t : null;
+  const lastDepth = (depth && depth.length) ? depth[depth.length - 1] : null;
+  if (lastTradeAt == null && !lastDepth) return false; // вообще нет данных — не о чем детектить
+  if (lastTradeAt != null && now - lastTradeAt > PATTERN_MAX_DATA_AGE_MS) return false;
+  if (lastDepth) {
+    if (now - lastDepth.t > PATTERN_MAX_DATA_AGE_MS) return false;
+    if (!(lastDepth.bestBid > 0) || !(lastDepth.bestAsk > 0) || lastDepth.bestAsk <= lastDepth.bestBid) return false;
+    const mid = (lastDepth.bestBid + lastDepth.bestAsk) / 2;
+    if ((lastDepth.bestAsk - lastDepth.bestBid) / mid * 100 > PATTERN_MAX_SPREAD_PCT) return false;
+  }
+  return true;
+}
+
 const patternActiveSessions = new Map(); // symbol+'|'+detectorKey -> {historyId, lastSeenAt}
 
 // Регистрирует эпизод паттерна. Продолжающийся (тот же symbol+detectorKey держится без перерыва
@@ -3420,18 +3592,20 @@ function registerPatternEvent(ev, now) {
     ev.historyId = session.historyId;
     return;
   }
+  const weights = patternWeightsFor(ev.detectorKey);
+  const historyFactorKey = weights ? 'history' : 'pastSuccess'; // новые алгоритмы называют этот фактор 'history' (ALGO_SCORE_WEIGHTS), а не 'pastSuccess'
   const pastSuccess = MexcCore.computePastSuccessRate(patternHistory, ev.detectorKey, {
     checkpointKey: 'at2m', successThresholdPct: PATTERN_SUCCESS_THRESHOLD_PCT
   });
-  ev.factors.pastSuccess = pastSuccess ? pastSuccess.rate : 0;
-  MexcCore.applyPatternScore(ev);
+  ev.factors[historyFactorKey] = pastSuccess ? pastSuccess.rate : 0;
+  MexcCore.applyPatternScore(ev, weights);
 
   const id = ++patternHistorySeq;
   ev.historyId = id;
   patternHistory.push({
     id: id, symbol: ev.symbol, detectorKey: ev.detectorKey, detectedAt: now,
     direction: ev.direction, confidencePct: ev.confidencePct, scoreAtSignal: ev.scoreAtSignal,
-    priceAtSignal: ev.priceAtSignal, repeatCount: ev.repeatCount,
+    priceAtSignal: ev.priceAtSignal, repeatCount: ev.repeatCount, marketRegime: ev.marketRegime || null,
     outcome: { at30s: null, at2m: null, at10m: null, at30m: null }
   });
   patternHistory = MexcCore.prunePatternHistory(patternHistory, {
@@ -3508,7 +3682,21 @@ function renderDetectorFilterRow() {
 
 function runPatternDetectors() {
   const events = [];
+  const cycleNow = Date.now();
   watchlist.forEach(function (entry, symbol) {
+    // DATA QUALITY gate — протухшие/аномальные данные не детектим вовсе, ни старыми, ни новыми
+    // алгоритмами (см. symbolDataIsFresh выше).
+    if (!symbolDataIsFresh(symbol, cycleNow)) return;
+    // Честный market regime tag (TRENDING/RANGING/HIGH_VOLATILITY/LOW_VOLATILITY/ILLIQUID) —
+    // считается один раз на монету за цикл через тот же Feature Engine, что уже переиспользуют
+    // priceVolumeInefficiency/compressionBreak, и вешается на КАЖДОЕ найденное на этой монете
+    // событие; пока только для отчётности (validation-split), не влияет на сам score (см. план).
+    const trades = tier2Trades.get(symbol);
+    let regime = null;
+    if (trades && trades.length >= 2) {
+      const features = MexcCore.computeFeatures(trades, tier2Depth.get(symbol), cycleNow);
+      regime = MexcCore.classifyRegime(trades, features);
+    }
     Object.keys(DETECTOR_DEFS).forEach(function (key) {
       if (disabledDetectorKeys.has(key)) return;
       let ev;
@@ -3518,7 +3706,10 @@ function runPatternDetectors() {
         logE('Pattern', key + '/' + symbol + ': детектор упал с исключением — ' + e.message);
         return;
       }
-      if (ev && ev.scoreAtSignal >= PATTERN_MIN_SCORE) events.push(ev);
+      if (ev && ev.scoreAtSignal >= PATTERN_MIN_SCORE) {
+        ev.marketRegime = regime;
+        events.push(ev);
+      }
     });
   });
 
@@ -3534,7 +3725,7 @@ function runPatternDetectors() {
   events.forEach(function (ev) {
     if (bySymbol.get(ev.symbol).length > 1) {
       ev.factors.confirmation = 1;
-      MexcCore.applyPatternScore(ev);
+      MexcCore.applyPatternScore(ev, patternWeightsFor(ev.detectorKey));
     }
   });
 
