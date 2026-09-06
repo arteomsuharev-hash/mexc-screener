@@ -1509,6 +1509,60 @@ function ratingCellHtml(c) {
   return '<div class="rating-cell"><span class="rating-pct ' + (chg >= 0 ? 'up' : 'down') + '">' + score + '%</span>' + sparklineSvg(c.symbol, chg) + '</div>';
 }
 
+// "Активные алгоритмы" в правой панели выбранной монеты (редизайн 2026-09, по образцу макета) —
+// тот же живой срез activePatternEvents, что и бейджи в таблице (algoBadgesCellHtml), просто в
+// виде списка название/сигнал/score для ОДНОЙ выбранной монеты. Честно пусто для монет вне
+// Tier-2 watchlist — как и бейджи в таблице, ничего не выдумывает.
+const ACTIVE_ALGOS_PANEL_MAX = 4;
+function activeAlgosPanelHtml(symbol) {
+  const evs = [];
+  for (let i = 0; i < activePatternEvents.length && evs.length < ACTIVE_ALGOS_PANEL_MAX; i++) {
+    if (activePatternEvents[i].symbol === symbol) evs.push(activePatternEvents[i]);
+  }
+  if (!evs.length) return '<div class="active-algos-empty">Нет активных алгоритмов сейчас</div>';
+  return evs.map(function (ev) {
+    const def = DETECTOR_DEFS[ev.detectorKey];
+    const dirCls = ev.direction === 'LONG' ? 'up' : ev.direction === 'SHORT' ? 'down' : 'neutral';
+    const dirText = ev.direction === 'LONG' ? 'LONG' : ev.direction === 'SHORT' ? 'SHORT' : 'NEUTRAL';
+    return '<div class="active-algo-row"><span class="active-algo-dot ' + dirCls + '"></span>' +
+      '<span class="active-algo-name">' + ((def && def.label) || ev.detectorKey) + '</span>' +
+      '<span class="active-algo-signal ' + dirCls + '">' + dirText + '</span>' +
+      '<span class="active-algo-score">' + Math.round(ev.confidencePct) + '%</span></div>';
+  }).join('');
+}
+
+function isTier2Watchlisted(symbol) {
+  return symbol.indexOf('BINANCE:') === 0 ? binanceWatchlist.has(symbol) : watchlist.has(symbol);
+}
+function standingWallForSymbol(symbol) {
+  return symbol.indexOf('BINANCE:') === 0 ? detectStandingWallBinance(symbol) : detectStandingWall(symbol);
+}
+
+// "Краткая статистика" в правой панели — только реальные, уже посчитанные где-то ещё числа
+// (никаких новых тяжёлых вычислений на каждый рендер): объём/изменение уже на объекте монеты,
+// волатильность 60с — то же metricsFromSnaps, что раньше было отдельной колонкой таблицы.
+// «Плотность»/«Ликвидность» — честные текстовые категории по реальным сигналам (стена в стакане
+// Tier-2 / объём 24ч), не выдуманные проценты и не «точный» анализ там, где данных физически нет.
+function miniStatsListHtml(c) {
+  const inWatchlist = isTier2Watchlisted(c.symbol);
+  const wall = inWatchlist ? standingWallForSymbol(c.symbol) : null;
+  const density = wall ? 'HIGH' : (inWatchlist ? 'LOW' : '—');
+  const vol24 = c.vol24 || 0;
+  const liquidity = vol24 >= 5000000 ? 'HIGH' : vol24 >= 500000 ? 'MED' : 'LOW';
+  const chg = c.change24 || 0;
+  const rows = [
+    ['Объём 24ч', fmtNum(vol24), ''],
+    ['Изм. 24ч', (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%', chg >= 0 ? 'up' : 'down'],
+    ['Волатильность', (c.vol60s || 0).toFixed(2) + '%', ''],
+    ['Плотность', density, ''],
+    ['Ликвидность', liquidity, '']
+  ];
+  return rows.map(function (r) {
+    return '<div class="mini-stat-row"><span class="mini-stat-label">' + r[0] + '</span>' +
+      '<span class="mini-stat-value' + (r[2] ? ' ' + r[2] : '') + '">' + r[1] + '</span></div>';
+  }).join('');
+}
+
 function renderTable() {
   const tbody = document.getElementById('tableBody');
   const grid = document.getElementById('gridView');
@@ -2818,6 +2872,10 @@ function updateInfoPanel() {
     gaugeFill.style.color = 'var(--text-muted)';
     if (algoPanel) algoPanel.style.setProperty('--gauge-glow', 'rgba(255,255,255,.06)');
   }
+  const algosListEl = document.getElementById('activeAlgosList');
+  if (algosListEl) algosListEl.innerHTML = activeAlgosPanelHtml(c.symbol);
+  const statsListEl = document.getElementById('miniStatsList');
+  if (statsListEl) statsListEl.innerHTML = miniStatsListHtml(c);
   updateFavButton();
   loadMyOrdersForCoin(c);
   updateDensityLevelsPanel(c);

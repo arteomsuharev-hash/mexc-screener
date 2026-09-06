@@ -230,6 +230,34 @@
             <div id="myOrdersList" style="font-size:12px;color:var(--text-secondary);">—</div>
           </div>
         </div>
+        <div class="right-panel">
+          <div class="algo-panel">
+            <div class="gauge-container">
+              <svg width="140" height="80" viewBox="0 0 140 80">
+                <path class="gauge-bg" d="M 10 70 A 60 60 0 0 1 130 70"></path>
+                <path class="gauge-fill" id="gaugeFill" d="M 10 70 A 60 60 0 0 1 130 70" stroke-dasharray="0 188.5"></path>
+              </svg>
+              <div class="gauge-text"><div class="gauge-value" id="gaugeValue">--</div><div class="gauge-label" data-i18n>из 100</div></div>
+            </div>
+            <div class="algo-status" id="algoStatus"><i class="ri-loader-line"></i> <span data-i18n>Ожидание данных</span></div>
+            <div class="panel-subtitle" data-i18n>Активные алгоритмы</div>
+            <div class="active-algos-list" id="activeAlgosList"></div>
+            <div class="panel-subtitle" data-i18n>Краткая статистика</div>
+            <div class="mini-stats-list" id="miniStatsList"></div>
+            <button class="algo-fav" id="addFav"><i class="ri-star-line"></i> <span data-i18n>Добавить в избранное</span></button>
+          </div>
+          <div class="trades-panel">
+            <div class="orderbook-mini" id="orderbookMini" style="display:none;">
+              <div class="panel-title"><span data-i18n>Стакан</span><span id="orderbookAge"></span></div>
+              <div class="orderbook-rows" id="orderbookRows"></div>
+            </div>
+            <div class="orderbook-unavailable" id="orderbookUnavailable" style="display:none;">
+              <i class="ri-stack-line"></i> <span data-i18n>Стакан недоступен — монета не в списке глубокого анализа (см. «Паттерны»)</span>
+            </div>
+            <div class="panel-title"><span data-i18n>Последние сделки</span><span id="tradesCount">0</span></div>
+            <div class="trades-list" id="tradesList"></div>
+          </div>
+        </div>
         <div class="chart-area">
           <div class="chart-header">
             <div class="timeframes">
@@ -318,30 +346,6 @@
                 </div>
               </div>
             </div>
-          </div>
-        </div>
-        <div class="right-panel">
-          <div class="trades-panel">
-            <div class="orderbook-mini" id="orderbookMini" style="display:none;">
-              <div class="panel-title"><span data-i18n>Стакан</span><span id="orderbookAge"></span></div>
-              <div class="orderbook-rows" id="orderbookRows"></div>
-            </div>
-            <div class="orderbook-unavailable" id="orderbookUnavailable" style="display:none;">
-              <i class="ri-stack-line"></i> <span data-i18n>Стакан недоступен — монета не в списке глубокого анализа (см. «Паттерны»)</span>
-            </div>
-            <div class="panel-title"><span data-i18n>Последние сделки</span><span id="tradesCount">0</span></div>
-            <div class="trades-list" id="tradesList"></div>
-          </div>
-          <div class="algo-panel">
-            <div class="gauge-container">
-              <svg width="140" height="80" viewBox="0 0 140 80">
-                <path class="gauge-bg" d="M 10 70 A 60 60 0 0 1 130 70"></path>
-                <path class="gauge-fill" id="gaugeFill" d="M 10 70 A 60 60 0 0 1 130 70" stroke-dasharray="0 188.5"></path>
-              </svg>
-              <div class="gauge-text"><div class="gauge-value" id="gaugeValue">--</div><div class="gauge-label" data-i18n>из 100</div></div>
-            </div>
-            <div class="algo-status" id="algoStatus"><i class="ri-loader-line"></i> <span data-i18n>Ожидание данных</span></div>
-            <button class="algo-fav" id="addFav"><i class="ri-star-line"></i> <span data-i18n>Добавить в избранное</span></button>
           </div>
         </div>
       </div>

@@ -1491,13 +1491,14 @@ body {
 .right-panel {
   width: auto; display: flex; flex-direction: column; flex-shrink: 0;
   background: linear-gradient(180deg, rgba(255,255,255,.015), transparent 140px);
-  /* Раньше без ограничения по высоте .right-panel (сделки + шкала алгоритмов) забирал себе
-     сколько угодно места в вертикальной колонке справа — график сжимался до пары сотен пикселей.
-     Капаем высоту и даём свой скролл, чтобы график (.chart-area, flex:3) стабильно получал
-     основную часть пространства независимо от количества сделок в ленте. */
-  max-height: 210px; overflow-y: auto;
+  border-bottom: 1px solid var(--border-color);
+  /* Правая колонка (редизайн 2026-09): алгоритмы+статистика выбранной монеты идут ПЕРЕД большим
+     графиком (.chart-area, flex:5 min-height:460 ниже) — тот же порядок, что в макете
+     (шапка монеты → активные алгоритмы → статистика → график). Капаем высоту и даём свой скролл,
+     чтобы график всё равно стабильно получал основную часть пространства колонки. */
+  max-height: 300px; overflow-y: auto;
 }
-.trades-panel { flex: 1; border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column; overflow: hidden; }
+.trades-panel { flex: 1; min-height: 90px; display: flex; flex-direction: column; overflow: hidden; }
 .panel-title {
   padding: 10px 16px; font-size: 11px; font-weight: 600;
   color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px;
@@ -1565,14 +1566,14 @@ body {
 }
 .trades-empty i { font-size: 22px; opacity: .6; }
 
-.algo-panel { position: relative; height: 168px; padding: 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; }
+.algo-panel { position: relative; flex-shrink: 0; padding: 14px 16px; display: flex; flex-direction: column; align-items: center; border-bottom: 1px solid var(--border-color); }
 .algo-panel::before {
   content: ''; position: absolute; top: -20px; left: 50%; transform: translateX(-50%);
   width: 200px; height: 200px; border-radius: 50%; pointer-events: none;
   background: radial-gradient(circle, var(--gauge-glow, rgba(0,192,118,.1)), transparent 70%);
   transition: background .4s ease;
 }
-.gauge-container { position: relative; width: 100%; max-width: 140px; aspect-ratio: 140 / 80; margin-bottom: 8px; }
+.gauge-container { position: relative; width: 100%; max-width: 120px; aspect-ratio: 140 / 80; margin-bottom: 6px; }
 .gauge-container svg { width: 100%; height: 100%; display: block; overflow: visible; }
 .gauge-bg { fill: none; stroke: var(--bg-card); stroke-width: 12; }
 .gauge-fill {
@@ -1582,11 +1583,36 @@ body {
   color: var(--green);
 }
 .gauge-text { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); text-align: center; }
-.gauge-value { font-size: 32px; font-weight: 700; font-family: var(--font-mono); line-height: 1; text-shadow: 0 0 18px rgba(255,255,255,.12); }
+.gauge-value { font-size: 28px; font-weight: 700; font-family: var(--font-mono); line-height: 1; text-shadow: 0 0 18px rgba(255,255,255,.12); }
 .gauge-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
-.algo-status { position: relative; display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--green); font-weight: 500; }
+.algo-status { position: relative; display: flex; align-items: center; gap: 6px; margin-bottom: 10px; font-size: 12px; color: var(--green); font-weight: 500; }
+.panel-subtitle {
+  position: relative; width: 100%; font-size: 10px; font-weight: 700; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: .06em; margin: 6px 0 6px;
+}
+/* Активные алгоритмы у выбранной монеты — реальные события Tier-2 (activePatternEvents), та же
+   правда/пусто-если-нечего-показать логика, что и у бейджей в таблице (algoBadgesCellHtml). */
+.active-algos-list { position: relative; width: 100%; display: flex; flex-direction: column; gap: 5px; }
+.active-algos-empty { font-size: 11px; color: var(--text-muted); padding: 4px 0; }
+.active-algo-row { display: flex; align-items: center; gap: 7px; font-size: 11.5px; padding: 3px 0; }
+.active-algo-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--text-muted); }
+.active-algo-dot.up { background: var(--green); box-shadow: 0 0 6px -1px var(--green); }
+.active-algo-dot.down { background: var(--red); box-shadow: 0 0 6px -1px var(--red); }
+.active-algo-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+.active-algo-signal { font-weight: 700; font-size: 10px; letter-spacing: .03em; }
+.active-algo-signal.up { color: var(--green); }
+.active-algo-signal.down { color: var(--red); }
+.active-algo-signal.neutral { color: var(--text-muted); }
+.active-algo-score { font-family: var(--font-mono); font-weight: 700; color: var(--text-primary); width: 32px; text-align: right; }
+/* Краткая статистика — только уже посчитанные в другом месте реальные числа (см. miniStatsListHtml). */
+.mini-stats-list { position: relative; width: 100%; display: flex; flex-direction: column; gap: 3px; }
+.mini-stat-row { display: flex; align-items: center; justify-content: space-between; font-size: 11.5px; padding: 2px 0; }
+.mini-stat-label { color: var(--text-muted); }
+.mini-stat-value { font-family: var(--font-mono); font-weight: 600; color: var(--text-primary); }
+.mini-stat-value.up { color: var(--green); }
+.mini-stat-value.down { color: var(--red); }
 .algo-fav {
-  position: relative; margin-top: auto; width: 100%; padding: 8px;
+  position: relative; margin-top: 12px; width: 100%; padding: 8px;
   background: var(--bg-card); border: 1px solid var(--border-color);
   color: var(--text-primary); border-radius: 4px; cursor: pointer;
   font-size: 12px; display: flex; align-items: center; justify-content: center;
