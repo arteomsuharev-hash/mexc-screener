@@ -693,13 +693,14 @@ const STRATEGY_DEFS = {
   algo: {
     label: 'Алгоритмы',
     badge: 'ALGO',
-    short: 'Watchlist-монеты: сработал один из 10 микроструктурных алгоритмов (стр. «Паттерны»). Остальные: равномерный оборот при сдержанном движении цены.',
-    desc: 'Для монет из watchlist глубокого анализа (Tier 2, см. стр. «Паттерны») сигнал строится на 10 ' +
-      'приоритетных микроструктурных алгоритмах, посчитанных по РЕАЛЬНЫМ сделкам и стакану (Density Break, ' +
-      'Density Absorption, Liquidity Sweep, Impulse-Pullback-Continuation, Price/Volume Inefficiency, ' +
-      'Density-Absorption-Breakout, Pump/Dump Reversal, Compression Break, Failed Breakout) — если хотя бы ' +
-      'один сейчас активен на монете, это и есть матч (подробности — в объяснении конкретной монеты и на стр. ' +
-      '«Паттерны»). Для остальных пар (нет подписки на стакан/сделки — физический лимит MEXC на потоки ' +
+    short: 'Watchlist-монеты: сработал один из 16 микроструктурных алгоритмов (стр. «Паттерны»). Остальные: равномерный оборот при сдержанном движении цены.',
+    desc: 'Для монет из watchlist глубокого анализа (Tier 2, см. стр. «Паттерны») сигнал строится на 16 ' +
+      'микроструктурных алгоритмах, посчитанных по РЕАЛЬНЫМ сделкам и стакану (Density Break, Density ' +
+      'Absorption, Liquidity Sweep, Impulse-Pullback-Continuation, Price/Volume Inefficiency, Density-' +
+      'Absorption-Breakout, Pump/Dump Reversal, Compression Break, Failed Breakout, Volume Anomaly, Liquidity ' +
+      'Withdrawal, Possible Hidden Absorption, Cross-Exchange Divergence, Cyclical Pattern, Time-Based ' +
+      'Impulse) — если хотя бы один сейчас активен на монете, это и есть матч (подробности — в объяснении ' +
+      'конкретной монеты и на стр. «Паттерны»). Для остальных пар (нет подписки на стакан/сделки — физический лимит MEXC на потоки ' +
       'соединения) используется прежняя тиковая эвристика: ищем пары с ликвидностью не хуже среднерыночной ' +
       '(объём 24ч выше нижних ~35% пар), у которых цена почти не отклоняется сразу на всех трёх окнах — 5с, 30с ' +
       'и 60с, и скорость оборота между этими окнами РАВНОМЕРНАЯ (боты/маркет-мейкеры обычно дробят активность ' +
@@ -2952,6 +2953,10 @@ const watchlistEvictStreaks = new Map();
 // выходе монеты из watchlist (см. unsubscribeWatchlistSymbol).
 const densityAbsorptionBreakoutState = new Map(); // symbol -> state
 const failedBreakoutState = new Map();            // symbol -> state
+// То же — для алгоритмов #14/#15 (rebuild "Алгоритмы" 11-16, 2026-09).
+const possibleHiddenAbsorptionState = new Map();  // symbol -> state
+const crossExchangeDivergenceState = new Map();   // symbol -> {[exchangeId]: state}
+const cyclicalTimeWindowState = new Map();        // symbol -> {bucketKey, windowStartAt, windowStartPrice} — текущее незакрытое окно #16
 const watchlistCooldowns = new Map(); // symbol -> until (ms) — временно исключена из кандидатов после WATCHLIST_MAX_RECONNECT_FAILS подряд
 
 // Здоровье Tier 2 — счётчики для будущей панели диагностики (этап 7 плана), уже сейчас доступны
@@ -3132,6 +3137,9 @@ function unsubscribeWatchlistSymbol(symbol) {
   watchlistEvictStreaks.delete(symbol);
   densityAbsorptionBreakoutState.delete(symbol);
   failedBreakoutState.delete(symbol);
+  possibleHiddenAbsorptionState.delete(symbol);
+  crossExchangeDivergenceState.delete(symbol);
+  cyclicalTimeWindowState.delete(symbol);
   logI('Watchlist', symbol + ' исключена из глубокого анализа');
 }
 
@@ -3376,6 +3384,176 @@ function detectFailedBreakout(symbol) {
   return ev;
 }
 
+// ------------------------------------------------------------------------------------------
+// Персистентная библиотека эпизодов для CYCLICAL_PATTERN (#12) и статистика временных бакетов
+// для REPEATING_TIME_BASED_IMPULSE (#16) — тот же localStorage-идиом, что и patternHistory (см.
+// ниже). Ключевой принцип "без look-ahead" держит не хранилище само по себе, а РАЗДЕЛЕНИЕ во
+// времени между "записать эпизод/окно" (сразу) и "заполнить его исход" (строго позже, отдельным
+// sweep) — см. sweepCyclicalOutcomes/flushTimeWindowIfDue ниже.
+// ------------------------------------------------------------------------------------------
+const CYCLICAL_LIBRARY_KEY = 'mexc_cyclical_library';
+const CYCLICAL_OUTCOME_HORIZON_MS = 120000; // 2 минуты — тот же горизонт, что at2m у общей истории паттернов
+
+let cyclicalLibrary = (function loadCyclicalLibrary() {
+  try {
+    const raw = localStorage.getItem(CYCLICAL_LIBRARY_KEY);
+    const obj = raw ? JSON.parse(raw) : {};
+    return (obj && typeof obj === 'object') ? obj : {};
+  } catch (e) { return {}; }
+})();
+function saveCyclicalLibrary() {
+  try { persistSet(CYCLICAL_LIBRARY_KEY, JSON.stringify(cyclicalLibrary)); } catch (e) { /* переживём без сохранения между сессиями */ }
+}
+// Раз в 30с проверяет ещё не закрытые эпизоды (outcomeMovePct == null) и, если с их момента прошло
+// достаточно времени, заполняет исход РЕАЛЬНО НАБЛЮДАВШЕЙСЯ с тех пор ценой (Tier2 буфер, если
+// монета всё ещё в watchlist; иначе — текущая цена из coinMap, та же честная деградация, что и у
+// sweepPatternOutcomes).
+function sweepCyclicalOutcomes() {
+  const now = Date.now();
+  let changed = false;
+  Object.keys(cyclicalLibrary).forEach(function (symbol) {
+    (cyclicalLibrary[symbol] || []).forEach(function (ep) {
+      if (ep.outcomeMovePct != null || !ep.priceAtEpisode) return;
+      if (now - ep.t < CYCLICAL_OUTCOME_HORIZON_MS) return;
+      const trades = tier2Trades.get(symbol);
+      let priceAfter = null;
+      if (trades && trades.length) {
+        const since = trades.filter(function (tr) { return tr.t >= ep.t; });
+        if (since.length) priceAfter = since[since.length - 1].price;
+      }
+      if (priceAfter == null) {
+        const coin = coinMap.get(symbol);
+        if (coin && coin.price) priceAfter = coin.price;
+      }
+      if (priceAfter == null) return;
+      ep.outcomeMovePct = (priceAfter - ep.priceAtEpisode) / ep.priceAtEpisode;
+      changed = true;
+    });
+  });
+  if (changed) saveCyclicalLibrary();
+}
+setInterval(sweepCyclicalOutcomes, 30000);
+
+const TIME_BUCKET_STATS_KEY = 'mexc_time_bucket_stats';
+const TIME_WINDOW_MS = 15 * 60 * 1000; // гранулярность бакета (не гипотеза о периоде — см. MexcCore.timeBucketKeyFromDate)
+
+let timeBucketStats = (function loadTimeBucketStats() {
+  try {
+    const raw = localStorage.getItem(TIME_BUCKET_STATS_KEY);
+    const obj = raw ? JSON.parse(raw) : {};
+    return (obj && typeof obj === 'object') ? obj : {};
+  } catch (e) { return {}; }
+})();
+function saveTimeBucketStats() {
+  try { persistSet(TIME_BUCKET_STATS_KEY, JSON.stringify(timeBucketStats)); } catch (e) { /* переживём без сохранения между сессиями */ }
+}
+// Закрывает текущее 15-минутное окно РЕАЛЬНОГО времени (если оно действительно завершилось) и
+// записывает наблюдение в статистику соответствующего бакета; иначе просто заводит окно при первом
+// вызове для этой монеты. Вызывается из detectTimeBasedImpulse на каждый цикл — дёшево, без своего
+// отдельного таймера.
+function flushTimeWindowIfDue(symbol, now, price) {
+  const w = cyclicalTimeWindowState.get(symbol);
+  const bucketKey = MexcCore.timeBucketKeyFromDate(new Date(now));
+  if (!w) { cyclicalTimeWindowState.set(symbol, { bucketKey: bucketKey, windowStartAt: now, windowStartPrice: price }); return; }
+  if (now - w.windowStartAt < TIME_WINDOW_MS) return; // окно ещё не завершилось
+  const trades = tier2Trades.get(symbol) || [];
+  const windowTrades = trades.filter(function (tr) { return tr.t >= w.windowStartAt && tr.t < now; });
+  const volumeUsd = windowTrades.reduce(function (a, tr) { return a + tr.price * tr.qty; }, 0);
+  const movePct = w.windowStartPrice > 0 ? (price - w.windowStartPrice) / w.windowStartPrice : 0;
+  timeBucketStats[symbol] = timeBucketStats[symbol] || {};
+  timeBucketStats[symbol][w.bucketKey] = MexcCore.recordTimeBucketObservation(timeBucketStats[symbol][w.bucketKey], { volumeUsd: volumeUsd, movePct: movePct });
+  saveTimeBucketStats();
+  cyclicalTimeWindowState.set(symbol, { bucketKey: bucketKey, windowStartAt: now, windowStartPrice: price });
+}
+function symbolOverallMedianVolume(symbol) {
+  const buckets = timeBucketStats[symbol];
+  if (!buckets) return 0;
+  const medians = Object.keys(buckets).map(function (k) { return buckets[k].medianVolume; }).filter(function (v) { return v != null; });
+  return medians.length ? MexcCore.median(medians) : 0;
+}
+
+// ------------------------------------------------------------------------------------------
+// Алгоритмы #11-16 из ТЗ пользователя (rebuild "Алгоритмы", 2026-09, часть 2) — тот же
+// wrapper-паттерн, что и у #1-10 выше.
+// ------------------------------------------------------------------------------------------
+function detectVolumeAnomaly(symbol) {
+  const ev = MexcCore.detectVolumeAnomaly(tier2Trades.get(symbol), tier2Depth.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectLiquidityWithdrawal(symbol) {
+  const ev = MexcCore.detectLiquidityWithdrawal(tier2Depth.get(symbol), tier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.liquidityWithdrawal.minRepeats, lookback: 200
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPossibleHiddenAbsorption(symbol) {
+  const state = possibleHiddenAbsorptionState.get(symbol) || {};
+  const result = MexcCore.detectPossibleHiddenAbsorption(tier2Depth.get(symbol), tier2Trades.get(symbol), {}, state);
+  possibleHiddenAbsorptionState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+// symbol — "BTC/USDT" (MEXC). Ищем ту же базовую монету на РЕАЛЬНО подключённых биржах (см.
+// upsertExternalCoin — их ключ в coinMap "BINANCE:BTC/USDT", см. EXCHANGE_CONNECTORS/
+// exchangeConnections) — только споты (фьючерсные теги исключены, спецификация #15 просит именно
+// SPOT). Если ни одна биржа не подключена или на ней нет этой монеты — кандидатов нет, и алгоритм
+// честно не сработает (см. её же комментарий в core-utils.js).
+function crossExchangeCandidatesFor(symbol) {
+  const base = symbol.split('/')[0];
+  const candidates = [];
+  Object.keys(EXCHANGE_CONNECTORS).forEach(function (id) {
+    if (!exchangeConnections[id] || !exchangeConnections[id].connected) return;
+    EXCHANGE_CONNECTORS[id].exchangeTags.filter(function (tag) { return !/FUT$/.test(tag); }).forEach(function (tag) {
+      const coin = coinMap.get(tag + ':' + base + '/USDT');
+      if (coin && coin.price > 0) candidates.push({ exchange: tag, price: coin.price });
+    });
+  });
+  return candidates;
+}
+function detectCrossExchangeDivergence(symbol) {
+  const coin = coinMap.get(symbol);
+  if (!coin || !(coin.price > 0)) return null;
+  const candidates = crossExchangeCandidatesFor(symbol);
+  if (!candidates.length) return null;
+  const state = crossExchangeDivergenceState.get(symbol) || {};
+  const result = MexcCore.detectCrossExchangeDivergence(coin.price, candidates, { now: Date.now() }, state);
+  crossExchangeDivergenceState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectCyclicalPattern(symbol) {
+  const trades = tier2Trades.get(symbol);
+  const library = cyclicalLibrary[symbol] || [];
+  const result = MexcCore.detectCyclicalPattern(trades, library, {});
+  if (result.library !== library) {
+    // MexcCore.detectCyclicalPattern не знает про priceAtEpisode (не её забота) — проставляем его
+    // здесь, на свежезалогированной записи (последней в массиве); он нужен sweepCyclicalOutcomes
+    // для расчёта исхода.
+    const added = result.library[result.library.length - 1];
+    if (added && added.priceAtEpisode == null && trades && trades.length) added.priceAtEpisode = trades[trades.length - 1].price;
+    cyclicalLibrary[symbol] = result.library;
+    saveCyclicalLibrary();
+  }
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectTimeBasedImpulse(symbol) {
+  const coin = coinMap.get(symbol);
+  if (!coin || !(coin.price > 0)) return null;
+  const now = Date.now();
+  flushTimeWindowIfDue(symbol, now, coin.price);
+  const bucketKey = MexcCore.timeBucketKeyFromDate(new Date(now));
+  const stats = (timeBucketStats[symbol] || {})[bucketKey];
+  const ev = MexcCore.detectTimeBasedImpulse(stats, symbolOverallMedianVolume(symbol), coin.price, {});
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+
 const DETECTOR_DEFS = {
   repeatSize: { label: 'Идентичные размеры сделок', badge: 'SIZE', category: 'repeat', minRepeats: 5, detect: detectRepeatedTradeSizes },
   repeatInterval: { label: 'Идентичные интервалы', badge: 'INTVL', category: 'repeat', minRepeats: 5, detect: detectRepeatedIntervals },
@@ -3400,7 +3578,14 @@ const DETECTOR_DEFS = {
   pumpReversal: { label: 'Разворот/продолжение пампа', badge: 'PUMPX', category: 'inefficiency', minRepeats: 40, detect: detectPumpReversal },
   dumpReversal: { label: 'Разворот/продолжение дампа', badge: 'DUMPX', category: 'inefficiency', minRepeats: 40, detect: detectDumpReversal },
   compressionBreak: { label: 'Сжатие → расширение волатильности', badge: 'COMPR', category: 'inefficiency', minRepeats: 60, detect: detectCompressionBreak },
-  failedBreakout: { label: 'Ложный пробой диапазона', badge: 'FAILBRK', category: 'repeat', minRepeats: 40, detect: detectFailedBreakout }
+  failedBreakout: { label: 'Ложный пробой диапазона', badge: 'FAILBRK', category: 'repeat', minRepeats: 40, detect: detectFailedBreakout },
+  // Алгоритмы #11-16 из ТЗ пользователя (rebuild "Алгоритмы", 2026-09, часть 2).
+  volumeAnomaly: { label: 'Аномалия объёма', badge: 'VOLX', category: 'inefficiency', minRepeats: 40, detect: detectVolumeAnomaly },
+  liquidityWithdrawal: { label: 'Уход ликвидности', badge: 'LWITH', category: 'depth', minRepeats: 20, detect: detectLiquidityWithdrawal },
+  possibleHiddenAbsorption: { label: 'Возможное скрытое поглощение', badge: 'HIDDEN?', category: 'heuristic-lowconf', minRepeats: 2, detect: detectPossibleHiddenAbsorption },
+  crossExchangeDivergence: { label: 'Межбиржевое расхождение', badge: 'XDIV', category: 'inefficiency', minRepeats: 2, detect: detectCrossExchangeDivergence },
+  cyclicalPattern: { label: 'Циклический паттерн', badge: 'CYCLIC', category: 'cycle', minRepeats: 5, detect: detectCyclicalPattern },
+  timeBasedImpulse: { label: 'Временной паттерн активности', badge: 'TIME', category: 'cycle', minRepeats: 10, detect: detectTimeBasedImpulse }
 };
 
 // Человекочитаемое объяснение "почему сработало" — та же идея, что explainCoinForStrategy() у
@@ -3520,6 +3705,40 @@ function explainPatternEvent(ev) {
     return 'Цена проколола диапазон за уровень ' + fmtPrice(ev.level) + ', но вернулась внутрь диапазона с подтверждающим ' +
       'встречным объёмом ≈$' + ev.reclaimVolumeUsd.toLocaleString('ru-RU') + ' — похоже на ложный пробой. Confidence ' + ev.confidencePct + '%.';
   }
+  if (ev.detectorKey === 'volumeAnomaly') {
+    const volTxt = ev.eventType === 'BULLISH_VOLUME_EVENT' ? 'подтверждён движением цены вверх — бычье событие'
+      : ev.eventType === 'BEARISH_VOLUME_EVENT' ? 'подтверждён движением цены вниз — медвежье событие'
+      : 'но цена почти не сдвинулась при сбалансированном потоке — похоже на поглощение объёма, не сигнал само по себе';
+    return 'Необычный объём: z-score ' + ev.volumeZ + ', в ' + ev.relativeVolume + '× выше типичного для этой монеты (' +
+      ev.tradeCount + ' сделок). Объём ' + volTxt + '. Confidence ' + ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'liquidityWithdrawal') {
+    return 'Резко исчезла видимая ликвидность на стороне ' + (ev.side === 'ask' ? 'продажи' : 'покупки') + ' (усохла на ' +
+      ev.withdrawalRatioPct + '%), и ' + ev.reactionRatioPct + '% потока сделок с тех пор идёт в сторону возникшего вакуума — ' +
+      'НЕ утверждается спуфинг, только сам факт ухода ликвидности. Confidence ' + ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'possibleHiddenAbsorption') {
+    return '⚠ ЭВРИСТИКА (не подтверждённый факт): уровень ' + fmtPrice(ev.priceLevel) + ' выдержал ' + ev.replenishments +
+      ' цикла просадки/восстановления видимого объёма за ' + ev.durationS + 'с, при этом исполненный объём через него в ' +
+      ev.executedOverVisibleRatio + '× превышает видимую глубину, а цена так и не пробила уровень — похоже на скрытую крупную ' +
+      'заявку, но по публичному стакану MEXC подтвердить это напрямую нельзя. Confidence ' + ev.confidencePct + '% (потолок ' + ev.maxConfidence + '%).';
+  }
+  if (ev.detectorKey === 'crossExchangeDivergence') {
+    return 'Цена на ' + ev.exchange + ' (' + fmtPrice(ev.extPrice) + ') устойчиво расходится с MEXC (' + fmtPrice(ev.mexcPrice) +
+      ') уже ' + ev.persistedS + 'с: gross-спред ' + ev.grossSpreadPct + '%, net-спред после комиссий/проскальзывания ' +
+      ev.netSpreadPct + '%. REST-опрос раз в несколько секунд — не тиковые данные другой биржи. Confidence ' + ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'cyclicalPattern') {
+    return 'Текущая форма (импульс ' + ev.impulsePct + '% → пауза → движение) совпала с ' + ev.observedRepeats +
+      ' прошлыми закрытыми эпизодами этой же монеты, из которых в ' + ev.winratePct + '% случаев движение продолжилось в ту же ' +
+      'сторону (средний исход ' + ev.avgMovePct + '%, медианный ' + ev.medianMovePct + '%) — без использования будущих данных ' +
+      'этих прошлых эпизодов. Confidence ' + ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'timeBasedImpulse') {
+    return 'Эта монета статистически активизируется в этот временной интервал (UTC): по ' + ev.observations + ' реальным ' +
+      'наблюдениям объём в ' + ev.volumeMultiplier + '× выше обычного для неё, и в ' + ev.biasPct + '% случаев движение было ' +
+      'направленным в сторону ' + (ev.direction === 'LONG' ? 'роста' : 'падения') + '. Confidence ' + ev.confidencePct + '%.';
+  }
   return '';
 }
 
@@ -3559,7 +3778,9 @@ function savePatternHistory() {
 const NEW_ALGO_DETECTOR_KEYS = new Set([
   'densityBreak', 'densityAbsorption', 'liquiditySweep', 'impulsePullbackContinuation',
   'priceVolumeInefficiency', 'densityAbsorptionBreakout', 'pumpReversal', 'dumpReversal',
-  'compressionBreak', 'failedBreakout'
+  'compressionBreak', 'failedBreakout',
+  'volumeAnomaly', 'liquidityWithdrawal', 'possibleHiddenAbsorption', 'crossExchangeDivergence',
+  'cyclicalPattern', 'timeBasedImpulse'
 ]);
 function patternWeightsFor(detectorKey) {
   return NEW_ALGO_DETECTOR_KEYS.has(detectorKey) ? MexcCore.ALGO_SCORE_WEIGHTS : undefined;
@@ -3743,7 +3964,15 @@ function runPatternDetectors() {
   const now = Date.now();
   events.forEach(function (ev) { registerPatternEvent(ev, now); });
 
-  events.sort(function (a, b) { return b.scoreAtSignal - a.scoreAtSignal; });
+  // Приоритет показа: 16 новых микроструктурных алгоритмов (NEW_ALGO_DETECTOR_KEYS) — ВСЕГДА
+  // выше 13 старых детекторов, независимо от numeric score (явный пользовательский запрос);
+  // внутри каждой из двух групп — по убыванию score, как и раньше.
+  events.sort(function (a, b) {
+    const an = NEW_ALGO_DETECTOR_KEYS.has(a.detectorKey) ? 1 : 0;
+    const bn = NEW_ALGO_DETECTOR_KEYS.has(b.detectorKey) ? 1 : 0;
+    if (an !== bn) return bn - an;
+    return b.scoreAtSignal - a.scoreAtSignal;
+  });
   activePatternEvents = events;
   tier2Health.patternEventsActive = activePatternEvents.length;
   const badge = document.getElementById('navPatternBadge');

@@ -1954,6 +1954,430 @@
     return { event: event, state: state };
   }
 
+  // ------------------------------------------------------------------------------------------
+  // ALGORITHM #11 — VOLUME_ANOMALY
+  // Необычный объём САМ ПО СЕБЕ — не торговый сигнал (спецификация #11 требует это явно): событие
+  // всегда сопровождается классификацией BULLISH/BEARISH/ABSORPTION_NEUTRAL — подтверждён ли
+  // всплеск объёма пропорциональным движением цены в сторону доминирующего потока, или объём
+  // поглощён без движения (нейтрально/абсорбция), а не автоматически трактуется как сигнал.
+  // ------------------------------------------------------------------------------------------
+  function detectVolumeAnomaly(trades, depthSnapshots, opts) {
+    opts = opts || {};
+    const minVolumeZ = opts.minVolumeZ != null ? opts.minVolumeZ : 2.5;
+    const minRelativeVolume = opts.minRelativeVolume != null ? opts.minRelativeVolume : 3;
+    const bullishMovePct = opts.bullishMovePct != null ? opts.bullishMovePct : 0.005;
+    const dominantFlowRatio = opts.dominantFlowRatio != null ? opts.dominantFlowRatio : 0.65;
+    if (!trades || trades.length < 40) return null;
+    const recent = trades.slice(-(opts.lookback || 400));
+    const now = recent[recent.length - 1].t;
+    const features = computeFeatures(recent, depthSnapshots, now);
+    if (features.volume_zscore == null || features.relative_volume == null) return null;
+    if (features.volume_zscore < minVolumeZ && features.relative_volume < minRelativeVolume) return null;
+
+    const totalVol = features.buy_volume + features.sell_volume;
+    const buyRatio = totalVol > 1e-9 ? features.buy_volume / totalVol : 0.5;
+    const movePct = features.returns[60] != null ? features.returns[60] : (features.returns[30] || 0);
+    let eventType, direction;
+    if (buyRatio >= dominantFlowRatio && movePct >= bullishMovePct) { eventType = 'BULLISH_VOLUME_EVENT'; direction = 'LONG'; }
+    else if (buyRatio <= (1 - dominantFlowRatio) && movePct <= -bullishMovePct) { eventType = 'BEARISH_VOLUME_EVENT'; direction = 'SHORT'; }
+    else { eventType = 'ABSORPTION_NEUTRAL_EVENT'; direction = 'BOTH'; }
+
+    const factors = {
+      context: Math.min(1, features.relative_volume / (minRelativeVolume * 2)),
+      trigger: Math.min(1, features.volume_zscore / (minVolumeZ * 2)),
+      flow: Math.abs(buyRatio - 0.5) * 2,
+      orderbook: features.obi_L10 != null ? Math.min(1, Math.abs(features.obi_L10)) : 0.5,
+      volume: Math.min(1, features.relative_volume / (minRelativeVolume * 3)),
+      history: 0
+    };
+    const score = scorePatternEvent(factors, ALGO_SCORE_WEIGHTS);
+    return {
+      detectorKey: 'volumeAnomaly', direction: direction, eventType: eventType,
+      volumeZ: Math.round(features.volume_zscore * 100) / 100, relativeVolume: Math.round(features.relative_volume * 100) / 100,
+      tradeCount: features.trade_count, avgTradeSizeUsd: Math.round(features.average_trade_size),
+      movePct: Math.round(movePct * 10000) / 100, priceAtSignal: features.last_price,
+      scoreAtSignal: score, confidencePct: score, factors: factors
+    };
+  }
+
+  // ------------------------------------------------------------------------------------------
+  // ALGORITHM #13 — LIQUIDITY_WITHDRAWAL
+  // Резкое исчезновение ВИДИМОЙ суммарной ликвидности (bidVol/askVol снимка — уже сумма по всем
+  // полученным уровням, а не одна "стена", как в density break/absorption) на одной стороне книги
+  // рядом с ценой. НЕ называется "spoofing" — публичный стакан не даёт для этого доказательств
+  // (спецификация #13 требует именно это разграничение).
+  // ------------------------------------------------------------------------------------------
+  function detectLiquidityWithdrawal(depthSnapshots, trades, opts) {
+    opts = opts || {};
+    const lookback = opts.lookback || 200;
+    const minSnapshots = opts.minSnapshots || 20;
+    const minWithdrawalRatio = opts.minWithdrawalRatio != null ? opts.minWithdrawalRatio : 0.5;
+    if (!depthSnapshots || depthSnapshots.length < minSnapshots) return null;
+    const recent = depthSnapshots.slice(-lookback);
+    const cur = recent[recent.length - 1];
+    if (!cur.bestBid || !cur.bestAsk) return null;
+    const price = (cur.bestBid + cur.bestAsk) / 2;
+
+    const earlyCount = Math.max(3, Math.floor(recent.length / 3));
+    const early = recent.slice(0, earlyCount);
+    const earlyAsk = median(early.map(function (s) { return s.askVol; }));
+    const earlyBid = median(early.map(function (s) { return s.bidVol; }));
+    const curAsk = cur.askVol, curBid = cur.bidVol;
+    const askWithdrawalRatio = earlyAsk > 0 ? (earlyAsk - curAsk) / earlyAsk : 0;
+    const bidWithdrawalRatio = earlyBid > 0 ? (earlyBid - curBid) / earlyBid : 0;
+
+    let side = null, withdrawalRatio = 0;
+    if (askWithdrawalRatio >= minWithdrawalRatio && askWithdrawalRatio >= bidWithdrawalRatio) { side = 'ask'; withdrawalRatio = askWithdrawalRatio; }
+    else if (bidWithdrawalRatio >= minWithdrawalRatio) { side = 'bid'; withdrawalRatio = bidWithdrawalRatio; }
+    if (!side) return null;
+
+    const t0 = early[early.length - 1].t, t1 = cur.t;
+    const reactionSide = side === 'ask' ? 'buy' : 'sell'; // сторона потока, которая заполнила бы возникший вакуум
+    const windowTrades = (trades || []).filter(function (tr) { return tr.t >= t0 && tr.t <= t1; });
+    const reactionVol = windowTrades.filter(function (tr) { return tr.side === reactionSide; }).reduce(function (a, tr) { return a + tr.price * tr.qty; }, 0);
+    const totalVol = windowTrades.reduce(function (a, tr) { return a + tr.price * tr.qty; }, 0);
+    const reactionRatio = totalVol > 0 ? reactionVol / totalVol : 0.5;
+    if (reactionRatio < 0.55) return null; // ликвидность ушла, но подтверждающего потока в сторону вакуума нет — не событие
+
+    const factors = {
+      context: Math.min(1, (side === 'ask' ? earlyAsk : earlyBid) / 20000),
+      trigger: Math.min(1, withdrawalRatio),
+      flow: reactionRatio,
+      orderbook: Math.max(0, Math.min(1, 1 - (side === 'ask' ? curAsk / (earlyAsk || 1) : curBid / (earlyBid || 1)))),
+      volume: Math.min(1, totalVol / 10000),
+      history: 0
+    };
+    const score = scorePatternEvent(factors, ALGO_SCORE_WEIGHTS);
+    return {
+      detectorKey: 'liquidityWithdrawal', direction: side === 'ask' ? 'LONG' : 'SHORT', eventType: 'LIQUIDITY_WITHDRAWAL',
+      side: side, withdrawalRatioPct: Math.round(withdrawalRatio * 1000) / 10, reactionRatioPct: Math.round(reactionRatio * 1000) / 10,
+      volumeUsd: Math.round(totalVol), priceAtSignal: price, scoreAtSignal: score, confidencePct: score, factors: factors
+    };
+  }
+
+  // ------------------------------------------------------------------------------------------
+  // ALGORITHM #14 — POSSIBLE_HIDDEN_ABSORPTION
+  // Настоящий iceberg по публичному стакану гарантированно не найти (спецификация #14 требует
+  // признать это прямо) — поэтому НИКОГДА не утверждается "ICEBERG FOUND", только
+  // POSSIBLE_HIDDEN_ABSORPTION: лучший бид/аск многократно "просаживается" исполненными сделками
+  // и восстанавливается (replenishment) без пробоя уровня, а исполненный объём через уровень
+  // заметно превышает его видимую глубину. {event, state} контракт — то же честное состояние
+  // между вызовами, что у #6/#10 (единственный способ посчитать replenishment_count).
+  // ------------------------------------------------------------------------------------------
+  function detectPossibleHiddenAbsorption(depthSnapshots, trades, opts, state) {
+    opts = opts || {};
+    const priceTolerance = opts.priceTolerance || 0.0015;
+    const maxDistancePct = opts.maxDistancePct != null ? opts.maxDistancePct : 0.8;
+    const replenishRatio = opts.replenishRatio != null ? opts.replenishRatio : 0.6;
+    const depletedRatio = opts.depletedRatio != null ? opts.depletedRatio : 0.4;
+    const minReplenishments = opts.minReplenishments || 2;
+    const executedOverVisibleRatio = opts.executedOverVisibleRatio != null ? opts.executedOverVisibleRatio : 3;
+    const staleMs = opts.staleMs || 900000;
+    const maxConfidence = opts.maxConfidence != null ? opts.maxConfidence : 75; // эвристика без прямого доказательства — честный потолок, как у fakeLiquidity
+    state = state || {};
+    if (!depthSnapshots || !depthSnapshots.length) return { event: null, state: state };
+    const cur = depthSnapshots[depthSnapshots.length - 1];
+    if (!cur.bestBid || !cur.bestAsk) return { event: null, state: state };
+    const price = (cur.bestBid + cur.bestAsk) / 2;
+
+    if (state.tracked && cur.t - state.tracked.lastUpdateAt > staleMs) state.tracked = null;
+
+    const candidates = [
+      { side: 'bid', price: cur.bestBid, qty: (cur.bids && cur.bids[0]) ? cur.bids[0].q : 0 },
+      { side: 'ask', price: cur.bestAsk, qty: (cur.asks && cur.asks[0]) ? cur.asks[0].q : 0 }
+    ].filter(function (c) { return c.qty > 0 && Math.abs(c.price - price) / price * 100 <= maxDistancePct; });
+
+    let candidate = null;
+    if (state.tracked) candidate = candidates.filter(function (c) { return c.side === state.tracked.side; })[0] || null;
+    else candidate = candidates[0] || null;
+    if (!candidate) return { event: null, state: state };
+
+    const isSameTracked = !!(state.tracked && state.tracked.side === candidate.side &&
+      Math.abs(candidate.price - state.tracked.price) / state.tracked.price <= priceTolerance * 5);
+    if (!isSameTracked) {
+      state.tracked = {
+        side: candidate.side, price: candidate.price, initialQty: candidate.qty, lastQty: candidate.qty,
+        wasDepleted: false, replenishments: 0, firstSeenAt: cur.t, lastUpdateAt: cur.t
+      };
+      return { event: null, state: state }; // только что начали отслеживать — рано для событий
+    }
+
+    const tl = state.tracked;
+    tl.lastUpdateAt = cur.t;
+    const ratioNow = tl.initialQty > 0 ? candidate.qty / tl.initialQty : 0;
+    if (ratioNow < depletedRatio) tl.wasDepleted = true;
+    else if (tl.wasDepleted && ratioNow >= replenishRatio) { tl.replenishments++; tl.wasDepleted = false; }
+    tl.lastQty = candidate.qty;
+
+    const priceBrokeLevel = tl.side === 'bid' ? price < tl.price * (1 - priceTolerance) : price > tl.price * (1 + priceTolerance);
+    if (priceBrokeLevel) { state.tracked = null; return { event: null, state: state }; } // уровень пройден -> это уже не absorption, а обычный пробой
+
+    const sideForTrades = tl.side === 'bid' ? 'sell' : 'buy'; // агрессивная сторона, которая "ест" этот уровень
+    const windowTrades = (trades || []).filter(function (tr) {
+      return tr.t >= tl.firstSeenAt && Math.abs(tr.price - tl.price) / tl.price <= priceTolerance * 3 && tr.side === sideForTrades;
+    });
+    const executedVolumeUsd = windowTrades.reduce(function (a, tr) { return a + tr.price * tr.qty; }, 0);
+    const visibleUsd = tl.price * tl.initialQty;
+
+    if (tl.replenishments < minReplenishments) return { event: null, state: state };
+    if (visibleUsd <= 0 || executedVolumeUsd / visibleUsd < executedOverVisibleRatio) return { event: null, state: state };
+
+    const durationS = Math.round((cur.t - tl.firstSeenAt) / 1000);
+    const factors = {
+      context: Math.min(1, tl.replenishments / (minReplenishments * 2)),
+      trigger: Math.min(1, (executedVolumeUsd / visibleUsd) / (executedOverVisibleRatio * 2)),
+      flow: Math.min(1, executedVolumeUsd / 20000),
+      orderbook: Math.max(0, Math.min(1, tl.lastQty / tl.initialQty)),
+      volume: Math.min(1, executedVolumeUsd / 30000),
+      history: 0
+    };
+    let score = scorePatternEvent(factors, ALGO_SCORE_WEIGHTS);
+    score = Math.min(score, maxConfidence);
+    const event = {
+      detectorKey: 'possibleHiddenAbsorption', direction: tl.side === 'bid' ? 'LONG' : 'SHORT', eventType: 'POSSIBLE_HIDDEN_ABSORPTION',
+      isHeuristic: true, maxConfidence: maxConfidence,
+      side: tl.side, priceLevel: tl.price, replenishments: tl.replenishments, durationS: durationS,
+      executedOverVisibleRatio: Math.round((executedVolumeUsd / visibleUsd) * 10) / 10,
+      volumeUsd: Math.round(executedVolumeUsd), priceAtSignal: price,
+      scoreAtSignal: score, confidencePct: score, factors: factors
+    };
+    // НЕ сбрасываем state.tracked после срабатывания (в отличие от #6/#10) — absorption на этом
+    // уровне может продолжаться (ещё replenishment'ы); повторное открытие сигнала предотвращает
+    // session/cooldown-механика на стороне app.js (registerPatternEvent), не эта функция.
+    return { event: event, state: state };
+  }
+
+  // ------------------------------------------------------------------------------------------
+  // ALGORITHM #15 — CROSS_EXCHANGE_DIVERGENCE (для SPOT — локальная ценовая неэффективность, не
+  // абстрактный арбитраж). Чистая функция: сравнение цен + оценка издержек (комиссия+проскальзывание).
+  // Сама подписка на другие биржи и подбор кандидатов — на стороне app.js (там же живут
+  // exchangeConnections/coinMap), сюда передаются уже готовые {exchange, price} кандидаты. Если
+  // кандидатов нет (ни одна биржа не подключена/не найдена та же монета) — возвращает null, а не
+  // выдуманный сигнал (спецификация #15 требует это явно).
+  // ------------------------------------------------------------------------------------------
+  function detectCrossExchangeDivergence(mexcPrice, candidates, opts, state) {
+    opts = opts || {};
+    const feeRatePerSide = opts.feeRatePerSide != null ? opts.feeRatePerSide : 0.001;
+    const slippagePct = opts.slippagePct != null ? opts.slippagePct : 0.0005;
+    const minNetSpreadPct = opts.minNetSpreadPct != null ? opts.minNetSpreadPct : 0.003;
+    const minPersistMs = opts.minPersistMs != null ? opts.minPersistMs : 8000;
+    const minDistinctUpdates = opts.minDistinctUpdates != null ? opts.minDistinctUpdates : 2;
+    const staleMs = opts.staleMs != null ? opts.staleMs : 20000;
+    state = state || {};
+    if (!(mexcPrice > 0) || !candidates || !candidates.length) return { event: null, state: state };
+
+    const now = opts.now || Date.now();
+    const estimatedCost = feeRatePerSide * 2 + slippagePct; // упрощённо: комиссия на обеих ногах + проскальзывание
+    let best = null;
+    candidates.forEach(function (c) {
+      if (!(c.price > 0) || !c.exchange) return;
+      const grossSpreadPct = (c.price - mexcPrice) / mexcPrice;
+      const netSpreadPct = Math.abs(grossSpreadPct) - estimatedCost;
+      let st = state[c.exchange];
+      if (!st || now - st.lastSeenAt > staleMs) st = { sinceT: now, lastExtPrice: c.price, distinctUpdates: 1, lastSeenAt: now };
+      else {
+        st.lastSeenAt = now;
+        if (Math.abs(c.price - st.lastExtPrice) / st.lastExtPrice > 1e-6) { st.distinctUpdates++; st.lastExtPrice = c.price; }
+      }
+      if (netSpreadPct < minNetSpreadPct) { st.sinceT = now; st.distinctUpdates = 1; } // разошлось недостаточно -> сброс отсчёта устойчивости
+      state[c.exchange] = st;
+      const persistedMs = now - st.sinceT;
+      if (netSpreadPct >= minNetSpreadPct && persistedMs >= minPersistMs && st.distinctUpdates >= minDistinctUpdates) {
+        if (!best || netSpreadPct > best.netSpreadPct) {
+          best = { exchange: c.exchange, extPrice: c.price, grossSpreadPct: grossSpreadPct, netSpreadPct: netSpreadPct, persistedMs: persistedMs };
+        }
+      }
+    });
+    if (!best) return { event: null, state: state };
+
+    const factors = {
+      context: Math.min(1, best.persistedMs / (minPersistMs * 3)),
+      trigger: Math.min(1, best.netSpreadPct / (minNetSpreadPct * 3)),
+      flow: 0.5, // нет доступа к order flow другой биржи честно — нейтрально, не выдумываем
+      orderbook: 0.5,
+      volume: 0.5,
+      history: 0
+    };
+    const score = scorePatternEvent(factors, ALGO_SCORE_WEIGHTS);
+    const event = {
+      detectorKey: 'crossExchangeDivergence', direction: best.grossSpreadPct > 0 ? 'LONG' : 'SHORT', eventType: 'CROSS_EXCHANGE_DIVERGENCE',
+      exchange: best.exchange, mexcPrice: mexcPrice, extPrice: best.extPrice,
+      grossSpreadPct: Math.round(best.grossSpreadPct * 10000) / 100, netSpreadPct: Math.round(best.netSpreadPct * 10000) / 100,
+      persistedS: Math.round(best.persistedMs / 1000), priceAtSignal: mexcPrice,
+      scoreAtSignal: score, confidencePct: score, factors: factors
+    };
+    return { event: event, state: state };
+  }
+
+  // ------------------------------------------------------------------------------------------
+  // ALGORITHM #12 — CYCLICAL_PATTERN
+  // "Один из наиболее важных алгоритмов" (спецификация #12) — но НЕ ищет свечи/фиксированный
+  // период. Строит per-symbol библиотеку прошлых ЗАКРЫТЫХ эпизодов (impulse -> пауза -> move,
+  // любых направлений — pump→pause→dump тоже валиден), сравнивает текущий кандидат с библиотекой
+  // упрощённым нормализованным расстоянием (спецификация явно разрешает "DTW или упрощённый
+  // distance"), требует минимум наблюдений ПЕРЕД тем, как считать паттерн надёжным. Библиотека —
+  // ответственность app.js (localStorage, тот же идиом, что patternHistory); outcomeMovePct
+  // каждой записи заполняется СТРОГО ПОЗЖЕ, отдельным sweep'ом в app.js (без look-ahead: во время
+  // самого extractCyclicalEpisode следующий отрезок цены ещё не наблюдался).
+  // ------------------------------------------------------------------------------------------
+  function extractCyclicalEpisode(trades, opts) {
+    opts = opts || {};
+    const impulseWindowMs = opts.impulseWindowMs || 60000;
+    const pauseWindowMs = opts.pauseWindowMs || 60000;
+    const moveWindowMs = opts.moveWindowMs || 60000;
+    const minImpulsePct = opts.minImpulsePct != null ? opts.minImpulsePct : 0.008;
+    if (!trades || trades.length < 40) return null;
+    const now = trades[trades.length - 1].t;
+    const moveTrades = trades.filter(function (t) { return t.t >= now - moveWindowMs; });
+    const pauseTrades = trades.filter(function (t) { return t.t >= now - moveWindowMs - pauseWindowMs && t.t < now - moveWindowMs; });
+    const impulseTrades = trades.filter(function (t) {
+      return t.t >= now - moveWindowMs - pauseWindowMs - impulseWindowMs && t.t < now - moveWindowMs - pauseWindowMs;
+    });
+    if (impulseTrades.length < 8 || pauseTrades.length < 5 || moveTrades.length < 8) return null;
+
+    const impulsePct = (impulseTrades[impulseTrades.length - 1].price - impulseTrades[0].price) / impulseTrades[0].price;
+    if (Math.abs(impulsePct) < minImpulsePct) return null;
+    const pauseHigh = Math.max.apply(null, pauseTrades.map(function (t) { return t.price; }));
+    const pauseLow = Math.min.apply(null, pauseTrades.map(function (t) { return t.price; }));
+    const pauseRangePct = pauseTrades[0].price > 0 ? (pauseHigh - pauseLow) / pauseTrades[0].price : 1;
+    if (pauseRangePct > Math.abs(impulsePct) * 0.5) return null; // движение не остановилось -> не настоящая пауза
+    const movePct = (moveTrades[moveTrades.length - 1].price - moveTrades[0].price) / moveTrades[0].price;
+    if (Math.abs(movePct) < minImpulsePct * 0.5) return null; // тишина продолжилась -> эпизод ещё не завершился
+
+    const impulseVolUsd = impulseTrades.reduce(function (a, t) { return a + t.price * t.qty; }, 0);
+    const moveVolUsd = moveTrades.reduce(function (a, t) { return a + t.price * t.qty; }, 0);
+    return {
+      t: now, impulsePct: impulsePct, movePct: movePct,
+      volumeRatio: impulseVolUsd > 0 ? moveVolUsd / impulseVolUsd : 1,
+      priceAtSignal: moveTrades[moveTrades.length - 1].price
+    };
+  }
+
+  function matchCyclicalEpisode(candidate, library, opts) {
+    opts = opts || {};
+    const maxDistance = opts.maxDistance != null ? opts.maxDistance : 0.5;
+    const minObservations = opts.minObservations || 5;
+    const successThresholdPct = opts.successThresholdPct != null ? opts.successThresholdPct : 0.3;
+    if (!candidate || !library || !library.length) return null;
+    const scale = Math.max(Math.abs(candidate.impulsePct), 0.005);
+    // Только УЖЕ ЗАКРЫТЫЕ записи (outcomeMovePct заполнен более поздним sweep'ом) участвуют в
+    // сравнении — открытые (ещё без исхода) исключены, иначе это было бы использованием будущего.
+    const matches = library.filter(function (e) {
+      if (e.outcomeMovePct == null) return false;
+      const d = Math.sqrt(Math.pow((e.impulsePct - candidate.impulsePct) / scale, 2) + Math.pow((e.movePct - candidate.movePct) / scale, 2));
+      return d <= maxDistance;
+    });
+    if (matches.length < minObservations) return null;
+    const sameDirCount = matches.filter(function (e) {
+      return Math.sign(e.outcomeMovePct) === Math.sign(candidate.movePct) && Math.abs(e.outcomeMovePct) >= successThresholdPct / 100;
+    }).length;
+    const winrate = sameDirCount / matches.length;
+    const moves = matches.map(function (e) { return e.outcomeMovePct; });
+    return {
+      count: matches.length, winrate: winrate,
+      avgMove: moves.reduce(function (a, b) { return a + b; }, 0) / moves.length, medianMove: median(moves)
+    };
+  }
+
+  // {event, library} контракт — library — массив закрытых+открытых эпизодов ЭТОЙ монеты,
+  // персистентно хранимый и передаваемый app.js (аналог state у #6/#10, но растущий список, а не
+  // единичный объект).
+  function detectCyclicalPattern(trades, library, opts) {
+    opts = opts || {};
+    library = library || [];
+    const candidate = extractCyclicalEpisode(trades, opts);
+    if (!candidate) return { event: null, library: library };
+    const dedupWindowMs = opts.dedupWindowMs != null ? opts.dedupWindowMs : 20000;
+    const alreadyLogged = library.length && Math.abs(library[library.length - 1].t - candidate.t) < dedupWindowMs;
+    const match = matchCyclicalEpisode(candidate, library, opts);
+    let event = null;
+    const minWinrate = opts.minWinrate != null ? opts.minWinrate : 0.55;
+    if (match && match.winrate >= minWinrate) {
+      const factors = {
+        context: Math.min(1, match.count / ((opts.minObservations || 5) * 3)),
+        trigger: Math.min(1, Math.abs(candidate.movePct) / 0.02),
+        flow: match.winrate,
+        orderbook: 0.5,
+        volume: Math.min(1, candidate.volumeRatio),
+        history: match.winrate
+      };
+      const score = scorePatternEvent(factors, ALGO_SCORE_WEIGHTS);
+      event = {
+        detectorKey: 'cyclicalPattern', direction: candidate.movePct > 0 ? 'LONG' : 'SHORT', eventType: 'CYCLICAL_PATTERN',
+        observedRepeats: match.count, winratePct: Math.round(match.winrate * 1000) / 10,
+        avgMovePct: Math.round(match.avgMove * 10000) / 100, medianMovePct: Math.round(match.medianMove * 10000) / 100,
+        impulsePct: Math.round(candidate.impulsePct * 10000) / 100, priceAtSignal: candidate.priceAtSignal,
+        scoreAtSignal: score, confidencePct: score, factors: factors
+      };
+    }
+    if (!alreadyLogged) {
+      library = library.concat([{ t: candidate.t, impulsePct: candidate.impulsePct, movePct: candidate.movePct, outcomeMovePct: null }]);
+      const maxLibrarySize = opts.maxLibrarySize || 300;
+      if (library.length > maxLibrarySize) library = library.slice(-maxLibrarySize);
+    }
+    return { event: event, library: library };
+  }
+
+  // ------------------------------------------------------------------------------------------
+  // ALGORITHM #16 — REPEATING_TIME_BASED_IMPULSE
+  // Не предполагает заранее конкретный период (спецификация #16 требует искать сам, не
+  // предполагать 15 минут) — здесь используется час UTC + 15-минутный интервал внутри часа как
+  // ГРАНУЛЯРНОСТЬ бакета (не как гипотеза о цикле), ровно так, как в примере спецификации
+  // (":00/:15/:30/:45"). Статистика по каждому бакету накапливается РЕАЛЬНЫМ временем работы
+  // приложения (app.js, localStorage) — эта функция только читает уже накопленное и требует
+  // минимум наблюдений, иначе не считает бакет надёжным (явное требование спецификации).
+  // ------------------------------------------------------------------------------------------
+  function timeBucketKeyFromDate(d) {
+    const hour = d.getUTCHours();
+    const qtr = Math.floor(d.getUTCMinutes() / 15) * 15;
+    return hour + ':' + (qtr < 10 ? '0' + qtr : String(qtr));
+  }
+
+  function recordTimeBucketObservation(bucketStats, obs) {
+    bucketStats = bucketStats || { count: 0, upMoves: 0, downMoves: 0, volumes: [] };
+    bucketStats.count++;
+    if (obs.movePct > 0) bucketStats.upMoves++; else if (obs.movePct < 0) bucketStats.downMoves++;
+    bucketStats.volumes = (bucketStats.volumes || []).concat([obs.volumeUsd]);
+    if (bucketStats.volumes.length > 200) bucketStats.volumes = bucketStats.volumes.slice(-200);
+    bucketStats.medianVolume = median(bucketStats.volumes);
+    return bucketStats;
+  }
+
+  function evaluateTimeBucket(bucketStats, overallMedianVolume, opts) {
+    opts = opts || {};
+    const minObservations = opts.minObservations || 10;
+    if (!bucketStats || bucketStats.count < minObservations) return null;
+    const totalDir = bucketStats.upMoves + bucketStats.downMoves;
+    if (totalDir < minObservations) return null;
+    const bias = bucketStats.upMoves / totalDir;
+    const minBias = opts.minBias != null ? opts.minBias : 0.65;
+    if (bias < minBias && bias > (1 - minBias)) return null;
+    const volumeMultiplier = (overallMedianVolume > 0 && bucketStats.medianVolume != null) ? bucketStats.medianVolume / overallMedianVolume : 1;
+    const minVolumeMultiplier = opts.minVolumeMultiplier != null ? opts.minVolumeMultiplier : 1.5;
+    if (volumeMultiplier < minVolumeMultiplier) return null;
+    return { bias: bias, volumeMultiplier: volumeMultiplier, observations: bucketStats.count, direction: bias >= minBias ? 'LONG' : 'SHORT' };
+  }
+
+  function detectTimeBasedImpulse(bucketStats, overallMedianVolume, priceAtSignal, opts) {
+    opts = opts || {};
+    const ev = evaluateTimeBucket(bucketStats, overallMedianVolume, opts);
+    if (!ev) return null;
+    const factors = {
+      context: Math.min(1, ev.observations / ((opts.minObservations || 10) * 3)),
+      trigger: Math.min(1, ev.volumeMultiplier / 4),
+      flow: Math.abs(ev.bias - 0.5) * 2,
+      orderbook: 0.5,
+      volume: Math.min(1, ev.volumeMultiplier / 3),
+      history: Math.abs(ev.bias - 0.5) * 2
+    };
+    const score = scorePatternEvent(factors, ALGO_SCORE_WEIGHTS);
+    return {
+      detectorKey: 'timeBasedImpulse', direction: ev.direction, eventType: 'TIME_PATTERN_' + ev.direction,
+      observations: ev.observations, biasPct: Math.round(ev.bias * 1000) / 10, volumeMultiplier: Math.round(ev.volumeMultiplier * 100) / 100,
+      priceAtSignal: priceAtSignal, scoreAtSignal: score, confidencePct: score, factors: factors
+    };
+  }
+
   // ============================================================================
   // История паттернов и отслеживание исхода БЕЗ LOOK-AHEAD BIAS (ТЗ #9). Ключевой принцип:
   // scoreAtSignal/confidencePct у события ЗАМОРОЖЕНЫ в момент детекции (уже так — детекторы выше
@@ -2110,6 +2534,17 @@
     detectDumpReversal: detectDumpReversal,
     detectCompressionBreak: detectCompressionBreak,
     detectFailedBreakout: detectFailedBreakout,
+    detectVolumeAnomaly: detectVolumeAnomaly,
+    detectLiquidityWithdrawal: detectLiquidityWithdrawal,
+    detectPossibleHiddenAbsorption: detectPossibleHiddenAbsorption,
+    detectCrossExchangeDivergence: detectCrossExchangeDivergence,
+    extractCyclicalEpisode: extractCyclicalEpisode,
+    matchCyclicalEpisode: matchCyclicalEpisode,
+    detectCyclicalPattern: detectCyclicalPattern,
+    timeBucketKeyFromDate: timeBucketKeyFromDate,
+    recordTimeBucketObservation: recordTimeBucketObservation,
+    evaluateTimeBucket: evaluateTimeBucket,
+    detectTimeBasedImpulse: detectTimeBasedImpulse,
     computeOutcomeMetrics: computeOutcomeMetrics,
     shouldOpenNewPatternSession: shouldOpenNewPatternSession,
     prunePatternHistory: prunePatternHistory,
