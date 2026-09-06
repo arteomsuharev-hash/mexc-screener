@@ -731,6 +731,13 @@ body {
 .algo-badge.down { background: rgba(255,61,99,.14); color: var(--red); box-shadow: inset 0 0 0 1px rgba(255,61,99,.3); }
 .algo-badge.neutral { background: rgba(34,211,238,.14); color: var(--blue); box-shadow: inset 0 0 0 1px rgba(34,211,238,.3); }
 
+/* "Рейтинг" — процент (activityScore) + мини-спарклайн (см. ratingCellHtml). */
+.rating-cell { display: flex; align-items: center; gap: 8px; }
+.rating-pct { font-family: var(--font-mono); font-weight: 700; font-size: 12px; min-width: 32px; }
+.rating-pct.up { color: var(--green); }
+.rating-pct.down { color: var(--red); }
+.row-sparkline { width: 56px; height: 20px; display: block; flex-shrink: 0; }
+
 /* Таблетки быстрых фильтров над таблицей (редизайн 2026-09, по образцу макета) — реальный
    дополнительный фильтр (см. algoCategoryPillMatches в app.js), НЕ дублирует и не заменяет
    выпадающий список "Профиль/Стратегия" ниже — работает как AND поверх него. */

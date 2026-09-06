@@ -1484,6 +1484,31 @@ function algoBadgesCellHtml(symbol) {
   }).join('') + '</div>';
 }
 
+// "Рейтинг" в таблице (редизайн 2026-09, по образцу макета) — переиспользует УЖЕ существующий
+// activityScore() (тот же 0-100 "насколько активна монета прямо сейчас" по объёму/движению/
+// коротким волатильностям, что и у круглого индикатора в карточке выбранной монеты) и УЖЕ
+// собираемый snapshots (тикеровый ринг-буфер за последние ~70с, который и так ведётся для
+// vol5/vol30/vol60 у ВСЕГО рынка, см. pushSnap/metricsFromSnaps) — не заводит отдельного тяжёлого
+// состояния и не рисует canvas на каждую строку (~400 одновременно видимых), только лёгкий inline
+// SVG polyline из уже готовых точек.
+function sparklineSvg(symbol, chg) {
+  const snaps = snapshots.get(symbol);
+  if (!snaps || snaps.length < 2) return '';
+  const prices = snaps.map(function (s) { return s.p; });
+  const min = Math.min.apply(null, prices), max = Math.max.apply(null, prices);
+  const w = 56, h = 20, range = (max - min) || 1;
+  const step = w / Math.max(1, prices.length - 1);
+  const points = prices.map(function (p, i) { return (i * step).toFixed(1) + ',' + (h - ((p - min) / range) * h).toFixed(1); }).join(' ');
+  const color = chg >= 0 ? 'var(--green)' : 'var(--red)';
+  return '<svg class="row-sparkline" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
+    '<polyline points="' + points + '" fill="none" style="stroke:' + color + '" stroke-width="1.5"/></svg>';
+}
+function ratingCellHtml(c) {
+  const score = activityScore(c);
+  const chg = c.change24 || 0;
+  return '<div class="rating-cell"><span class="rating-pct ' + (chg >= 0 ? 'up' : 'down') + '">' + score + '%</span>' + sparklineSvg(c.symbol, chg) + '</div>';
+}
+
 function renderTable() {
   const tbody = document.getElementById('tableBody');
   const grid = document.getElementById('gridView');
@@ -1518,12 +1543,12 @@ function renderTable() {
   document.getElementById('navFavBadge').textContent = allCoins.filter(function (c) { return c.fav; }).length;
 
   if (!allCoins.length) {
-    tbody.innerHTML = '<tr><td colspan="12" class="empty-state"><i class="ri-database-2-line"></i>Нет данных MEXC. Ожидание WebSocket...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="empty-state"><i class="ri-database-2-line"></i>Нет данных MEXC. Ожидание WebSocket...</td></tr>';
     grid.innerHTML = '';
     return;
   }
   if (!visible.length) {
-    tbody.innerHTML = '<tr><td colspan="12" class="empty-state"><i class="ri-filter-off-line"></i>Нет пар по текущим фильтрам. Сбросьте фильтры или подождите накопления 5с-метрик.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="empty-state"><i class="ri-filter-off-line"></i>Нет пар по текущим фильтрам. Сбросьте фильтры или подождите накопления 5с-метрик.</td></tr>';
     grid.innerHTML = '';
     return;
   }
@@ -1544,12 +1569,9 @@ function renderTable() {
       '<td class="cell-price">' + fmtPrice(c.price) + '</td>' +
       '<td class="' + (chg >= 0 ? 'price-up' : 'price-down') + '">' + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%</td>' +
       '<td>' + fmtNum(c.vol24) + '</td>' +
-      '<td>' + fmtNum(c.vol5) + '</td>' +
-      '<td>' + c.vol5s.toFixed(3) + '%</td>' +
-      '<td>' + c.vol30s.toFixed(3) + '%</td>' +
-      '<td>' + c.vol60s.toFixed(3) + '%</td>' +
       '<td>' + algoBadgesCellHtml(c.symbol) + '</td>' +
-      '<td>' + signalCell + '</td></tr>';
+      '<td>' + signalCell + '</td>' +
+      '<td>' + ratingCellHtml(c) + '</td></tr>';
   }).join('');
 
   grid.innerHTML = visible.map(function (c) {
