@@ -2957,6 +2957,7 @@ const failedBreakoutState = new Map();            // symbol -> state
 const possibleHiddenAbsorptionState = new Map();  // symbol -> state
 const crossExchangeDivergenceState = new Map();   // symbol -> {[exchangeId]: state}
 const cyclicalTimeWindowState = new Map();        // symbol -> {bucketKey, windowStartAt, windowStartPrice} — текущее незакрытое окно #16
+const twapState = new Map();                      // symbol -> state (см. MexcCore.detectTwap, #17)
 const watchlistCooldowns = new Map(); // symbol -> until (ms) — временно исключена из кандидатов после WATCHLIST_MAX_RECONNECT_FAILS подряд
 
 // Здоровье Tier 2 — счётчики для будущей панели диагностики (этап 7 плана), уже сейчас доступны
@@ -3140,6 +3141,7 @@ function unsubscribeWatchlistSymbol(symbol) {
   possibleHiddenAbsorptionState.delete(symbol);
   crossExchangeDivergenceState.delete(symbol);
   cyclicalTimeWindowState.delete(symbol);
+  twapState.delete(symbol);
   logI('Watchlist', symbol + ' исключена из глубокого анализа');
 }
 
@@ -3554,6 +3556,27 @@ function detectTimeBasedImpulse(symbol) {
   return ev;
 }
 
+// ------------------------------------------------------------------------------------------
+// Алгоритмы #17-18 (TWAP-исполнение, возможный маркет-мейкер/спредер-бот) — по мотивам разбора
+// стороннего скринера GodsEye (oculusdei.pro, 2026-09): у него это подаётся как "Bot Rn"/"TWAP"
+// прямо на графике. У нас — тот же смысл, честными средствами на РЕАЛЬНЫХ публичных данных MEXC
+// (никакого моста к чужим desktop-ботам и никакого "рейтинга" контрагента — см. isHeuristic/
+// maxConfidence у possibleMarketMakerBot в core-utils.js).
+// ------------------------------------------------------------------------------------------
+function detectTwap(symbol) {
+  const state = twapState.get(symbol) || {};
+  const result = MexcCore.detectTwap(tier2Trades.get(symbol), {}, state);
+  twapState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPossibleMarketMakerBot(symbol) {
+  const ev = MexcCore.detectPossibleMarketMakerBot(tier2Trades.get(symbol), tier2Depth.get(symbol), {});
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+
 const DETECTOR_DEFS = {
   repeatSize: { label: 'Идентичные размеры сделок', badge: 'SIZE', category: 'repeat', minRepeats: 5, detect: detectRepeatedTradeSizes },
   repeatInterval: { label: 'Идентичные интервалы', badge: 'INTVL', category: 'repeat', minRepeats: 5, detect: detectRepeatedIntervals },
@@ -3585,7 +3608,10 @@ const DETECTOR_DEFS = {
   possibleHiddenAbsorption: { label: 'Возможное скрытое поглощение', badge: 'HIDDEN?', category: 'heuristic-lowconf', minRepeats: 2, detect: detectPossibleHiddenAbsorption },
   crossExchangeDivergence: { label: 'Межбиржевое расхождение', badge: 'XDIV', category: 'inefficiency', minRepeats: 2, detect: detectCrossExchangeDivergence },
   cyclicalPattern: { label: 'Циклический паттерн', badge: 'CYCLIC', category: 'cycle', minRepeats: 5, detect: detectCyclicalPattern },
-  timeBasedImpulse: { label: 'Временной паттерн активности', badge: 'TIME', category: 'cycle', minRepeats: 10, detect: detectTimeBasedImpulse }
+  timeBasedImpulse: { label: 'Временной паттерн активности', badge: 'TIME', category: 'cycle', minRepeats: 10, detect: detectTimeBasedImpulse },
+  // Алгоритмы #17-18 (по мотивам разбора GodsEye, 2026-09) — см. wrapper'ы выше.
+  twap: { label: 'TWAP-исполнение', badge: 'TWAP', category: 'sequence', minRepeats: 6, detect: detectTwap },
+  possibleMarketMakerBot: { label: 'Возможный маркет-мейкер/спредер-бот', badge: 'MMBOT?', category: 'heuristic-lowconf', minRepeats: 30, detect: detectPossibleMarketMakerBot }
 };
 
 // Человекочитаемое объяснение "почему сработало" — та же идея, что explainCoinForStrategy() у
@@ -3739,6 +3765,21 @@ function explainPatternEvent(ev) {
       'наблюдениям объём в ' + ev.volumeMultiplier + '× выше обычного для неё, и в ' + ev.biasPct + '% случаев движение было ' +
       'направленным в сторону ' + (ev.direction === 'LONG' ? 'роста' : 'падения') + '. Confidence ' + ev.confidencePct + '%.';
   }
+  if (ev.detectorKey === 'twap') {
+    if (ev.eventType === 'TWAP_STOPPED') {
+      return 'TWAP-подобная активность (' + (ev.direction === 'LONG' ? 'покупка' : 'продажа') + ') прекратилась — устойчивого ' +
+        'потока одинаковых по размеру и интервалу сделок в эту сторону больше не наблюдается.';
+    }
+    return 'Похоже на TWAP-исполнение: ' + ev.repeatCount + ' сделок ' + (ev.direction === 'LONG' ? 'на покупку' : 'на продажу') +
+      ' примерно одинакового размера (≈$' + ev.avgSizeUsd.toLocaleString('ru-RU') + ') с интервалом ~' + ev.avgIntervalS +
+      'с между ними (≈$' + ev.rateUsdPer30s.toLocaleString('ru-RU') + ' за 30с). Confidence ' + ev.confidencePct + '%.';
+  }
+  if (ev.detectorKey === 'possibleMarketMakerBot') {
+    return '⚠ ЭВРИСТИКА (не подтверждённый факт, личность контрагента по публичным данным не определить): ' +
+      ev.tradeCount + ' сделок за минуту почти поровну на обе стороны (' + ev.buyRatioPct + '% на покупку), спокойная ' +
+      'волатильность и узкий стабильный спред' + (ev.spreadBps != null ? ' (' + ev.spreadBps + ' bps)' : '') +
+      ' — типичная сигнатура маркет-мейкера/спредер-бота. Confidence ' + ev.confidencePct + '% (потолок ' + ev.maxConfidence + '%).';
+  }
   return '';
 }
 
@@ -3780,7 +3821,7 @@ const NEW_ALGO_DETECTOR_KEYS = new Set([
   'priceVolumeInefficiency', 'densityAbsorptionBreakout', 'pumpReversal', 'dumpReversal',
   'compressionBreak', 'failedBreakout',
   'volumeAnomaly', 'liquidityWithdrawal', 'possibleHiddenAbsorption', 'crossExchangeDivergence',
-  'cyclicalPattern', 'timeBasedImpulse'
+  'cyclicalPattern', 'timeBasedImpulse', 'twap', 'possibleMarketMakerBot'
 ]);
 function patternWeightsFor(detectorKey) {
   return NEW_ALGO_DETECTOR_KEYS.has(detectorKey) ? MexcCore.ALGO_SCORE_WEIGHTS : undefined;

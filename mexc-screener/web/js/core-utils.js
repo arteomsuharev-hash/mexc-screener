@@ -2378,6 +2378,152 @@
     };
   }
 
+  // ------------------------------------------------------------------------------------------
+  // ALGORITHM #17 — TWAP DETECTION
+  // Настоящий TWAP-ордер режет объём на похожие по размеру куски через похожие интервалы времени,
+  // преимущественно в одну сторону — по сути сочетание уже существующих сигналов repeatSize/
+  // repeatInterval (см. #1/#2 среди исходных 13 детекторов), плюс требование устойчивой СТОРОНЫ и
+  // длительности. {event, state} контракт, как у #6/#10/#14 — состояние нужно, чтобы честно
+  // поймать момент ОКОНЧАНИЯ TWAP (когда паттерн пропадает) и явно сообщить об этом (TWAP_STOPPED),
+  // а не просто молча перестать показывать карточку.
+  // ------------------------------------------------------------------------------------------
+  function detectTwap(trades, opts, state) {
+    opts = opts || {};
+    const lookback = opts.lookback || 300;
+    const windowMs = opts.windowMs || 120000;
+    const minRepeats = opts.minRepeats != null ? opts.minRepeats : 6;
+    const sizeTolerance = opts.sizeTolerance != null ? opts.sizeTolerance : 0.3;
+    const intervalTolerance = opts.intervalTolerance != null ? opts.intervalTolerance : 0.35;
+    const minSideRatio = opts.minSideRatio != null ? opts.minSideRatio : 0.75;
+    const graceMs = opts.graceMs != null ? opts.graceMs : 60000;
+    state = state || {};
+
+    function closeIfStale(lastPrice) {
+      if (state.active && (state.lastMatchAt == null || (opts.now || (trades && trades.length ? trades[trades.length - 1].t : 0)) - state.lastMatchAt > graceMs)) {
+        const stoppedEvent = {
+          detectorKey: 'twap', direction: state.side === 'buy' ? 'LONG' : 'SHORT', eventType: 'TWAP_STOPPED',
+          priceAtSignal: lastPrice, scoreAtSignal: 60, confidencePct: 60, maxConfidence: 60,
+          factors: { context: 0, trigger: 0, flow: 0, orderbook: 0, volume: 0, history: 0 }
+        };
+        state.active = false;
+        return { event: stoppedEvent, state: state };
+      }
+      return { event: null, state: state };
+    }
+
+    if (!trades || trades.length < minRepeats * 2) return closeIfStale(trades && trades.length ? trades[trades.length - 1].price : null);
+    const recent = trades.slice(-lookback);
+    const now = recent[recent.length - 1].t;
+    const windowTrades = recent.filter(function (t) { return t.t >= now - windowMs; });
+    const lastPrice = recent[recent.length - 1].price;
+    if (windowTrades.length < minRepeats) return closeIfStale(lastPrice);
+
+    const buyCount = windowTrades.filter(function (t) { return t.side === 'buy'; }).length;
+    const sideRatio = Math.max(buyCount, windowTrades.length - buyCount) / windowTrades.length;
+    const side = buyCount >= windowTrades.length - buyCount ? 'buy' : 'sell';
+    const sideTrades = windowTrades.filter(function (t) { return t.side === side; });
+    if (sideRatio < minSideRatio || sideTrades.length < minRepeats) return closeIfStale(lastPrice);
+
+    const sizes = sideTrades.map(function (t) { return t.qty; });
+    const medSize = median(sizes);
+    const madSize = medianAbsoluteDeviation(sizes, medSize);
+    const sizeCV = medSize > 0 ? (madSize * 1.4826) / medSize : 1;
+    if (sizeCV > sizeTolerance) return closeIfStale(lastPrice);
+
+    const intervals = [];
+    for (let i = 1; i < sideTrades.length; i++) intervals.push(sideTrades[i].t - sideTrades[i - 1].t);
+    const medInterval = median(intervals);
+    const madInterval = medianAbsoluteDeviation(intervals, medInterval);
+    const intervalCV = medInterval > 0 ? (madInterval * 1.4826) / medInterval : 1;
+    if (intervalCV > intervalTolerance) return closeIfStale(lastPrice);
+
+    const volumeUsd = sideTrades.reduce(function (a, t) { return a + t.price * t.qty; }, 0);
+    const rate30s = volumeUsd / (windowMs / 1000) * 30;
+    const wasActive = !!state.active;
+    state.active = true;
+    state.lastMatchAt = now;
+    state.side = side;
+    if (wasActive) return { event: null, state: state }; // уже сообщали о старте — не дублируем каждый цикл
+
+    const factors = {
+      context: Math.min(1, sideTrades.length / (minRepeats * 3)),
+      trigger: Math.max(0, 1 - sizeCV / sizeTolerance),
+      flow: Math.max(0, 1 - intervalCV / intervalTolerance),
+      orderbook: 0.5,
+      volume: Math.min(1, volumeUsd / 10000),
+      history: 0
+    };
+    const score = scorePatternEvent(factors, ALGO_SCORE_WEIGHTS);
+    const event = {
+      detectorKey: 'twap', direction: side === 'buy' ? 'LONG' : 'SHORT', eventType: 'TWAP_ACTIVE',
+      repeatCount: sideTrades.length, avgSizeUsd: Math.round(medSize * sideTrades[sideTrades.length - 1].price),
+      avgIntervalS: Math.round(medInterval / 1000), rateUsdPer30s: Math.round(rate30s),
+      priceAtSignal: lastPrice, scoreAtSignal: score, confidencePct: score, factors: factors
+    };
+    return { event: event, state: state };
+  }
+
+  // ------------------------------------------------------------------------------------------
+  // ALGORITHM #18 — POSSIBLE MARKET-MAKER / SPREADER BOT
+  // По публичным данным MEXC нельзя увидеть, ЧЬИ заявки стоят в стакане — поэтому, в отличие от
+  // некоторых конкурентов, не присваивается "рейтинг бота" и не утверждается личность контрагента.
+  // Вместо этого — честная поведенческая эвристика: много мелких сделок, поровну на обе стороны,
+  // при спокойной и стабильной волатильности и стабильном узком спреде — типичная сигнатура
+  // маркет-мейкера/спредера, но НЕ доказательство. Честный потолок confidence, как у fakeLiquidity/
+  // possibleHiddenAbsorption.
+  // ------------------------------------------------------------------------------------------
+  function detectPossibleMarketMakerBot(trades, depthSnapshots, opts) {
+    opts = opts || {};
+    const lookback = opts.lookback || 400;
+    const minTradeCount = opts.minTradeCount != null ? opts.minTradeCount : 30;
+    const maxImbalance = opts.maxImbalance != null ? opts.maxImbalance : 0.15;
+    const maxVolatilityPercentile = opts.maxVolatilityPercentile != null ? opts.maxVolatilityPercentile : 0.3;
+    const maxSpreadCV = opts.maxSpreadCV != null ? opts.maxSpreadCV : 0.35;
+    const maxConfidence = opts.maxConfidence != null ? opts.maxConfidence : 70;
+    if (!trades || trades.length < 60) return null;
+    const recent = trades.slice(-lookback);
+    const now = recent[recent.length - 1].t;
+    const features = computeFeatures(recent, depthSnapshots, now);
+    if (features.trade_count == null || features.trade_count < minTradeCount) return null;
+    const totalVol = features.buy_volume + features.sell_volume;
+    if (totalVol <= 0) return null;
+    const buyRatio = features.buy_volume / totalVol;
+    const imbalance = Math.abs(buyRatio - 0.5);
+    if (imbalance > maxImbalance) return null;
+    if (features.volatility_percentile == null || features.volatility_percentile > maxVolatilityPercentile) return null;
+    if (!depthSnapshots || depthSnapshots.length < 10) return null;
+
+    const recentDepth = depthSnapshots.slice(-30);
+    const spreads = recentDepth
+      .map(function (s) { return (s.bestBid != null && s.bestAsk != null && s.bestBid > 0) ? (s.bestAsk - s.bestBid) / s.bestBid : null; })
+      .filter(function (v) { return v != null; });
+    if (spreads.length < 10) return null;
+    const medSpread = median(spreads);
+    const madSpread = medianAbsoluteDeviation(spreads, medSpread);
+    const spreadCV = medSpread > 0 ? (madSpread * 1.4826) / medSpread : 1;
+    if (spreadCV > maxSpreadCV) return null;
+    if (!(features.average_trade_size > 0)) return null;
+
+    const factors = {
+      context: Math.min(1, features.trade_count / (minTradeCount * 3)),
+      trigger: Math.max(0, 1 - imbalance / maxImbalance),
+      flow: Math.max(0, 1 - spreadCV / maxSpreadCV),
+      orderbook: features.obi_L10 != null ? Math.max(0, 1 - Math.abs(features.obi_L10)) : 0.5,
+      volume: features.relative_volume != null ? Math.min(1, features.relative_volume) : 0.5,
+      history: 0
+    };
+    let score = scorePatternEvent(factors, ALGO_SCORE_WEIGHTS);
+    score = Math.min(score, maxConfidence);
+    return {
+      detectorKey: 'possibleMarketMakerBot', direction: 'BOTH', eventType: 'POSSIBLE_MARKET_MAKER_BOT',
+      isHeuristic: true, maxConfidence: maxConfidence,
+      tradeCount: features.trade_count, buyRatioPct: Math.round(buyRatio * 1000) / 10,
+      avgTradeSizeUsd: Math.round(features.average_trade_size),
+      spreadBps: features.spread_bps != null ? Math.round(features.spread_bps * 10) / 10 : null,
+      priceAtSignal: features.last_price, scoreAtSignal: score, confidencePct: score, factors: factors
+    };
+  }
+
   // ============================================================================
   // История паттернов и отслеживание исхода БЕЗ LOOK-AHEAD BIAS (ТЗ #9). Ключевой принцип:
   // scoreAtSignal/confidencePct у события ЗАМОРОЖЕНЫ в момент детекции (уже так — детекторы выше
@@ -2545,6 +2691,8 @@
     recordTimeBucketObservation: recordTimeBucketObservation,
     evaluateTimeBucket: evaluateTimeBucket,
     detectTimeBasedImpulse: detectTimeBasedImpulse,
+    detectTwap: detectTwap,
+    detectPossibleMarketMakerBot: detectPossibleMarketMakerBot,
     computeOutcomeMetrics: computeOutcomeMetrics,
     shouldOpenNewPatternSession: shouldOpenNewPatternSession,
     prunePatternHistory: prunePatternHistory,
