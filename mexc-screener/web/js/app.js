@@ -1485,9 +1485,14 @@ function algoBadgesCellHtml(symbol) {
   return '<div class="algo-badges">' + evs.map(function (ev) {
     const def = DETECTOR_DEFS[ev.detectorKey];
     const dirCls = ev.direction === 'LONG' ? 'up' : ev.direction === 'SHORT' ? 'down' : 'neutral';
+    // Цвет самого бейджа — по СЕМЕЙСТВУ детектора (category), не по сигналу (по образцу макета,
+    // где у BRK/CYCL/IMP/VOL и т.п. всегда свой цвет вне зависимости от long/short) — так рядок
+    // алгоритмов остаётся различимым с первого взгляда даже когда все сигналы совпадают.
+    // Направление даёт маленькая цветная точка внутри бейджа, а не перекраска всего бейджа.
+    const catCls = 'cat-' + ((def && def.category) || 'inefficiency').replace(/[^a-z-]/g, '');
     let text;
     try { text = explainPatternEvent(ev).replace(/"/g, '&quot;'); } catch (e) { text = ''; }
-    return '<span class="algo-badge ' + dirCls + '" title="' + text + '">' + ((def && def.badge) || ev.detectorKey) + '</span>';
+    return '<span class="algo-badge ' + catCls + '" title="' + text + '"><i class="badge-dot ' + dirCls + '"></i>' + ((def && def.badge) || ev.detectorKey) + '</span>';
   }).join('') + '</div>';
 }
 

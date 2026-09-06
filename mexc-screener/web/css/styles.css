@@ -201,12 +201,17 @@ body {
 .sidebar.collapsed .nav-badge,
 .sidebar.collapsed .conn-pill span { opacity: 0; width: 0; overflow: hidden; pointer-events: none; }
 .sidebar.collapsed .sidebar-mascot { display: none; }
-/* Маскоты (редизайн 2026-09) — оригинальный дизайн дед-учёный/подросток-помощник, НЕ Рик и Морти
-   (см. обсуждение в чате про авторские права) — узнаваемых силуэтов причёсок/костюма нарочно нет. */
-.sidebar-mascot { padding: 6px 12px 4px; display: flex; flex-direction: column; align-items: center; }
-.sidebar-mascot svg { width: 100%; max-width: 170px; height: auto; }
+/* Маскот (редизайн 2026-09) — компактный icon-badge вместо freehand-лиц (те читались криво на
+   маленьком размере) — оригинальная sci-fi/lab тема без узнаваемых персонажей. */
+.sidebar-mascot { padding: 8px 12px 6px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.mascot-badge {
+  width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(circle, var(--neon-glow-soft), transparent 70%);
+  box-shadow: inset 0 0 0 1px var(--border-color), 0 0 16px -6px var(--neon-glow);
+  color: var(--green); font-size: 20px;
+}
 .sidebar-mascot-bubble {
-  margin-top: -4px; background: var(--bg-card); border: 1px solid var(--border-color);
+  background: var(--bg-card); border: 1px solid var(--border-color);
   border-radius: 10px; padding: 4px 10px; font-size: 10px; color: var(--text-secondary);
   white-space: nowrap;
 }
@@ -474,10 +479,15 @@ body {
 .status-badge.exch-okx { background: var(--bg-hover); color: var(--text-primary); border-color: var(--border-color); box-shadow: none; }
 .status-dot { width: 6px; height: 6px; background: currentColor; border-radius: 50%; animation: pulse 2s infinite; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
-.topbar-metrics { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
-.metric { text-align: left; }
-.metric-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
-.metric-value { font-size: 13px; font-weight: 600; color: var(--text-primary); font-family: var(--font-mono); display: inline-block; }
+.topbar-metrics { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* Каждая метрика — своя тонкая стеклянная карточка (по образцу макета: ОБЩИЙ РЫНОК/ПОКАЗАНО/
+   СДЕЛОК/ВРЕМЯ РАБОТЫ были отдельными обведёнными блоками, а не голым инлайн-текстом). */
+.metric {
+  text-align: left; padding: 4px 12px; border-radius: 6px;
+  background: rgba(255,255,255,.02); box-shadow: inset 0 0 0 1px var(--border-color);
+}
+.metric-label { font-size: 9.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
+.metric-value { font-size: 14px; font-weight: 700; color: var(--text-primary); font-family: var(--font-mono); display: inline-block; }
 @keyframes metricPulse {
   0% { color: var(--blue); text-shadow: 0 0 10px rgba(30,128,255,.7); transform: scale(1.08); }
   100% { color: var(--text-primary); text-shadow: none; transform: scale(1); }
@@ -497,15 +507,15 @@ body {
   display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
   padding: 8px 16px; gap: 10px; flex-shrink: 0;
 }
-.filter-group { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-.filter-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
+.filter-group { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.filter-label { font-size: 9.5px; color: var(--text-muted); text-transform: uppercase; }
 .filter-input {
   background: var(--bg-card); border: 1px solid var(--border-color);
-  color: var(--text-primary); padding: 5px 8px; border-radius: 4px;
-  font-size: 12px; font-family: var(--font-mono); width: 96px; outline: none;
+  color: var(--text-primary); padding: 5px 6px; border-radius: 4px;
+  font-size: 12px; font-family: var(--font-mono); width: 74px; outline: none;
 }
 .filter-input:focus, .filter-select:focus { border-color: #fff; }
-.filter-input.wide { width: 118px; }
+.filter-input.wide { width: 92px; }
 .filter-select {
   background: var(--bg-card); border: 1px solid var(--border-color);
   color: var(--text-primary); padding: 5px 6px; border-radius: 4px;
@@ -568,7 +578,7 @@ body {
   display: flex; align-items: center; justify-content: space-between;
   padding: 8px 16px; gap: 10px; flex-shrink: 0; flex-wrap: wrap;
 }
-.toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .profile-select {
   background: var(--bg-card); border: 1px solid var(--border-color);
   color: var(--text-primary); padding: 5px 10px; border-radius: 4px;
@@ -759,16 +769,26 @@ body {
 /* Бейджи алгоритмов в строке таблицы (см. algoBadgesCellHtml) — компактные цветные "таблетки",
    цвет по направлению сигнала (LONG зелёный/SHORT красный/BOTH нейтральный синий), полный текст
    объяснения — во всплывающей подсказке (title), чтобы не раздувать саму ячейку. */
-.algo-badges { display: flex; gap: 3px; flex-wrap: wrap; max-width: 150px; }
+.algo-badges { display: flex; gap: 3px; flex-wrap: wrap; max-width: 150px; align-items: center; }
 .algo-badges-empty { color: var(--text-muted); }
 .algo-badge {
-  display: inline-block; padding: 1px 6px; border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px 1px 5px; border-radius: 999px;
   font-size: 10px; font-weight: 700; font-family: var(--font-mono);
   white-space: nowrap; cursor: default;
 }
-.algo-badge.up { background: rgba(18,255,94,.14); color: var(--green); box-shadow: inset 0 0 0 1px rgba(18,255,94,.3); }
-.algo-badge.down { background: rgba(255,61,99,.14); color: var(--red); box-shadow: inset 0 0 0 1px rgba(255,61,99,.3); }
-.algo-badge.neutral { background: rgba(34,211,238,.14); color: var(--blue); box-shadow: inset 0 0 0 1px rgba(34,211,238,.3); }
+/* Цвет бейджа — по семейству детектора (см. algoBadgesCellHtml), а не по сигналу: так рядок
+   алгоритмов пёстрый и различимый с первого взгляда, как в макете, а не однотонный
+   зелёный/красный/синий по 3 состояниям сигнала. Направление — см. .badge-dot ниже. */
+.algo-badge.cat-repeat { background: rgba(34,211,238,.14); color: #22d3ee; box-shadow: inset 0 0 0 1px rgba(34,211,238,.32); }
+.algo-badge.cat-inefficiency { background: rgba(255,178,56,.14); color: #ffb238; box-shadow: inset 0 0 0 1px rgba(255,178,56,.32); }
+.algo-badge.cat-cycle { background: rgba(255,94,196,.14); color: #ff5ec4; box-shadow: inset 0 0 0 1px rgba(255,94,196,.32); }
+.algo-badge.cat-sequence { background: rgba(167,139,250,.16); color: #a78bfa; box-shadow: inset 0 0 0 1px rgba(167,139,250,.34); }
+.algo-badge.cat-depth { background: rgba(59,130,246,.16); color: #60a5fa; box-shadow: inset 0 0 0 1px rgba(59,130,246,.34); }
+.algo-badge.cat-heuristic-lowconf { background: rgba(143,163,173,.12); color: #8fa3ad; box-shadow: inset 0 0 0 1px rgba(143,163,173,.28); }
+.badge-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; background: var(--text-muted); }
+.badge-dot.up { background: var(--green); box-shadow: 0 0 4px -0.5px var(--green); }
+.badge-dot.down { background: var(--red); box-shadow: 0 0 4px -0.5px var(--red); }
+.badge-dot.neutral { background: var(--text-muted); }
 
 /* "Рейтинг" — процент (activityScore) + мини-спарклайн (см. ratingCellHtml). */
 .rating-cell { display: flex; align-items: center; gap: 8px; }
