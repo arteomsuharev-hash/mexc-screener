@@ -3873,9 +3873,40 @@ function sweepPatternOutcomes() {
 }
 setInterval(sweepPatternOutcomes, 10000);
 
-// Текущий срез активных паттернов (последний прогон) — витрина для UI; постоянная история —
-// отдельно, в patternHistory выше.
+// Текущий срез активных паттернов (последний прогон) — используется мостом Tier2->Tier1
+// (bestActiveAlgoEventFor) и диагностической панелью здоровья; постоянная история — отдельно, в
+// patternHistory выше.
 let activePatternEvents = [];
+
+// Пользовательский фидбэк (2026-09): карточки на стр. «Паттерны» пересобирались из
+// activePatternEvents КАЖДЫЙ цикл (2с) — как только детектор переставал совпадать хоть на один
+// цикл (например, дисбаланс на секунду просел ниже порога), карточка мгновенно исчезала, даже если
+// событие только что появилось и пользователь не успел его прочитать. patternFeed — отдельная,
+// НАКАПЛИВАЮЩАЯСЯ витрина именно для этой страницы: новый symbol+detectorKey добавляется в начало
+// и остаётся видимым, пока не "утихнет" на PATTERN_FEED_MAX_AGE_MS (не постфактум скрывается по
+// live-статусу) — та же идея разделения "структурный ре-рендер vs лёгкий тик", что уже применена
+// для флика на стр. «Листинги». Порядок элементов НЕ меняется на обновлении уже существующей
+// записи (только её содержимое) — иначе список продолжал бы "прыгать" при каждом обновлении score.
+const PATTERN_FEED_MAX_AGE_MS = 15 * 60 * 1000;
+const PATTERN_FEED_MAX_ENTRIES = 60;
+let patternFeed = [];
+function updatePatternFeed(events, now) {
+  events.forEach(function (ev) {
+    const key = ev.symbol + '|' + ev.detectorKey;
+    const existing = patternFeed.find(function (e) { return e.key === key; });
+    if (existing) { existing.ev = ev; existing.lastSeenAt = now; }
+    else patternFeed.unshift({ key: key, ev: ev, firstSeenAt: now, lastSeenAt: now });
+  });
+  patternFeed = patternFeed.filter(function (e) { return now - e.lastSeenAt <= PATTERN_FEED_MAX_AGE_MS; });
+  if (patternFeed.length > PATTERN_FEED_MAX_ENTRIES) {
+    // Обрезаем по избытку, но НИКОГДА не трогаем то, что совпало именно в этом цикле (lastSeenAt === now).
+    const activeNow = patternFeed.filter(function (e) { return e.lastSeenAt === now; });
+    const rest = patternFeed.filter(function (e) { return e.lastSeenAt !== now; })
+      .sort(function (a, b) { return b.lastSeenAt - a.lastSeenAt; })
+      .slice(0, Math.max(0, PATTERN_FEED_MAX_ENTRIES - activeNow.length));
+    patternFeed = activeNow.concat(rest);
+  }
+}
 
 // Отключённые пользователем детекторы (стр. «Паттерны», чипы-переключатели) — не считаются вообще
 // (не тратится даже дешёвый бюджет вычислений на watchlist-монетах), а не просто скрываются в UI.
@@ -3974,6 +4005,7 @@ function runPatternDetectors() {
     return b.scoreAtSignal - a.scoreAtSignal;
   });
   activePatternEvents = events;
+  updatePatternFeed(events, now);
   tier2Health.patternEventsActive = activePatternEvents.length;
   const badge = document.getElementById('navPatternBadge');
   if (badge) badge.textContent = activePatternEvents.length;
@@ -4095,10 +4127,13 @@ function updatePatternsPage() {
 
   const grid = document.getElementById('patternsGrid');
   const countEl = document.getElementById('patternsCount');
-  // ТЗ #8/#9: "лучше 5 действительно интересных ситуаций, чем 100 слабых" — теперь, когда весь
-  // движок (12 детекторов) собран, сужаем до буквально ~5, как и просили.
-  const top = activePatternEvents.slice(0, 5);
-  if (countEl) countEl.textContent = activePatternEvents.length + ' ' + t('активных');
+  // Пользовательский фидбэк (2026-09): раньше здесь показывались только activePatternEvents
+  // (мгновенный live-срез, ТЗ #8/#9 "5 действительно интересных ситуаций") — карточки исчезали,
+  // стоило детектору перестать совпадать хоть на один цикл, читать не успевали. Теперь витрина —
+  // patternFeed (копится, не пересобирается с нуля каждый цикл, см. её комментарий выше); порядок
+  // уже "новое сверху" (unshift), доп. сортировка не нужна.
+  const top = patternFeed.map(function (e) { return e.ev; });
+  if (countEl) countEl.textContent = top.length + ' ' + t('за последние 15 мин');
   if (grid) {
     if (!top.length) {
       grid.innerHTML = '<div class="finres-empty" style="grid-column:1/-1;"><i class="ri-radar-2-line"></i>' +
@@ -9984,6 +10019,7 @@ window.__tier2Watchlist = function () { return Array.from(watchlist.keys()); };
 window.__tier2TradesFor = function (symbol) { return tier2Trades.get(symbol) || []; };
 window.__tier2DepthFor = function (symbol) { return tier2Depth.get(symbol) || []; };
 window.__patternEvents = function () { return activePatternEvents.map(function (ev) { return Object.assign({ explanation: explainPatternEvent(ev) }, ev); }); };
+window.__patternFeed = function () { return patternFeed.map(function (e) { return Object.assign({ explanation: explainPatternEvent(e.ev), firstSeenAt: e.firstSeenAt, lastSeenAt: e.lastSeenAt }, e.ev); }); };
 window.__patternHistory = function () { return patternHistory; };
 window.__sweepPatternOutcomesNow = sweepPatternOutcomes;
 // Только для ручной проверки UI страницы "Паттерны" без ожидания реальных срабатываний детекторов
@@ -9996,6 +10032,7 @@ window.__injectFakePatternEvent = function (partial) {
     detectedAt: Date.now(), factors: {}
   }, partial || {});
   activePatternEvents = [ev].concat(activePatternEvents);
+  patternFeed.unshift({ key: ev.symbol + '|' + ev.detectorKey, ev: ev, firstSeenAt: Date.now(), lastSeenAt: Date.now() });
   updatePatternsPage();
   return ev;
 };
