@@ -497,6 +497,13 @@ let tableHoverFreezeSymbol = null;
 // пересортировка. Пока заморожено — состав и порядок видимых строк не меняются вообще, обновляются
 // только значения в ячейках (см. renderTable()). Сбрасывается в null, как только курсор уходит.
 let frozenVisibleSymbols = null;
+// Пагинация таблицы (редизайн 2026-09, по образцу макета) — режет уже отфильтрованный/капнутый
+// maxPairs список на страницы по TABLE_PAGE_SIZE, вместо одного длинного скролла. Намеренно НЕ
+// сбрасывается на 1 автоматически при каждом тике живых данных (иначе пользователя постоянно
+// сбрасывало бы на первую страницу) — renderTable() просто клампит номер страницы в допустимый
+// диапазон, если текущий список стал короче.
+const TABLE_PAGE_SIZE = 50;
+let tablePage = 1;
 let ws = null;
 let wsReconnectAttempts = 0;
 let lastMiniTickerAt = 0; // для watchdog'а "сокет открыт, но молчит" — см. connectWs()
@@ -1563,6 +1570,47 @@ function miniStatsListHtml(c) {
   }).join('');
 }
 
+// Пагинация таблицы (редизайн 2026-09, по образцу макета «Найдено: N ‹ 1 2 3 … 28 ›») — компактно
+// показывает первую/последнюю страницу и окрестность текущей, с многоточием между разрывами,
+// вместо полного списка из потенциально сотен страниц.
+function pageNumbersToShow(current, total) {
+  const pages = new Set([1, total]);
+  for (let p = current - 1; p <= current + 1; p++) { if (p >= 1 && p <= total) pages.add(p); }
+  return Array.from(pages).sort(function (a, b) { return a - b; });
+}
+function renderTablePagination(totalCount, totalPages) {
+  const el = document.getElementById('tablePagination');
+  if (!el) return;
+  if (totalCount <= TABLE_PAGE_SIZE) { el.innerHTML = ''; return; }
+  const nums = pageNumbersToShow(tablePage, totalPages);
+  let numsHtml = '';
+  let prevShown = 0;
+  nums.forEach(function (p) {
+    if (prevShown && p - prevShown > 1) numsHtml += '<span class="page-ellipsis">…</span>';
+    numsHtml += '<button type="button" class="page-num' + (p === tablePage ? ' active' : '') + '" data-page="' + p + '">' + p + '</button>';
+    prevShown = p;
+  });
+  el.innerHTML = '<span class="page-found">Найдено: ' + totalCount + '</span>' +
+    '<button type="button" class="page-nav" data-page-nav="prev"' + (tablePage <= 1 ? ' disabled' : '') + '><i class="ri-arrow-left-s-line"></i></button>' +
+    numsHtml +
+    '<button type="button" class="page-nav" data-page-nav="next"' + (tablePage >= totalPages ? ' disabled' : '') + '><i class="ri-arrow-right-s-line"></i></button>';
+}
+(function wireTablePagination() {
+  const el = document.getElementById('tablePagination');
+  if (!el) return;
+  el.addEventListener('click', function (e) {
+    const numBtn = e.target.closest('[data-page]');
+    const navBtn = e.target.closest('[data-page-nav]');
+    if (numBtn) {
+      tablePage = parseInt(numBtn.dataset.page, 10) || 1;
+      renderTable();
+    } else if (navBtn && !navBtn.disabled) {
+      tablePage += navBtn.dataset.pageNav === 'prev' ? -1 : 1;
+      renderTable();
+    }
+  });
+})();
+
 function renderTable() {
   const tbody = document.getElementById('tableBody');
   const grid = document.getElementById('gridView');
@@ -1599,16 +1647,30 @@ function renderTable() {
   if (!allCoins.length) {
     tbody.innerHTML = '<tr><td colspan="9" class="empty-state"><i class="ri-database-2-line"></i>Нет данных MEXC. Ожидание WebSocket...</td></tr>';
     grid.innerHTML = '';
+    renderTablePagination(0, 0);
     return;
   }
   if (!visible.length) {
     tbody.innerHTML = '<tr><td colspan="9" class="empty-state"><i class="ri-filter-off-line"></i>Нет пар по текущим фильтрам. Сбросьте фильтры или подождите накопления 5с-метрик.</td></tr>';
     grid.innerHTML = '';
+    renderTablePagination(0, 0);
     return;
   }
 
+  // Пагинация (см. TABLE_PAGE_SIZE выше) — режем УЖЕ отфильтрованный/капнутый maxPairs список
+  // visible на страницы, а не рендерим всё одним длинным скроллом. Клампим номер страницы вместо
+  // сброса на 1, чтобы живые тики (объём/цена меняются, но состав почти тот же) не сбрасывали
+  // пользователя с текущей страницы.
+  const totalPages = Math.max(1, Math.ceil(visible.length / TABLE_PAGE_SIZE));
+  if (tablePage > totalPages) tablePage = totalPages;
+  if (tablePage < 1) tablePage = 1;
+  const pageStart = (tablePage - 1) * TABLE_PAGE_SIZE;
+  const pageVisible = visible.slice(pageStart, pageStart + TABLE_PAGE_SIZE);
+  renderTablePagination(visible.length, totalPages);
+
   const stratDef = activeStrategy ? STRATEGY_DEFS[activeStrategy] : null;
-  tbody.innerHTML = visible.map(function (c, i) {
+  tbody.innerHTML = pageVisible.map(function (c, iOnPage) {
+    const i = pageStart + iOnPage;
     const chg = c.change24 || 0;
     const sel = currentCoin && c.symbol === currentCoin.symbol;
     const sig = (c.signal || 'WAIT').toLowerCase();
@@ -1628,7 +1690,7 @@ function renderTable() {
       '<td>' + ratingCellHtml(c) + '</td></tr>';
   }).join('');
 
-  grid.innerHTML = visible.map(function (c) {
+  grid.innerHTML = pageVisible.map(function (c) {
     const chg = c.change24 || 0;
     const sel = currentCoin && c.symbol === currentCoin.symbol;
     return '<div class="grid-card ' + (sel ? 'selected' : '') + '" data-symbol="' + c.symbol + '">' +
