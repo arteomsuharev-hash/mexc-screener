@@ -1,17 +1,23 @@
 /* ... весь ваш CSS без изменений ... */
 :root {
-  --bg-primary: #0B0E11;
-  --bg-secondary: #11161C;
-  --bg-card: #1A2028;
-  --bg-hover: #252B33;
-  --border-color: #2B3139;
-  --text-primary: #EAECEF;
-  --text-secondary: #848E9C;
-  --text-muted: #5E6673;
-  --green: #00C076;
-  --red: #F84960;
-  --orange: #F0B90B;
-  --blue: #1E80FF;
+  /* Зелёная неоновая тема (редизайн 2026-09, по образцу пользовательского макета) — те же имена
+     переменных, что и раньше, просто новые значения, поэтому всё, что уже написано через var(--...),
+     подхватывает новый вид без переписывания каждого правила. */
+  --bg-primary: #050b08;
+  --bg-secondary: #08150f;
+  --bg-card: #0d1f17;
+  --bg-hover: #123023;
+  --border-color: #1c4433;
+  --text-primary: #eafff2;
+  --text-secondary: #8fd6b2;
+  --text-muted: #547a68;
+  --green: #35ff8d;
+  --red: #ff5470;
+  --orange: #ffb238;
+  --blue: #22d3ee;
+  --neon: #35ff8d;
+  --neon-glow: rgba(53, 255, 141, .35);
+  --neon-glow-soft: rgba(53, 255, 141, .16);
   --sidebar-width: 248px;
   --header-height: 56px;
   --font-main: 'Inter', system-ui, -apple-system, sans-serif;
@@ -32,9 +38,10 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #2B3139; border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: #3d4550; }
-.app { display: flex; height: 100vh; width: 100vw; overflow: hidden; }
+.app { display: flex; height: 100vh; width: 100vw; overflow: hidden; padding: 10px; gap: 10px; }
 
-/* SIDEBAR */
+/* SIDEBAR — скруглённая панель со светящейся зелёной рамкой (редизайн 2026-09), а не сплошная
+   боковая колонка во всю высоту без зазоров, как раньше. */
 .sidebar {
   width: var(--sidebar-width);
   /* Раньше был литеральный тёмный градиент (#0E1318→#0B0E11), не завязанный на CSS-переменные —
@@ -42,7 +49,9 @@ body {
      никак не затрагивало, он оставался тёмным. Теперь строим тот же по ощущению градиент из
      переменных, чтобы сайдбар следовал теме, как и остальной интерфейс. */
   background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
-  border-right: 1px solid var(--border-color);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  box-shadow: 0 0 0 1px var(--neon-glow-soft), 0 0 24px -8px var(--neon-glow);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -109,21 +118,15 @@ body {
 }
 .nav-item span { overflow: hidden; transition: opacity .2s; }
 .nav-item i { font-size: 18px; width: 22px; text-align: center; flex-shrink: 0; }
-.nav-item:hover { background: rgba(128,128,128,.12); color: var(--text-primary); transform: translateX(2px); }
+.nav-item:hover { background: var(--neon-glow-soft); color: var(--text-primary); transform: translateX(2px); }
 .nav-item.active {
-  background: linear-gradient(90deg, rgba(30,128,255,.14), rgba(30,128,255,.03));
-  color: var(--text-primary);
-  box-shadow: inset 0 0 0 1px rgba(30,128,255,.18);
+  background: var(--neon-glow-soft);
+  color: var(--green);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--neon-glow), 0 0 16px -4px var(--neon-glow);
 }
-.nav-item.active::before {
-  content: '';
-  position: absolute;
-  left: 0; top: 10px; bottom: 10px;
-  width: 3px;
-  background: var(--blue);
-  border-radius: 0 3px 3px 0;
-  box-shadow: 0 0 10px 1px rgba(30,128,255,.7);
-}
+.nav-item.active i { color: var(--green); text-shadow: 0 0 8px var(--neon-glow); }
+.nav-item.active::before { display: none; }
 .nav-badge {
   margin-left: auto;
   min-width: 18px;
@@ -478,12 +481,14 @@ body {
   color: var(--text-secondary); padding: 6px 12px; border-radius: 4px;
   font-size: 12px; cursor: pointer; transition: all .15s; white-space: nowrap;
 }
-.filter-btn:hover { border-color: var(--text-secondary); color: var(--text-primary); }
+.filter-btn:hover { border-color: var(--green); color: var(--text-primary); }
 .filter-btn.primary {
-  background: #fff; border-color: #fff; color: #0B0E11; font-weight: 600;
+  background: var(--green); border-color: var(--green); color: #04140c; font-weight: 700;
   display: flex; align-items: center; gap: 6px;
+  box-shadow: 0 0 18px -5px var(--neon-glow);
 }
 .filter-btn.primary:hover { opacity: .9; }
+.filter-btn, .filter-select { border-radius: 999px; }
 .app-toast {
   position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(12px);
   background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);
@@ -655,7 +660,7 @@ body {
   -webkit-backdrop-filter: blur(10px) saturate(1.7) brightness(1.06);
   border-radius: 10px;
 }
-.data-table tr.selected { background: rgba(30,128,255,.08); box-shadow: inset 3px 0 0 var(--blue); }
+.data-table tr.selected { background: var(--neon-glow-soft); box-shadow: inset 3px 0 0 var(--green); }
 @keyframes rowEnterIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 .data-table tr.row-enter { animation: rowEnterIn .3s ease both; }
 .cell-price { position: relative; }
@@ -1217,13 +1222,36 @@ body {
 .grid-card-price { font-family: var(--font-mono); font-size: 18px; font-weight: 700; }
 .grid-card-meta { display: flex; justify-content: space-between; margin-top: 8px; font-size: 11px; color: var(--text-muted); }
 
+/* Правая колонка вместо нижней панели (редизайн 2026-09, по образцу макета) — #page-screener ниже
+   переопределяет .page на CSS Grid (2 колонки: контент таблицы | правая панель монеты), и
+   .bottom-panel/.coin-info/.chart-area из горизонтальной нижней плашки становятся вертикальной
+   колонкой во всю высоту, оформленной как отдельная светящаяся карточка. */
+#page-screener.active {
+  /* .active — иначе правило форсировало бы display:grid ВСЕГДА, даже когда открыта другая
+     страница (у .page есть свой display:none по умолчанию, .active его переопределяет на flex —
+     без этого уточнения #page-screener оставался бы видимым поверх/под любой другой активной
+     страницей; ровно так это и сломалось при первой проверке). */
+  display: grid !important;
+  grid-template-columns: 1fr 320px;
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "filterbar filterbar" "content bottompanel";
+  gap: 10px;
+  padding: 10px;
+  min-height: 0;
+}
+#page-screener > .filter-bar { grid-area: filterbar; }
+#page-screener > #screenerContent { grid-area: content; min-width: 0; min-height: 0; }
 .bottom-panel {
-  background: var(--bg-secondary); border-top: 1px solid var(--border-color);
-  display: flex; height: clamp(230px, 34vh, 400px); flex-shrink: 0;
+  grid-area: bottompanel;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  box-shadow: 0 0 0 1px var(--neon-glow-soft), 0 0 24px -10px var(--neon-glow);
+  display: flex; flex-direction: column; height: auto; min-height: 0; overflow-y: auto;
 }
 .coin-info {
-  width: 250px; padding: 16px;
-  border-right: 1px solid var(--border-color);
+  width: auto; padding: 16px;
+  border-right: none; border-bottom: 1px solid var(--border-color);
   display: flex; flex-direction: column; flex-shrink: 0;
 }
 .coin-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
@@ -1239,7 +1267,7 @@ body {
 .info-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
 .info-value { font-size: 13px; font-weight: 600; font-family: var(--font-mono); }
 
-.chart-area { flex: 1; display: flex; flex-direction: column; border-right: 1px solid var(--border-color); min-width: 0; }
+.chart-area { flex: 1; display: flex; flex-direction: column; border-right: none; min-width: 0; min-height: 320px; }
 .chart-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 8px 16px; border-bottom: 1px solid var(--border-color); gap: 10px;
