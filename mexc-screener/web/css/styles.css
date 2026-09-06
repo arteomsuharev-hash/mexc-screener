@@ -190,6 +190,16 @@ body {
 .sidebar.collapsed .sidebar-action span,
 .sidebar.collapsed .nav-badge,
 .sidebar.collapsed .conn-pill span { opacity: 0; width: 0; overflow: hidden; pointer-events: none; }
+.sidebar.collapsed .sidebar-mascot { display: none; }
+/* Маскоты (редизайн 2026-09) — оригинальный дизайн дед-учёный/подросток-помощник, НЕ Рик и Морти
+   (см. обсуждение в чате про авторские права) — узнаваемых силуэтов причёсок/костюма нарочно нет. */
+.sidebar-mascot { padding: 6px 12px 4px; display: flex; flex-direction: column; align-items: center; }
+.sidebar-mascot svg { width: 100%; max-width: 170px; height: auto; }
+.sidebar-mascot-bubble {
+  margin-top: -4px; background: var(--bg-card); border: 1px solid var(--border-color);
+  border-radius: 10px; padding: 4px 10px; font-size: 10px; color: var(--text-secondary);
+  white-space: nowrap;
+}
 /* Паддинг НЕ переопределяем (был "10px 0") — он не входит в transition у .nav-item, поэтому менялся
    мгновенно, пока ширина сайдбара плавно анимируется 320мс, и иконка визуально "прыгала" в середине
    анимации. Паддинг слева/справа и так симметричный (12px/12px), так что justify-content:center
@@ -420,10 +430,20 @@ body {
 .finres-warn-banner i { font-size: 15px; flex-shrink: 0; }
 
 .topbar {
-  height: var(--header-height); background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-color);
+  /* Баннер (редизайн 2026-09) — та же скруглённая светящаяся карточка, что у сайдбара/правой
+     панели, плюс мягкое радиальное "портальное" зелёное свечение по краям (чисто CSS-градиент,
+     не иллюстрация — см. .topbar-mascot ниже про маскотов). */
+  height: calc(var(--header-height) + 20px);
+  background:
+    radial-gradient(circle at 8% -40%, var(--neon-glow-soft), transparent 55%),
+    radial-gradient(circle at 96% 140%, var(--neon-glow-soft), transparent 55%),
+    var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  box-shadow: 0 0 0 1px var(--neon-glow-soft), 0 0 28px -10px var(--neon-glow);
   display: flex; align-items: center; justify-content: space-between;
-  padding: 0 20px; flex-shrink: 0;
+  padding: 0 20px; flex-shrink: 0; margin-bottom: 10px;
+  position: relative; overflow: hidden;
 }
 .topbar-left { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .status-badge {
@@ -710,6 +730,21 @@ body {
 .algo-badge.up { background: rgba(18,255,94,.14); color: var(--green); box-shadow: inset 0 0 0 1px rgba(18,255,94,.3); }
 .algo-badge.down { background: rgba(255,61,99,.14); color: var(--red); box-shadow: inset 0 0 0 1px rgba(255,61,99,.3); }
 .algo-badge.neutral { background: rgba(34,211,238,.14); color: var(--blue); box-shadow: inset 0 0 0 1px rgba(34,211,238,.3); }
+
+/* Таблетки быстрых фильтров над таблицей (редизайн 2026-09, по образцу макета) — реальный
+   дополнительный фильтр (см. algoCategoryPillMatches в app.js), НЕ дублирует и не заменяет
+   выпадающий список "Профиль/Стратегия" ниже — работает как AND поверх него. */
+.algo-pill-row { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 16px 0; }
+.algo-pill {
+  background: transparent; border: 1px solid var(--border-color); color: var(--text-secondary);
+  padding: 6px 16px; border-radius: 999px; font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: all .15s;
+}
+.algo-pill:hover { border-color: var(--green); color: var(--text-primary); }
+.algo-pill.active {
+  background: var(--green); border-color: var(--green); color: #04140c;
+  box-shadow: 0 0 18px -5px var(--neon-glow);
+}
 
 .profile-nav-pills { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 22px; }
 .profile-nav-pill {

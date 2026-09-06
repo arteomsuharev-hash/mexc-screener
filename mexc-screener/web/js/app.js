@@ -507,6 +507,31 @@ let maxPairs = 400;
 let filtersActive = true;
 let wsInitialDataLoaded = false;
 let activeStrategy = null; // null = обычные профили (Balanced/Aggressive/...), иначе ключ STRATEGY_DEFS
+// Таблетки быстрых фильтров над таблицей (редизайн 2026-09) — отдельный, дополнительный фильтр
+// (см. algoCategoryPillMatches), работает как AND поверх активного профиля/стратегии, а не вместо
+// него. 'all' — без доп.фильтра, 'algo' — есть хоть один активный Tier-2 бейдж (см. algoBadgesCellHtml),
+// остальные — конкретные группы detectorKey.
+let activeAlgoPill = 'all';
+const ALGO_PILL_DETECTOR_KEYS = {
+  pump_dump: ['pumpReversal', 'dumpReversal', 'twap'],
+  volume: ['volumeAnomaly', 'liquidityWithdrawal'],
+  density: ['densityBreak', 'densityAbsorption', 'densityAbsorptionBreakout', 'standingWall', 'absorption', 'fakeLiquidity', 'possibleHiddenAbsorption'],
+  reversal: ['liquiditySweep', 'failedBreakout', 'pumpReversal', 'dumpReversal'],
+  cycle: ['cycle', 'cyclicalPattern', 'timeBasedImpulse']
+};
+// Честно смотрит на activePatternEvents (тот же живой Tier-2 срез, что и у algoBadgesCellHtml) —
+// не выдумывает совпадение для монет вне watchlist.
+function algoCategoryPillMatches(symbol) {
+  if (activeAlgoPill === 'all') return true;
+  const keys = ALGO_PILL_DETECTOR_KEYS[activeAlgoPill];
+  for (let i = 0; i < activePatternEvents.length; i++) {
+    const ev = activePatternEvents[i];
+    if (ev.symbol !== symbol) continue;
+    if (activeAlgoPill === 'algo') return true;
+    if (keys && keys.indexOf(ev.detectorKey) !== -1) return true;
+  }
+  return false;
+}
 // Внутри активной стратегии по умолчанию список отсортирован по её score() (рекомендованный порядок).
 // Если пользователь кликает по заголовку столбца (объём, цена и т.д.), включаем "ручной" режим —
 // список остаётся отфильтрованным по правилам стратегии (match()), но порядок теперь по этому столбцу,
@@ -1375,6 +1400,7 @@ function parseFilterVal(id) {
 }
 
 function coinPassesFilters(c) {
+  if (!algoCategoryPillMatches(c.symbol)) return false;
   if (activeExchangeFilter !== 'ALL' && (c.exchange || 'MEXC') !== activeExchangeFilter) return false;
   const q = searchQuery.toLowerCase();
   if (q && c.symbol.toLowerCase().indexOf(q) === -1 && c.baseAsset.toLowerCase().indexOf(q) === -1) return false;
@@ -1564,6 +1590,18 @@ function renderTable() {
 // наведение, включает/выключает tableHoverFreezeSymbol (см. её объявление и использование в applySortOnly).
 // mouseover/mouseout (а не mouseenter/mouseleave) специально — те не всплывают, делегирование через
 // closest() работает только с всплывающими событиями.
+(function wireAlgoPillRow() {
+  const row = document.getElementById('algoPillRow');
+  if (!row) return;
+  row.addEventListener('click', function (e) {
+    const btn = e.target.closest('[data-algo-pill]');
+    if (!btn) return;
+    activeAlgoPill = btn.dataset.algoPill;
+    row.querySelectorAll('.algo-pill').forEach(function (p) { p.classList.toggle('active', p === btn); });
+    renderTable();
+  });
+})();
+
 (function wireTableHoverFreeze() {
   function onOver(e) {
     const row = e.target.closest('tr[data-symbol], .grid-card[data-symbol]');
