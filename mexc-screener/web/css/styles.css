@@ -743,6 +743,12 @@ body {
 .mini-chart-price.up, .mini-chart-change.up { color: var(--green); }
 .mini-chart-price.down, .mini-chart-change.down { color: var(--red); }
 .mini-chart-canvas { width: 100%; height: 130px; display: block; }
+.mini-chart-card.pinned { border-color: rgba(30,128,255,.45); }
+.mini-chart-unpin {
+  border: 0; background: none; color: var(--text-muted); font-size: 14px; line-height: 1; cursor: pointer;
+  padding: 0 2px; margin-right: 2px;
+}
+.mini-chart-unpin:hover { color: var(--red); }
 .profile-strategy-card {
   position: relative; border: 1px solid var(--border-color); border-radius: 10px; padding: 16px 18px 18px;
   cursor: pointer; transition: border-color .15s, background .15s, transform .1s; display: flex; flex-direction: column; gap: 8px;
