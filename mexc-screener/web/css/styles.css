@@ -60,7 +60,12 @@ h2 { font-family: var(--font-display); letter-spacing: .3px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #2B3139; border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: #3d4550; }
-.app { display: flex; height: 100vh; width: 100vw; overflow: hidden; padding: 10px; gap: 10px; }
+/* Шапка (баннер со статами) теперь ПОЛНОЙ ШИРИНЫ над сайдбаром+контентом (редизайн 2026-09-3, по
+   образцу присланного макета "NEURAL SCREENER" — там header идёт над трёхколоночным телом, а не
+   сбоку от сайдбара) — .app стал колонкой (topbar сверху), а бывшая горизонтальная раскладка
+   sidebar|main переехала в новый .app-body. */
+.app { display: flex; flex-direction: column; height: 100vh; width: 100vw; overflow: hidden; padding: 10px; gap: 10px; }
+.app-body { display: flex; flex: 1; min-height: 0; gap: 10px; }
 
 /* SIDEBAR — скруглённая панель со светящейся зелёной рамкой (редизайн 2026-09), а не сплошная
    боковая колонка во всю высоту без зазоров, как раньше. */
@@ -487,7 +492,7 @@ h2 { font-family: var(--font-display); letter-spacing: .3px; }
   border-radius: 16px;
   box-shadow: 0 0 0 1px var(--neon-glow-soft), 0 0 28px -10px var(--neon-glow);
   display: flex; align-items: center; justify-content: space-between;
-  padding: 0 20px; flex-shrink: 0; margin-bottom: 10px;
+  padding: 0 20px; flex-shrink: 0;
   position: relative; overflow: hidden;
 }
 .topbar-left { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }

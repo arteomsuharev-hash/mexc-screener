@@ -13,6 +13,21 @@
 <body>
 <!-- HTML разметка без изменений -->
 <div class="app">
+  <div class="topbar">
+    <div class="topbar-left">
+      <div class="status-badge off" id="connectionStatus"><span class="status-dot"></span><span id="statusText" data-i18n>ПОДКЛЮЧЕНИЕ...</span></div>
+      <div class="topbar-metrics">
+        <div class="metric"><div class="metric-label" data-i18n>Пары USDT</div><div class="metric-value" id="metricCoins">0</div></div>
+        <div class="metric"><div class="metric-label" data-i18n>Показано</div><div class="metric-value" id="metricShown">0</div></div>
+        <div class="metric"><div class="metric-label" data-i18n>Сделок</div><div class="metric-value" id="metricTrades">0</div></div>
+        <div class="metric"><div class="metric-label" data-i18n>Время работы</div><div class="metric-value" id="metricUptime">00:00:00</div></div>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="time-display" id="clock">--:--:--</div>
+    </div>
+  </div>
+  <div class="app-body">
   <aside class="sidebar" id="sidebar">
     <div class="logo">
       <div class="logo-icon" title="MEXC">
@@ -77,21 +92,6 @@
   </aside>
 
   <main class="main">
-    <div class="topbar">
-      <div class="topbar-left">
-        <div class="status-badge off" id="connectionStatus"><span class="status-dot"></span><span id="statusText" data-i18n>ПОДКЛЮЧЕНИЕ...</span></div>
-        <div class="topbar-metrics">
-          <div class="metric"><div class="metric-label" data-i18n>Пары USDT</div><div class="metric-value" id="metricCoins">0</div></div>
-          <div class="metric"><div class="metric-label" data-i18n>Показано</div><div class="metric-value" id="metricShown">0</div></div>
-          <div class="metric"><div class="metric-label" data-i18n>Сделок</div><div class="metric-value" id="metricTrades">0</div></div>
-          <div class="metric"><div class="metric-label" data-i18n>Время работы</div><div class="metric-value" id="metricUptime">00:00:00</div></div>
-        </div>
-      </div>
-      <div class="topbar-right">
-        <div class="time-display" id="clock">--:--:--</div>
-      </div>
-    </div>
-
     <div class="page active" id="page-screener">
       <div class="filter-bar">
         <div class="algo-pill-row" id="algoPillRow">
@@ -808,6 +808,7 @@
       </div>
     </div>
   </main>
+  </div>
 </div>
 
 <div class="modal-overlay" id="modal">
