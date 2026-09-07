@@ -938,7 +938,7 @@ tr.rank-one .coin-icon::after {
 .graphs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
 .mini-chart-card {
   border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-card);
-  cursor: pointer; transition: border-color .15s, transform .1s; overflow: hidden;
+  transition: border-color .15s, transform .1s; overflow: hidden;
   display: flex; flex-direction: column;
 }
 .mini-chart-card:hover { border-color: var(--blue); transform: translateY(-1px); }
@@ -948,13 +948,17 @@ tr.rank-one .coin-icon::after {
 .mini-chart-change { min-width: 52px; text-align: right; }
 .mini-chart-price.up, .mini-chart-change.up { color: var(--green); }
 .mini-chart-price.down, .mini-chart-change.down { color: var(--red); }
-.mini-chart-canvas { width: 100%; height: 130px; display: block; }
+/* grab — можно зажать и потащить (пан), колесо мыши сверху — зум; см. wireGraphsGridClick */
+.mini-chart-canvas { width: 100%; height: 130px; display: block; cursor: grab; touch-action: none; }
+.mini-chart-canvas.dragging { cursor: grabbing; }
 .mini-chart-card.pinned { border-color: rgba(201,143,160,.45); }
-.mini-chart-unpin {
-  border: 0; background: none; color: var(--text-muted); font-size: 14px; line-height: 1; cursor: pointer;
-  padding: 0 2px; margin-right: 2px;
+.mini-chart-unpin, .mini-chart-copy, .mini-chart-open {
+  border: 0; background: none; color: var(--text-muted); font-size: 13px; line-height: 1; cursor: pointer;
+  padding: 2px 3px; margin-right: 2px; border-radius: 4px; display: inline-flex; align-items: center;
 }
+.mini-chart-unpin { font-size: 14px; }
 .mini-chart-unpin:hover { color: var(--red); }
+.mini-chart-copy:hover, .mini-chart-open:hover { color: var(--accent); background: var(--bg-hover); }
 .profile-strategy-card {
   position: relative; border: 1px solid var(--border-color); border-radius: 10px; padding: 16px 18px 18px;
   cursor: pointer; transition: border-color .15s, background .15s, transform .1s; display: flex; flex-direction: column; gap: 8px;

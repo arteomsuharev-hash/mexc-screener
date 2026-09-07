@@ -2602,7 +2602,15 @@ function drawMiniCandleChart(canvas, candles, opts) {
   const plotH = h - padTop - padBottom - volumeH;
   const volTop = padTop + plotH;
 
-  const slice = candles.slice(-Math.max(20, opts.maxCandles || 96));
+  // offsetFromEnd/maxCandles — окно просмотра для зума/панорамы конкретной карточки (см.
+  // graphsChartView в wireGraphsGridClick): offset=0 значит "последние maxCandles свечей" (как
+  // раньше), offset>0 сдвигает окно назад по истории — сам массив candles не режется/не мутирует,
+  // только то, какой его отрезок сейчас рисуем.
+  const maxCandles = Math.max(8, opts.maxCandles || 96);
+  const offsetFromEnd = Math.max(0, Math.min(candles.length - 2, opts.offsetFromEnd || 0));
+  const sliceEnd = candles.length - offsetFromEnd;
+  const sliceStart = Math.max(0, sliceEnd - maxCandles);
+  const slice = candles.slice(sliceStart, sliceEnd);
   const n = slice.length;
   if (n < 2) return;
 
@@ -5168,6 +5176,14 @@ function updatePatternValidationPanel() {
 const GRAPHS_REFRESH_MS = 20000; // как часто перезапрашиваем историю свечей по REST
 const GRAPHS_REDRAW_MS = 2000;   // как часто просто перерисовываем уже загруженное (живая цена)
 let graphsCandles = new Map();   // symbol -> candles[] (последний REST-снимок)
+// Индивидуальный зум/пан КАЖДОЙ карточки (колесо мыши / зажать-потащить на canvas, см.
+// wireGraphsGridClick) — symbol -> {count, offset}, живёт отдельно от graphsCandles, поэтому
+// переживает переперестройку сетки (смену фильтра/сортировки) и REST-обновление свечей той же
+// монеты. Отсутствие записи = дефолт (последние 96 свечей, см. drawMiniCandleChart).
+let graphsChartView = new Map();
+const GRAPHS_MIN_ZOOM_CANDLES = 12;
+const GRAPHS_MAX_ZOOM_CANDLES = 200; // столько же свечей и запрашиваем по REST (см. refreshGraphsCandles)
+let graphsDrag = null; // {symbol, canvas, startX, startOffset, count} — активное перетаскивание графика (см. wireGraphsGridClick)
 let graphsVisibleSymbols = [];
 // Раньше "изменился ли состав сетки" определялось сравнением с предыдущим graphsVisibleSymbols,
 // а места, которым нужно было ФОРСИРОВАТЬ перестройку (смена фильтра/пина), просто обнуляли его в
@@ -5261,14 +5277,20 @@ function graphsMiniCardHtml(symbol) {
   const changeCls = coin && coin.change24 >= 0 ? 'up' : 'down';
   const pinned = graphsPinned.has(symbol);
   const safeSymbol = symbol.replace(/"/g, '&quot;');
-  return '<div class="mini-chart-card' + (pinned ? ' pinned' : '') + '" data-symbol="' + safeSymbol + '" title="' + t('Открыть график и стакан') + ' ' + safeSymbol + '">' +
+  // Карточка больше не открывает Скринер по клику на сам график — колесо мыши/зажать-потащить
+  // на canvas теперь масштабируют/двигают ЭТОТ конкретный мини-график (см. graphsChartView,
+  // wireGraphsGridClick), а не уводят со страницы. Полный переход в Скринер — отдельная кнопка
+  // (mini-chart-open), копия тикера — тоже отдельная кнопка, обе в шапке карточки.
+  return '<div class="mini-chart-card' + (pinned ? ' pinned' : '') + '" data-symbol="' + safeSymbol + '">' +
     '<div class="mini-chart-head">' +
       (pinned ? '<button class="mini-chart-unpin" data-unpin="' + safeSymbol + '" title="' + t('Открепить') + '">×</button>' : '') +
       '<span class="mini-chart-symbol">' + (coin ? coinDisplayLabel(coin) : symbol).replace(/</g, '&lt;') + '</span>' +
       '<span class="mini-chart-price ' + changeCls + '">' + (coin ? fmtPrice(coin.price) : '—') + '</span>' +
       '<span class="mini-chart-change ' + changeCls + '">' + (coin && coin.change24 != null ? (coin.change24 >= 0 ? '+' : '') + coin.change24.toFixed(2) + '%' : '') + '</span>' +
+      '<button class="mini-chart-copy" data-copy="' + safeSymbol + '" title="' + t('Скопировать тикер') + '"><i class="ri-file-copy-line"></i></button>' +
+      '<button class="mini-chart-open" data-open="' + safeSymbol + '" title="' + t('Открыть в Скринере') + '"><i class="ri-external-link-line"></i></button>' +
     '</div>' +
-    '<canvas class="mini-chart-canvas"></canvas>' +
+    '<canvas class="mini-chart-canvas" title="' + t('Колесо — масштаб, зажать и тащить — панорама, двойной клик — сбросить') + '"></canvas>' +
   '</div>';
 }
 
@@ -5316,13 +5338,36 @@ function redrawGraphsGrid() {
         c: coin.price, h: Math.max(last.h, coin.price), l: Math.min(last.l, coin.price)
       });
     }
-    drawMiniCandleChart(canvas, patched, { markers: graphsMarkersForSymbol(symbol) });
+    const view = graphsChartView.get(symbol);
+    drawMiniCandleChart(canvas, patched, {
+      markers: graphsMarkersForSymbol(symbol),
+      maxCandles: view ? view.count : undefined,
+      offsetFromEnd: view ? view.offset : 0
+    });
   });
+}
+
+// Копирование тикера монеты (кнопка mini-chart-copy на карточке «Графики») — тот же паттерн
+// clipboard-с-fallback'ом, что и copySymbolForVataga выше, просто нейтральный тост без упоминания
+// конкретного терминала (тут это просто "скопировать тикер", а не подсказка для конкретного места).
+function copyGraphsTicker(symbol) {
+  const text = rawSymbol(symbol);
+  const announce = function () { showAppToast(t('Тикер скопирован') + ': ' + text); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(announce).catch(function () { fallbackCopyText(text); announce(); });
+  } else {
+    fallbackCopyText(text);
+    announce();
+  }
 }
 
 (function wireGraphsGridClick() {
   const grid = document.getElementById('graphsGrid');
   if (!grid) return;
+
+  // Клики по кнопкам в шапке карточки — открепить/скопировать/открыть в Скринере. Клик по самому
+  // графику (canvas) больше никуда не уводит: там теперь зум/пан (колесо/зажать-потащить, ниже) и
+  // двойной клик — сброс.
   grid.addEventListener('click', function (e) {
     const unpinBtn = e.target.closest('[data-unpin]');
     if (unpinBtn) {
@@ -5333,14 +5378,19 @@ function redrawGraphsGrid() {
       updateGraphsPage();
       return;
     }
-    const card = e.target.closest('.mini-chart-card[data-symbol]');
-    if (card) openCoinFromPattern(card.dataset.symbol);
+    const copyBtn = e.target.closest('[data-copy]');
+    if (copyBtn) { e.stopPropagation(); copyGraphsTicker(copyBtn.dataset.copy); return; }
+    const openBtn = e.target.closest('[data-open]');
+    if (openBtn) { e.stopPropagation(); openCoinFromPattern(openBtn.dataset.open); return; }
   });
+
   // Наведение на маркер алгоритма — полное объяснение (explainPatternEvent) через нативный title,
   // без отдельного плавающего тултипа: canvas.__markerHits проставляется drawMiniCandleChart'ом
-  // (см. её же комментарий) на каждую перерисовку.
+  // (см. её же комментарий) на каждую перерисовку. Во время перетаскивания (панорамы) не дёргаем —
+  // ниже координаты маркеров всё равно сейчас же станут неактуальны от следующей перерисовки.
   const HOVER_RADIUS_PX = 8;
   grid.addEventListener('mousemove', function (e) {
+    if (graphsDrag) return;
     const canvas = e.target.closest('.mini-chart-canvas');
     if (!canvas) return;
     const hits = canvas.__markerHits || [];
@@ -5354,6 +5404,71 @@ function redrawGraphsGrid() {
     });
     const nextTitle = found ? explainPatternEvent(found.ev) : '';
     if (canvas.title !== nextTitle) canvas.title = nextTitle; // не дёргаем title на каждый мышемув без надобности
+  });
+
+  // Колесо мыши над конкретным мини-графиком — зум ЭТОЙ карточки (не всей страницы): вверх —
+  // приблизить (меньше свечей видно), вниз — отдалить. preventDefault, чтобы страница саму не
+  // скроллило заодно.
+  grid.addEventListener('wheel', function (e) {
+    const canvas = e.target.closest('.mini-chart-canvas');
+    if (!canvas) return;
+    const card = canvas.closest('.mini-chart-card[data-symbol]');
+    if (!card) return;
+    const symbol = card.dataset.symbol;
+    const candles = graphsCandles.get(symbol);
+    if (!candles || candles.length < 2) return;
+    e.preventDefault();
+    const view = graphsChartView.get(symbol) || { count: Math.min(96, candles.length), offset: 0 };
+    const factor = e.deltaY < 0 ? 0.85 : 1 / 0.85;
+    const maxCount = Math.min(candles.length, GRAPHS_MAX_ZOOM_CANDLES);
+    const nextCount = Math.max(GRAPHS_MIN_ZOOM_CANDLES, Math.min(maxCount, Math.round(view.count * factor)));
+    const maxOffset = Math.max(0, candles.length - nextCount);
+    graphsChartView.set(symbol, { count: nextCount, offset: Math.max(0, Math.min(maxOffset, view.offset)) });
+    redrawGraphsGrid();
+  }, { passive: false });
+
+  // Зажать и тащить — панорама (пан) той же карточки. Слушаем mousemove/mouseup на document, а не
+  // на grid/canvas, чтобы перетаскивание не срывалось, если курсор на миг ушёл за пределы холста —
+  // обычное поведение drag в любом графическом редакторе/чарте.
+  grid.addEventListener('mousedown', function (e) {
+    const canvas = e.target.closest('.mini-chart-canvas');
+    if (!canvas) return;
+    const card = canvas.closest('.mini-chart-card[data-symbol]');
+    if (!card) return;
+    const symbol = card.dataset.symbol;
+    const candles = graphsCandles.get(symbol);
+    if (!candles || candles.length < 2) return;
+    const view = graphsChartView.get(symbol) || { count: Math.min(96, candles.length), offset: 0 };
+    graphsDrag = { symbol: symbol, canvas: canvas, startX: e.clientX, startOffset: view.offset, count: view.count };
+    canvas.classList.add('dragging');
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', function (e) {
+    if (!graphsDrag) return;
+    const candles = graphsCandles.get(graphsDrag.symbol);
+    if (!candles || candles.length < 2) return;
+    const dx = e.clientX - graphsDrag.startX;
+    const pxPerCandle = (graphsDrag.canvas.clientWidth || 220) / graphsDrag.count;
+    const deltaCandles = Math.round(dx / pxPerCandle);
+    const maxOffset = Math.max(0, candles.length - graphsDrag.count);
+    const nextOffset = Math.max(0, Math.min(maxOffset, graphsDrag.startOffset + deltaCandles));
+    graphsChartView.set(graphsDrag.symbol, { count: graphsDrag.count, offset: nextOffset });
+    redrawGraphsGrid();
+  });
+  document.addEventListener('mouseup', function () {
+    if (!graphsDrag) return;
+    if (graphsDrag.canvas) graphsDrag.canvas.classList.remove('dragging');
+    graphsDrag = null;
+  });
+
+  // Двойной клик по графику — сброс зума/пана этой карточки к дефолту (последние 96 свечей).
+  grid.addEventListener('dblclick', function (e) {
+    const canvas = e.target.closest('.mini-chart-canvas');
+    if (!canvas) return;
+    const card = canvas.closest('.mini-chart-card[data-symbol]');
+    if (!card) return;
+    graphsChartView.delete(card.dataset.symbol);
+    redrawGraphsGrid();
   });
 })();
 
