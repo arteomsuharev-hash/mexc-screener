@@ -294,35 +294,20 @@ h2 span[data-i18n] {
 }
 .finres-tab i { font-size: 16px; width: 18px; text-align: center; flex-shrink: 0; color: var(--text-muted); transition: color .18s ease; }
 .finres-tab:hover { background: rgba(255,255,255,.05); color: #fff; transform: translateX(1px); }
-.finres-tab.active { background: rgba(76,125,255,.14); color: #fff; box-shadow: inset 0 0 0 1px rgba(76,125,255,.3); }
+.finres-tab.active { background: rgba(201,143,160,.14); color: #fff; box-shadow: inset 0 0 0 1px rgba(201,143,160,.3); }
 .finres-tab.active::before {
   content: ''; position: absolute; left: -10px; top: 7px; bottom: 7px; width: 3px;
-  background: var(--blue); border-radius: 0 3px 3px 0; box-shadow: 0 0 8px -1px rgba(76,125,255,.6);
+  background: var(--blue); border-radius: 0 3px 3px 0; box-shadow: 0 0 8px -1px rgba(201,143,160,.6);
 }
 .finres-tab.active i { color: var(--blue); }
 .finres-content { flex: 1; overflow-y: auto; padding: 22px 26px 40px; min-width: 0; }
 
-/* --- Финрез: отдельная тёмная trading-terminal палитра (раунд 10), scoped исключительно на
-   #page-finres через переопределение CSS custom properties — не трогает общую тему остального
-   приложения (скринер, настройки и т.д.), т.к. все finres-компоненты и так рендерятся через var(). --- */
-#page-finres {
-  --bg-primary: #080B0F;
-  --bg-secondary: #0D1218;
-  /* ВАЖНО: --bg-card обязан быть заметно СВЕТЛЕЕ --bg-secondary (сохраняем 3-уровневую иерархию
-     primary < secondary < card, как в основной теме приложения). Раньше оба были #0D1218 —
-     карточка/ячейка сливалась с фоном контейнера и текст на ней становился нечитаемым
-     (регрессия читаемости календаря P&L, репорт пользователя). */
-  --bg-card: #161E27;
-  --bg-hover: #1E2732;
-  --border-color: #1A2630;
-  --text-primary: #E8EDF2;
-  --text-secondary: #7C8996;
-  --text-muted: #57626D;
-  --green: #00D084;
-  --red: #FF4D5A;
-  --blue: #4C7DFF;
-  background: var(--bg-primary);
-}
+/* Финрез раньше нёс СВОЮ отдельную палитру (--bg-*/--blue и т.д. переопределялись только для
+   #page-finres, "раунд 10", ДО редизайна 2026-09) — из-за этого страница осталась на старом
+   синем акценте и синеватом фоне, пока весь остальной интерфейс перешёл на editorial чёрный/
+   графит/пыльная роза (см. :root выше). Убрано: страница наследует общую тему напрямую, поэтому
+   "оформить по дизайну скринера" теперь автоматически верно и для Финреза, без отдельного
+   раздвоения палитры, которое опять разъедется при следующей смене темы. */
 .finres-subnav-title { position: relative; }
 .finres-subnav-title::after { content: ''; display: block; width: 20px; height: 2px; background: var(--blue); border-radius: 2px; margin-top: 9px; }
 
@@ -537,7 +522,7 @@ h2 span[data-i18n] {
 /* Верхний статус-бейдж подсвечивается под текущий выбор в переключателе бирж (activeExchangeFilter,
    см. applyConnectionBadge в app.js) — но только пока связь реально в порядке (mode "ok"); при warn/off
    выше эти цвета всё равно перекрываются — проблема со связью важнее бренд-цвета. */
-.status-badge.exch-mexc { background: rgba(30,128,255,.1); color: var(--blue); border-color: rgba(30,128,255,.25); box-shadow: 0 0 14px -4px rgba(30,128,255,.5); }
+.status-badge.exch-mexc { background: rgba(201,143,160,.1); color: var(--blue); border-color: rgba(201,143,160,.25); box-shadow: 0 0 14px -4px rgba(201,143,160,.5); }
 .status-badge.exch-binance { background: rgba(240,185,11,.14); color: #F0B90B; border-color: rgba(240,185,11,.3); box-shadow: 0 0 16px -3px rgba(240,185,11,.6); }
 .status-badge.exch-okx { background: var(--bg-hover); color: var(--text-primary); border-color: var(--border-color); box-shadow: none; }
 .status-dot { width: 6px; height: 6px; background: currentColor; border-radius: 50%; animation: pulse 2s infinite; }
@@ -559,7 +544,7 @@ h2 span[data-i18n] {
 .metric-label { font-size: 9.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
 .metric-value { font-size: 14px; font-weight: 700; color: var(--text-primary); font-family: var(--font-mono); display: inline-block; }
 @keyframes metricPulse {
-  0% { color: var(--blue); text-shadow: 0 0 10px rgba(30,128,255,.7); transform: scale(1.08); }
+  0% { color: var(--blue); text-shadow: 0 0 10px rgba(201,143,160,.7); transform: scale(1.08); }
   100% { color: var(--text-primary); text-shadow: none; transform: scale(1); }
 }
 .metric-value.metric-pulse { animation: metricPulse .6s ease-out; }
@@ -732,14 +717,14 @@ h2 span[data-i18n] {
    на отдельную страницу "Профили" за расшифровкой. Полное описание с формулами по-прежнему там же. */
 .strategy-hint-bar {
   display: none; align-items: center; gap: 8px; padding: 7px 16px;
-  background: rgba(30,128,255,.06); border-bottom: 1px solid var(--border-color);
+  background: rgba(201,143,160,.06); border-bottom: 1px solid var(--border-color);
   font-size: 11.5px; color: var(--text-secondary); flex-shrink: 0;
 }
 .strategy-hint-bar.visible { display: flex; }
 .strategy-hint-bar i { color: var(--blue); }
 .strategy-hint-badge {
   font-weight: 700; color: var(--blue); font-family: var(--font-mono); font-size: 10.5px;
-  padding: 1px 7px; border: 1px solid rgba(30,128,255,.4); border-radius: 4px; flex-shrink: 0;
+  padding: 1px 7px; border: 1px solid rgba(201,143,160,.4); border-radius: 4px; flex-shrink: 0;
 }
 .strategy-hint-text { flex: 1; }
 .strategy-hint-count { color: var(--text-muted); font-family: var(--font-mono); white-space: nowrap; flex-shrink: 0; }
@@ -834,7 +819,7 @@ tr.rank-one .coin-icon::after {
 }
 .exch-tag-binance { background: rgba(240,185,11,.16); color: #F0B90B; }
 .exch-tag-okx { background: rgba(255,255,255,.14); color: var(--text-primary); }
-.exch-tag-mexc { background: rgba(30,128,255,.14); color: var(--blue); }
+.exch-tag-mexc { background: rgba(201,143,160,.14); color: var(--blue); }
 .star { color: var(--text-muted); cursor: pointer; font-size: 14px; transition: color .15s; }
 .star:hover, .star.active { color: var(--orange); }
 .price-up { color: var(--green); }
@@ -851,8 +836,8 @@ tr.rank-one .coin-icon::after {
 .dot-buy { background: var(--green); box-shadow: 0 0 6px 1px rgba(0,192,118,.7); animation: pulse 2s infinite; }
 .dot-sell { background: var(--red); box-shadow: 0 0 6px 1px rgba(248,73,96,.7); animation: pulse 2s infinite; }
 .dot-wait { background: var(--text-muted); }
-.signal-strategy { background: rgba(30,128,255,.12); color: var(--blue); box-shadow: 0 0 12px -5px rgba(30,128,255,.65); }
-.dot-strategy { background: var(--blue); box-shadow: 0 0 6px 1px rgba(30,128,255,.6); }
+.signal-strategy { background: rgba(201,143,160,.12); color: var(--blue); box-shadow: 0 0 12px -5px rgba(201,143,160,.65); }
+.dot-strategy { background: var(--blue); box-shadow: 0 0 6px 1px rgba(201,143,160,.6); }
 /* Бейджи алгоритмов в строке таблицы (см. algoBadgesCellHtml) — компактные цветные "таблетки",
    цвет по направлению сигнала (LONG зелёный/SHORT красный/BOTH нейтральный синий), полный текст
    объяснения — во всплывающей подсказке (title), чтобы не раздувать саму ячейку. */
@@ -919,8 +904,8 @@ tr.rank-one .coin-icon::after {
 }
 .detector-chip:hover { border-color: var(--blue); }
 .detector-chip .chip-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); flex-shrink: 0; transition: background .15s; }
-.detector-chip.on { color: var(--text-primary); border-color: rgba(30,128,255,.4); background: rgba(30,128,255,.06); }
-.detector-chip.on .chip-dot { background: var(--blue); box-shadow: 0 0 6px 1px rgba(30,128,255,.6); }
+.detector-chip.on { color: var(--text-primary); border-color: rgba(201,143,160,.4); background: rgba(201,143,160,.06); }
+.detector-chip.on .chip-dot { background: var(--blue); box-shadow: 0 0 6px 1px rgba(201,143,160,.6); }
 /* Категория "эвристика без ground truth" (fakeLiquidity) — янтарный тон даже когда включена,
    чтобы её "особый" статус был виден прямо в переключателях, а не только в самих карточках. */
 .detector-chip.on.cat-heuristic { color: var(--orange); border-color: rgba(255,159,10,.4); background: rgba(255,159,10,.07); }
@@ -955,7 +940,7 @@ tr.rank-one .coin-icon::after {
 .mini-chart-price.up, .mini-chart-change.up { color: var(--green); }
 .mini-chart-price.down, .mini-chart-change.down { color: var(--red); }
 .mini-chart-canvas { width: 100%; height: 130px; display: block; }
-.mini-chart-card.pinned { border-color: rgba(30,128,255,.45); }
+.mini-chart-card.pinned { border-color: rgba(201,143,160,.45); }
 .mini-chart-unpin {
   border: 0; background: none; color: var(--text-muted); font-size: 14px; line-height: 1; cursor: pointer;
   padding: 0 2px; margin-right: 2px;
@@ -966,7 +951,7 @@ tr.rank-one .coin-icon::after {
   cursor: pointer; transition: border-color .15s, background .15s, transform .1s; display: flex; flex-direction: column; gap: 8px;
 }
 .profile-strategy-card:hover { border-color: var(--blue); background: var(--bg-hover); transform: translateY(-1px); }
-.profile-strategy-card.active { border-color: var(--blue); background: rgba(30,128,255,.07); box-shadow: inset 0 0 0 1px var(--blue), 0 0 22px -8px rgba(30,128,255,.45); }
+.profile-strategy-card.active { border-color: var(--blue); background: rgba(201,143,160,.07); box-shadow: inset 0 0 0 1px var(--blue), 0 0 22px -8px rgba(201,143,160,.45); }
 /* Паттерны без ground truth (например fakeLiquidity — эвристика, не подтверждённый факт по
    публичному стакану MEXC) — приглушённый янтарный тон вместо синего, чтобы визуально не выглядеть
    как обычный подтверждённый сигнал даже до прочтения текста карточки. */
@@ -974,7 +959,7 @@ tr.rank-one .coin-icon::after {
 .pattern-card.pattern-card-heuristic:hover { border-color: var(--orange); background: rgba(255,159,10,.08); }
 .profile-strategy-card .card-icon {
   width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center;
-  background: rgba(30,128,255,.12); color: var(--blue); font-size: 17px; flex-shrink: 0;
+  background: rgba(201,143,160,.12); color: var(--blue); font-size: 17px; flex-shrink: 0;
 }
 .profile-strategy-card.active .card-icon { background: var(--blue); color: #fff; }
 .profile-strategy-card .card-top { display: flex; align-items: center; gap: 10px; }
@@ -1016,7 +1001,7 @@ tr.rank-one .coin-icon::after {
   cursor: pointer; transition: border-color .15s, background .15s, transform .1s; position: relative;
 }
 .exch-tab:hover { border-color: var(--blue); background: var(--bg-hover); transform: translateY(-1px); }
-.exch-tab.active { border-color: var(--blue); background: rgba(30,128,255,.07); box-shadow: inset 0 0 0 1px var(--blue), 0 0 22px -8px rgba(30,128,255,.45); }
+.exch-tab.active { border-color: var(--blue); background: rgba(201,143,160,.07); box-shadow: inset 0 0 0 1px var(--blue), 0 0 22px -8px rgba(201,143,160,.45); }
 .exch-tab-icon {
   width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
   font-size: 13px; font-weight: 700; color: #fff; flex-shrink: 0;
@@ -1036,8 +1021,8 @@ tr.rank-one .coin-icon::after {
    переход на страницу "Финрез", где теперь живёт вся визуализация (см. #finresHeroBar). */
 .acct-finres-note {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-  border: 1px solid rgba(30,128,255,.25); border-radius: 10px; padding: 16px 18px;
-  background: linear-gradient(135deg, rgba(30,128,255,.07), rgba(30,128,255,0) 65%);
+  border: 1px solid rgba(201,143,160,.25); border-radius: 10px; padding: 16px 18px;
+  background: linear-gradient(135deg, rgba(201,143,160,.07), rgba(201,143,160,0) 65%);
 }
 .acct-finres-note i { font-size: 22px; color: var(--blue); flex-shrink: 0; }
 .acct-finres-note-mid { flex: 1; min-width: 220px; }
@@ -1049,8 +1034,8 @@ tr.rank-one .coin-icon::after {
   position: relative; overflow: hidden;
   display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap;
   padding: 18px 20px; margin-bottom: 18px; border: 1px solid var(--border-color); border-radius: 10px;
-  background: linear-gradient(135deg, rgba(30,128,255,.06), rgba(30,128,255,0) 60%);
-  box-shadow: 0 0 32px -12px rgba(30,128,255,.25);
+  background: linear-gradient(135deg, rgba(201,143,160,.06), rgba(201,143,160,0) 60%);
+  box-shadow: 0 0 32px -12px rgba(201,143,160,.25);
 }
 /* Тонкий диагональный блик сверху-слева — лёгкий стеклянный акцент, без перегруза интерфейса */
 .balance-hero::before {
@@ -1069,13 +1054,13 @@ tr.rank-one .coin-icon::after {
   color: var(--text-secondary); font-size: 11px; font-weight: 500; cursor: pointer;
   transition: background .12s, color .12s, border-color .12s; flex-shrink: 0;
 }
-.finres-refresh-btn:hover { background: rgba(30,128,255,.1); color: #fff; border-color: rgba(30,128,255,.4); }
+.finres-refresh-btn:hover { background: rgba(201,143,160,.1); color: #fff; border-color: rgba(201,143,160,.4); }
 .finres-refresh-btn:disabled { opacity: .6; cursor: default; }
 .finres-refresh-btn i { font-size: 13px; }
 .finres-refresh-btn.spinning i { animation: spin 0.8s linear infinite; }
 .finres-last-updated { font-size: 10.5px; color: var(--text-muted); margin-top: 8px; }
 .finres-last-updated.stale { color: var(--orange); }
-.balance-hero-value { font-size: 30px; font-weight: 700; color: var(--text-primary); font-family: var(--font-mono); line-height: 1.15; text-shadow: 0 0 24px rgba(30,128,255,.25); }
+.balance-hero-value { font-size: 30px; font-weight: 700; color: var(--text-primary); font-family: var(--font-mono); line-height: 1.15; text-shadow: 0 0 24px rgba(201,143,160,.25); }
 .balance-hero-delta { font-size: 12.5px; margin-top: 6px; display: flex; align-items: center; gap: 4px; font-weight: 600; }
 .balance-hero-delta.up { color: var(--green); }
 .balance-hero-delta.down { color: var(--red); }
@@ -1160,13 +1145,13 @@ tr.rank-one .coin-icon::after {
 .stat-tile.down { border-color: rgba(248,73,96,.35); box-shadow: 0 0 20px -10px rgba(248,73,96,.5); }
 .stat-tile.down .stat-tile-label, .stat-tile.down .stat-tile-pct { color: var(--red); }
 .stat-tile.flat .stat-tile-pct { color: var(--text-secondary); }
-.stat-tile.neutral { border-color: rgba(30,128,255,.3); box-shadow: 0 0 20px -10px rgba(30,128,255,.45); }
+.stat-tile.neutral { border-color: rgba(201,143,160,.3); box-shadow: 0 0 20px -10px rgba(201,143,160,.45); }
 .stat-tile.neutral .stat-tile-label, .stat-tile.neutral .stat-tile-pct { color: var(--blue); }
 .balance-hero-value.pulse { animation: heroValuePulse .6s ease; }
 @keyframes heroValuePulse {
-  0% { text-shadow: 0 0 24px rgba(30,128,255,.25); }
-  35% { text-shadow: 0 0 34px rgba(30,128,255,.65); }
-  100% { text-shadow: 0 0 24px rgba(30,128,255,.25); }
+  0% { text-shadow: 0 0 24px rgba(201,143,160,.25); }
+  35% { text-shadow: 0 0 34px rgba(201,143,160,.65); }
+  100% { text-shadow: 0 0 24px rgba(201,143,160,.25); }
 }
 @keyframes balanceRowIn {
   from { opacity: 0; transform: translateX(-6px); }
@@ -1177,7 +1162,7 @@ tr.rank-one .coin-icon::after {
 .balance-asset-row { transition: border-color .15s, background .15s; }
 .balance-asset-row:hover { border-color: rgba(255,255,255,.18); background: var(--bg-hover); }
 .balance-donut-card { transition: box-shadow .2s, border-color .2s; }
-.balance-donut-card:hover { border-color: rgba(30,128,255,.35); box-shadow: 0 0 26px -12px rgba(30,128,255,.4); }
+.balance-donut-card:hover { border-color: rgba(201,143,160,.35); box-shadow: 0 0 26px -12px rgba(201,143,160,.4); }
 /* --- Баланс: календарь P&L по дням (редизайн раунда 9 — крупнее, читаемее, каждая ячейка своя
    видимая карточка вместо еле заметных цифр по пустому фону) --- */
 .balance-calendar-card {
@@ -1193,7 +1178,7 @@ tr.rank-one .coin-icon::after {
   color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 13px;
   transition: background .15s ease, color .15s ease, border-color .15s ease, transform .15s ease;
 }
-.balance-calendar-navbtn:hover { background: rgba(30,128,255,.12); color: #fff; border-color: var(--blue); transform: translateY(-1px); }
+.balance-calendar-navbtn:hover { background: rgba(201,143,160,.12); color: #fff; border-color: var(--blue); transform: translateY(-1px); }
 .balance-calendar-navbtn:active { transform: translateY(0); }
 .balance-calendar-month { font-size: 12.5px; font-weight: 700; color: var(--text-primary); min-width: 108px; text-align: center; font-family: var(--font-mono); }
 .balance-calendar-weekdays {
@@ -1234,10 +1219,10 @@ tr.rank-one .coin-icon::after {
 .balcal-cell-inner.down { background: rgba(255,77,90, var(--intensity, .16)); border-color: rgba(255,77,90,.3); }
 .balcal-cell-inner.down .balcal-daynum, .balcal-cell-inner.down .balcal-amount { color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.4); }
 .balcal-cell-inner.flat { background: rgba(255,255,255,.06); }
-.balcal-cell.today .balcal-cell-inner { box-shadow: inset 0 0 0 1.5px var(--blue), 0 0 14px -4px rgba(76,125,255,.5); animation: balcalTodayGlow 2.6s ease-in-out infinite; }
+.balcal-cell.today .balcal-cell-inner { box-shadow: inset 0 0 0 1.5px var(--blue), 0 0 14px -4px rgba(201,143,160,.5); animation: balcalTodayGlow 2.6s ease-in-out infinite; }
 @keyframes balcalTodayGlow {
-  0%, 100% { box-shadow: inset 0 0 0 1.5px var(--blue), 0 0 12px -5px rgba(76,125,255,.45); }
-  50% { box-shadow: inset 0 0 0 1.5px var(--blue), 0 0 18px -3px rgba(76,125,255,.75); }
+  0%, 100% { box-shadow: inset 0 0 0 1.5px var(--blue), 0 0 12px -5px rgba(201,143,160,.45); }
+  50% { box-shadow: inset 0 0 0 1.5px var(--blue), 0 0 18px -3px rgba(201,143,160,.75); }
 }
 .balance-calendar-summary { margin-top: 10px; font-size: 11px; color: var(--text-muted); text-align: center; }
 .balance-calendar-summary .up { color: var(--green); font-weight: 600; }
@@ -1283,7 +1268,7 @@ tr.rank-one .coin-icon::after {
   border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-secondary);
   cursor: pointer; font-size: 12px; font-weight: 600; transition: border-color .15s, color .15s, background .15s, transform .12s, box-shadow .15s;
 }
-.journal-chip:hover { border-color: var(--blue); color: #fff; background: rgba(30,128,255,.08); transform: translateY(-1px) scale(1.03); box-shadow: 0 4px 14px -8px rgba(30,128,255,.5); }
+.journal-chip:hover { border-color: var(--blue); color: #fff; background: rgba(201,143,160,.08); transform: translateY(-1px) scale(1.03); box-shadow: 0 4px 14px -8px rgba(201,143,160,.5); }
 .journal-chip-avatar {
   width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
   font-size: 8.5px; font-weight: 700; color: #fff; flex-shrink: 0;
@@ -1305,12 +1290,12 @@ tr.rank-one .coin-icon::after {
     0 2px 0 rgba(255,255,255,.03) inset,
     0 30px 70px -24px rgba(0,0,0,.7),
     0 10px 28px -12px rgba(0,0,0,.5),
-    0 0 40px -16px rgba(30,128,255,.18);
+    0 0 40px -16px rgba(201,143,160,.18);
 }
 .journal-modal-header {
   display: flex; align-items: center; justify-content: space-between; padding: 14px 18px;
   border-bottom: 1px solid var(--border-color); flex-shrink: 0;
-  background: linear-gradient(180deg, rgba(30,128,255,.06), transparent);
+  background: linear-gradient(180deg, rgba(201,143,160,.06), transparent);
 }
 .journal-modal-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; }
 .journal-modal-title i { color: var(--blue); }
@@ -1512,7 +1497,7 @@ tr.rank-one .coin-icon::after {
    не статичное описание алгоритма (оно есть в .strategy-hint-bar), а живой разбор её поведения. */
 .coin-analysis-bar {
   display: none; align-items: center; gap: 10px; padding: 6px 16px; border-bottom: 1px solid var(--border-color);
-  background: rgba(30,128,255,.05); font-size: 11.5px; line-height: 1.3;
+  background: rgba(201,143,160,.05); font-size: 11.5px; line-height: 1.3;
 }
 .coin-analysis-bar.visible { display: flex; }
 .coin-analysis-bar.matched { background: rgba(0,192,118,.07); }
@@ -1520,7 +1505,7 @@ tr.rank-one .coin-icon::after {
 .coin-analysis-bar.matched i { color: var(--green); }
 .coin-analysis-badge {
   font-weight: 700; font-family: var(--font-mono); font-size: 10.5px; flex-shrink: 0;
-  padding: 1px 7px; border-radius: 4px; color: var(--blue); border: 1px solid rgba(30,128,255,.4);
+  padding: 1px 7px; border-radius: 4px; color: var(--blue); border: 1px solid rgba(201,143,160,.4);
 }
 .coin-analysis-bar.matched .coin-analysis-badge { color: var(--green); border-color: rgba(0,192,118,.4); }
 /* Раньше переносилось на несколько строк и заметно "съедало" высоту графика — теперь одна строка
@@ -1573,7 +1558,7 @@ tr.rank-one .coin-icon::after {
   cursor: pointer; font-size: 15px; transition: background .15s, color .15s, border-color .15s, transform .1s;
 }
 .ochart-tool:hover { background: rgba(255,255,255,.07); color: #fff; }
-.ochart-tool.active { background: rgba(30,128,255,.16); border-color: rgba(30,128,255,.5); color: #fff; box-shadow: 0 0 12px -4px rgba(30,128,255,.55); }
+.ochart-tool.active { background: rgba(201,143,160,.16); border-color: rgba(201,143,160,.5); color: #fff; box-shadow: 0 0 12px -4px rgba(201,143,160,.55); }
 .ochart-sep { width: 1px; align-self: stretch; margin: 4px 4px; background: var(--border-color); }
 .ochart-hint {
   flex: 1; min-width: 0; font-size: 11px; color: var(--text-muted); white-space: nowrap;
@@ -1594,7 +1579,7 @@ tr.rank-one .coin-icon::after {
 }
 .ochart-pill i { font-size: 14px; }
 .ochart-pill:hover { color: #fff; border-color: rgba(255,255,255,.22); }
-.ochart-pill.active { background: rgba(30,128,255,.16); border-color: rgba(30,128,255,.5); color: #fff; box-shadow: 0 0 12px -4px rgba(30,128,255,.55); }
+.ochart-pill.active { background: rgba(201,143,160,.16); border-color: rgba(201,143,160,.5); color: #fff; box-shadow: 0 0 12px -4px rgba(201,143,160,.55); }
 .ochart-indicators-wrap { position: relative; flex-shrink: 0; }
 .ochart-indicators-panel {
   display: none; position: fixed; z-index: 200; min-width: 168px;
@@ -1610,7 +1595,7 @@ tr.rank-one .coin-icon::after {
 .ochart-ind-row.ind-off { color: var(--text-muted); }
 .ochart-ind-eye {
   display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; flex-shrink: 0;
-  border: none; background: transparent; color: #1e80ff; font-size: 15px; cursor: pointer; padding: 0;
+  border: none; background: transparent; color: var(--accent); font-size: 15px; cursor: pointer; padding: 0;
 }
 .ochart-ind-eye:not(.active) { color: var(--text-muted); }
 /* Тело графика: слева — вертикальная колонка инструментов рисования (курсор/уровень/лучи/линейка),
@@ -1633,11 +1618,11 @@ tr.rank-one .coin-icon::after {
 .ochart-live-btn {
   position: absolute; right: 64px; bottom: 14px; z-index: 4; display: none;
   align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px;
-  background: rgba(30,128,255,.16); border: 1px solid rgba(30,128,255,.5); color: #fff;
-  font-size: 11px; cursor: pointer; box-shadow: 0 4px 14px -4px rgba(30,128,255,.5);
+  background: rgba(201,143,160,.16); border: 1px solid rgba(201,143,160,.5); color: #fff;
+  font-size: 11px; cursor: pointer; box-shadow: 0 4px 14px -4px rgba(201,143,160,.5);
   transition: background .15s;
 }
-.ochart-live-btn:hover { background: rgba(30,128,255,.3); }
+.ochart-live-btn:hover { background: rgba(201,143,160,.3); }
 .ochart-live-btn.show { display: flex; }
 .own-chart-empty {
   position: absolute; inset: 0; z-index: 3; display: none; align-items: center; justify-content: center;
@@ -1656,7 +1641,7 @@ tr.rank-one .coin-icon::after {
 .chart-tip-change { margin-top: 2px; font-weight: 600; }
 .chart-tip-change.up { color: var(--green); }
 .chart-tip-change.down { color: var(--red); }
-.filter-btn.active { border-color: var(--blue); color: #fff; background: rgba(30,128,255,.12); box-shadow: 0 0 14px -4px rgba(30,128,255,.45); }
+.filter-btn.active { border-color: var(--blue); color: #fff; background: rgba(201,143,160,.12); box-shadow: 0 0 14px -4px rgba(201,143,160,.45); }
 
 .right-panel {
   width: auto; display: flex; flex-direction: column; flex-shrink: 0;
@@ -1983,7 +1968,7 @@ tr.rank-one .coin-icon::after {
 .settings-btn.danger { background: var(--red); color: #fff; }
 .settings-btn.danger:hover { box-shadow: 0 0 16px -3px rgba(248,73,96,.6); }
 .settings-btn.secondary { background: var(--bg-hover); color: var(--text-secondary); }
-.settings-btn.secondary:hover { box-shadow: 0 0 14px -4px rgba(30,128,255,.35); }
+.settings-btn.secondary:hover { box-shadow: 0 0 14px -4px rgba(201,143,160,.35); }
 
 .hidden { display: none !important; }
 @media (max-width: 1500px) {
