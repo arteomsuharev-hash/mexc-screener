@@ -81,8 +81,14 @@ h2 span[data-i18n] {
   /* Раньше был литеральный тёмный градиент (#0E1318→#0B0E11), не завязанный на CSS-переменные —
      переключение на светлую тему (themeToggle в app.js переопределяет --bg-* на :root) сайдбар
      никак не затрагивало, он оставался тёмным. Теперь строим тот же по ощущению градиент из
-     переменных, чтобы сайдбар следовал теме, как и остальной интерфейс. */
-  background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
+     переменных, чтобы сайдбар следовал теме, как и остальной интерфейс.
+     Пользовательская картинка (web/assets/custom/sidebar.png, см. README.txt рядом) — под затемняющим
+     градиентом, чтобы текст пунктов меню поверх неё оставался читаемым. Если файла нет — просто не
+     подгружается, виден только сам градиент (тихий fallback, без битой иконки/ошибки). */
+  background:
+    linear-gradient(180deg, rgba(10,10,12,.55) 0%, rgba(10,10,12,.88) 55%, var(--bg-primary) 85%),
+    url('assets/custom/sidebar.png') top center / cover no-repeat,
+    linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
   border: 1px solid var(--border-color);
   border-radius: 16px;
   box-shadow: 0 0 0 1px var(--neon-glow-soft), 0 0 24px -8px var(--neon-glow);
@@ -101,16 +107,6 @@ h2 span[data-i18n] {
   width: 1px;
   background: linear-gradient(180deg, transparent, rgba(255,255,255,.06), transparent);
   pointer-events: none;
-}
-/* Едва заметный фоновый иероглиф (по образцу референсов: сакура+"愛" глоу за "LOVE", "妖怪" в
-   логотипе Yokai) — чистая типографика (символ языка, не персонаж), очень тускло, не мешает читать
-   пункты меню поверх. */
-.sidebar::before {
-  content: '侍';
-  position: absolute; top: -30px; left: 50%; transform: translateX(-50%);
-  font-size: 220px; line-height: 1; font-family: var(--font-display), serif;
-  color: var(--accent); opacity: .16; text-shadow: 0 0 60px var(--accent);
-  pointer-events: none; user-select: none;
 }
 .sidebar.collapsed { width: 68px; }
 .logo {

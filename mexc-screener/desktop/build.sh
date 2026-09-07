@@ -48,12 +48,13 @@ fi
 echo "    (использую Python: $($PYTHON --version 2>&1), команда: $PYTHON)"
 
 echo "==> 1/4  Копирую исходники web/ в desktop/resources/ и добавляю мост Neutralino..."
-rm -rf resources/index.html resources/css resources/js/app.js resources/js/core-utils.js
-mkdir -p resources/css resources/js
+rm -rf resources/index.html resources/css resources/js/app.js resources/js/core-utils.js resources/assets
+mkdir -p resources/css resources/js resources/assets
 cp ../web/index.html resources/index.html
 cp -r ../web/css/. resources/css/
 cp ../web/js/app.js resources/js/app.js
 cp ../web/js/core-utils.js resources/js/core-utils.js
+if [ -d ../web/assets ]; then cp -r ../web/assets/. resources/assets/; fi
 
 # Единственная разница между веб- и desktop-версией разметки: подключение клиентской библиотеки
 # Neutralino (resources/js/neutralino.js) — сам JS-код приложения (app.js) уже умеет работать в обоих
