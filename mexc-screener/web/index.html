@@ -53,26 +53,35 @@
       <a class="nav-item" data-page="finres"><i class="ri-funds-line"></i><span data-i18n>Финрез</span></a>
       <div class="sidebar-mascot" aria-hidden="true">
         <!-- Freehand SVG faces read as crude/broken at this size — заменено на компактный
-           icon-badge (та же лаборатория/sci-fi тема, без попытки рисовать лица). Веточка сакуры
-           по бокам — тот же элемент, что цветёт на присланных референсах, чистая декоративная
-           геометрия (не персонаж), очень тускло, не мешает читать пункты меню. -->
-        <svg class="mascot-sakura" viewBox="0 0 220 60" xmlns="http://www.w3.org/2000/svg">
-          <g opacity=".5">
-            <path d="M14 30 Q 28 18 40 22" stroke="var(--accent-soft)" stroke-width="1.2" fill="none"/>
-            <circle cx="10" cy="32" r="5" fill="var(--accent-soft)"/>
-            <circle cx="17" cy="24" r="5" fill="var(--accent-soft)"/>
-            <circle cx="24" cy="33" r="5" fill="var(--accent-soft)"/>
-            <circle cx="16" cy="31" r="3" fill="var(--accent)"/>
-          </g>
-          <g opacity=".5" transform="translate(220,60) rotate(180)">
-            <path d="M14 30 Q 28 18 40 22" stroke="var(--accent-soft)" stroke-width="1.2" fill="none"/>
-            <circle cx="10" cy="32" r="5" fill="var(--accent-soft)"/>
-            <circle cx="17" cy="24" r="5" fill="var(--accent-soft)"/>
-            <circle cx="24" cy="33" r="5" fill="var(--accent-soft)"/>
-            <circle cx="16" cy="31" r="3" fill="var(--accent)"/>
-          </g>
+           icon-badge (та же лаборатория/sci-fi тема, без попытки рисовать лица). Два настоящих
+           5-лепестковых цветка сакуры по бокам (не размытые точки, как раньше) — тот же элемент,
+           что цветёт на присланных референсах, чистая декоративная геометрия (не персонаж). -->
+        <svg class="mascot-sakura" viewBox="0 0 220 70" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <g id="sakuraFlower">
+              <g fill="var(--accent-soft)">
+                <ellipse rx="7" ry="10" transform="rotate(0) translate(0,-9)"/>
+                <ellipse rx="7" ry="10" transform="rotate(72) translate(0,-9)"/>
+                <ellipse rx="7" ry="10" transform="rotate(144) translate(0,-9)"/>
+                <ellipse rx="7" ry="10" transform="rotate(216) translate(0,-9)"/>
+                <ellipse rx="7" ry="10" transform="rotate(288) translate(0,-9)"/>
+              </g>
+              <circle r="3.4" fill="var(--accent)"/>
+            </g>
+          </defs>
+          <use href="#sakuraFlower" x="28" y="24" opacity=".85"/>
+          <use href="#sakuraFlower" x="12" y="46" opacity=".55" transform="scale(.6)" style="transform-origin:12px 46px;"/>
+          <use href="#sakuraFlower" x="192" y="24" opacity=".85"/>
+          <use href="#sakuraFlower" x="208" y="46" opacity=".55" transform="scale(.6)" style="transform-origin:208px 46px;"/>
         </svg>
-        <div class="mascot-badge"><i class="ri-flask-line"></i></div>
+        <div class="mascot-badge">
+          <!-- Соломенная шляпа-каса (по образцу "Yokai Reborn") — предмет, не персонаж. -->
+          <svg viewBox="0 0 32 32" width="20" height="20" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <ellipse cx="16" cy="23" rx="14" ry="3.4" fill="currentColor"/>
+            <path d="M4 22.5 C 4 12, 10 5, 16 5 C 22 5, 28 12, 28 22.5 C 22 20, 10 20, 4 22.5 Z" fill="currentColor"/>
+            <circle cx="16" cy="6.5" r="1.6" fill="var(--bg-primary)"/>
+          </svg>
+        </div>
         <div class="sidebar-mascot-bubble" data-i18n>Хороших сделок!</div>
       </div>
       <div class="nav-section" data-i18n>Система</div>

@@ -110,7 +110,7 @@ h2 span[data-i18n] {
   content: '侍';
   position: absolute; top: -30px; left: 50%; transform: translateX(-50%);
   font-size: 220px; line-height: 1; font-family: var(--font-display), serif;
-  color: var(--accent); opacity: .09; text-shadow: 0 0 60px var(--accent);
+  color: var(--accent); opacity: .16; text-shadow: 0 0 60px var(--accent);
   pointer-events: none; user-select: none;
 }
 .sidebar.collapsed { width: 68px; }
@@ -244,8 +244,8 @@ h2 span[data-i18n] {
    маленьком размере) — оригинальная sci-fi/lab тема без узнаваемых персонажей. */
 .sidebar-mascot { padding: 8px 12px 6px; display: flex; flex-direction: column; align-items: center; gap: 8px; position: relative; }
 .mascot-sakura {
-  position: absolute; top: 4px; left: 50%; transform: translateX(-50%);
-  width: 100%; max-width: 210px; height: 44px; pointer-events: none;
+  position: absolute; top: -2px; left: 50%; transform: translateX(-50%);
+  width: 100%; max-width: 220px; height: 56px; pointer-events: none;
 }
 .mascot-badge { position: relative;
   width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
