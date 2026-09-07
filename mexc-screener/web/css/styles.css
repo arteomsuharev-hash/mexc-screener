@@ -82,11 +82,14 @@ h2 span[data-i18n] {
      переключение на светлую тему (themeToggle в app.js переопределяет --bg-* на :root) сайдбар
      никак не затрагивало, он оставался тёмным. Теперь строим тот же по ощущению градиент из
      переменных, чтобы сайдбар следовал теме, как и остальной интерфейс.
-     Пользовательская картинка (web/assets/custom/sidebar.png, см. README.txt рядом) — под затемняющим
-     градиентом, чтобы текст пунктов меню поверх неё оставался читаемым. Если файла нет — просто не
-     подгружается, виден только сам градиент (тихий fallback, без битой иконки/ошибки). */
+     Пользовательская картинка (web/assets/custom/sidebar.png или .gif, см. README.txt рядом) — под
+     затемняющим градиентом, чтобы текст пунктов меню поверх неё оставался читаемым. sidebar.gif
+     лежит ВЫШЕ sidebar.png в списке слоёв — если gif есть, он и покажется (анимированный), png под
+     ним не виден; если gif нет — этот слой просто прозрачный, виден png. Ни того ни другого нет —
+     виден только сам градиент (тихий fallback, без битой иконки/ошибки). */
   background:
     linear-gradient(180deg, rgba(10,10,12,.55) 0%, rgba(10,10,12,.88) 55%, var(--bg-primary) 85%),
+    url('../assets/custom/sidebar.gif') top center / cover no-repeat,
     url('../assets/custom/sidebar.png') top center / cover no-repeat,
     linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
   border: 1px solid var(--border-color);
@@ -335,6 +338,7 @@ h2 span[data-i18n] {
   margin: 0 20px 6px; border-radius: 14px; overflow: hidden;
   background:
     linear-gradient(100deg, rgba(10,10,12,.78) 0%, rgba(10,10,12,.4) 45%, rgba(10,10,12,.78) 100%),
+    url('../assets/custom/finres-hero.gif') center / cover no-repeat,
     url('../assets/custom/finres-hero.png') center / cover no-repeat;
 }
 .finres-hero-bar:empty { padding: 0 26px; }
@@ -1548,6 +1552,7 @@ tr.rank-one .coin-icon::after {
      виден один #131722 (родной фон-заглушка TradingView), как и раньше. */
   background:
     radial-gradient(ellipse at center, rgba(19,23,34,.45), rgba(19,23,34,.88) 75%),
+    url('../assets/custom/chart-placeholder.gif') center / cover no-repeat,
     url('../assets/custom/chart-placeholder.png') center / cover no-repeat,
     #131722;
 }
