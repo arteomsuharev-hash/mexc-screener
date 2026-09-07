@@ -1871,7 +1871,6 @@ function switchToTradingViewUi() {
   const ownBox = document.getElementById('ownChartContainer');
   const ph = document.getElementById('chartPlaceholder');
   stopOwnChartAutoRefresh();
-  stopPlaceholderGl();
   if (ownBox) ownBox.style.display = 'none';
   if (ph) ph.style.display = 'none';
   if (tvBox) tvBox.style.display = 'block';
@@ -1881,69 +1880,10 @@ function switchToOwnChartUi() {
   const tvBox = document.getElementById('tv_chart_container');
   const ownBox = document.getElementById('ownChartContainer');
   const ph = document.getElementById('chartPlaceholder');
-  stopPlaceholderGl();
   if (tvBox) tvBox.style.display = 'none';
   if (ph) ph.style.display = 'none';
   if (ownBox) ownBox.style.display = 'flex';
 }
-
-// Точечный WebGL 3D-акцент (three.js) на пустом "выберите монету" экране — единственное место в
-// приложении, где рендер не конкурирует с чем-то живым (таблица/панель алгоритмов тикают каждую
-// секунду, туда такое намеренно НЕ добавлено, см. сравнение вариантов в чате). Один render loop на
-// всё приложение, останавливается насовсем, как только пользователь один раз выбрал монету
-// (плейсхолдер после этого больше не показывается — см. switchTo*ChartUi выше).
-let placeholderGlRunning = false;
-function stopPlaceholderGl() { placeholderGlRunning = false; }
-function initChartPlaceholderGl() {
-  const mount = document.getElementById('chartPlaceholderGl');
-  if (!mount || typeof THREE === 'undefined') return; // офлайн/CDN недоступен — остаётся обычная иконка
-  const w = 120, h = 120;
-  const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(38, w / h, 0.1, 100);
-  camera.position.z = 4.6;
-  const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-  renderer.setSize(w, h);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  mount.appendChild(renderer.domElement);
-
-  // Материалы под editorial luxury-палитру (по ТЗ: "polished chrome, subtle pink reflections,
-  // silver highlights" — не насыщенная неоновая магента, как раньше, а приглушённая пыльная роза +
-  // серебро, ближе к дорогому CGI-рендеру, чем к игровому неону).
-  scene.add(new THREE.AmbientLight(0x2a2628, 1.4));
-  const key = new THREE.PointLight(0xc98fa0, 3.0, 12);
-  key.position.set(2.5, 2, 3);
-  scene.add(key);
-  const rim = new THREE.PointLight(0xd8d0cc, 2.2, 12);
-  rim.position.set(-2.5, -1.5, 2);
-  scene.add(rim);
-
-  const mesh = new THREE.Mesh(
-    new THREE.IcosahedronGeometry(1.3, 0),
-    new THREE.MeshStandardMaterial({ color: 0x18181a, metalness: 0.6, roughness: 0.18, flatShading: true })
-  );
-  scene.add(mesh);
-  const wire = new THREE.Mesh(
-    new THREE.IcosahedronGeometry(1.34, 0),
-    new THREE.MeshBasicMaterial({ color: 0xc98fa0, wireframe: true, transparent: true, opacity: 0.28 })
-  );
-  scene.add(wire);
-
-  const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  placeholderGlRunning = true;
-  mount.style.display = 'block';
-  const ph = document.getElementById('chartPlaceholder');
-  if (ph) ph.classList.add('gl-active');
-  (function animate() {
-    if (!placeholderGlRunning) { renderer.dispose(); return; }
-    requestAnimationFrame(animate);
-    if (!reduceMotion) {
-      mesh.rotation.x += 0.006; mesh.rotation.y += 0.009;
-      wire.rotation.x += 0.006; wire.rotation.y += 0.009;
-    }
-    renderer.render(scene, camera);
-  })();
-}
-initChartPlaceholderGl();
 
 // Официальный embeddable-виджет TradingView (s3.tradingview.com/tv.js, подключён в index.html).
 // Если библиотека не загрузилась (нет сети до TradingView, заблокирована и т.п.) или сам виджет

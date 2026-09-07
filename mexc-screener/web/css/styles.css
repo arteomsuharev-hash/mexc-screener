@@ -1552,12 +1552,6 @@ tr.rank-one .coin-icon::after {
     #131722;
 }
 .chart-placeholder i { font-size: 32px; }
-/* Точечный 3D-акцент (three.js, см. initChartPlaceholderGl в app.js) — только здесь, на пустом
-   "выберите монету" экране, где рендер не конкурирует ни с чем живым. Пусто/display:none, пока
-   JS не смонтирует canvas (офлайн/CDN недоступен — остаётся обычная иконка выше). */
-.chart-placeholder-gl { width: 120px; height: 120px; display: none; }
-.chart-placeholder-gl canvas { display: block; }
-.chart-placeholder.gl-active i { display: none; }
 
 .own-chart-container { position: absolute; inset: 0; background: #131722; display: none; flex-direction: column; }
 /* Top-бар "своего графика": тип свечей слева, MA, по центру — текущая подсказка инструмента,

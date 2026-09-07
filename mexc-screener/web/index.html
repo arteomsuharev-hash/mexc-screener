@@ -248,7 +248,6 @@
           <div class="chart-container">
             <div id="tv_chart_container"></div>
             <div class="chart-placeholder" id="chartPlaceholder">
-              <div class="chart-placeholder-gl" id="chartPlaceholderGl"></div>
               <i class="ri-line-chart-line" id="chartPlaceholderIcon"></i>
               <span data-i18n>Выберите монету для графика MEXC</span>
             </div>
@@ -871,11 +870,6 @@
      всегда был штатно встраиваемым и предназначен именно для этого). Если s3.tradingview.com
      недоступен (нет сети/заблокирован), loadTradingView() в app.js тихо откатывается на свой график. -->
 <script src="https://s3.tradingview.com/tv.js"></script>
-<!-- three.js: один декоративный вращающийся 3D-акцент на плейсхолдере "выберите монету для графика"
-     (см. initChartPlaceholderGl в app.js) — намеренно НЕ используется в таблице/панели алгоритмов
-     (там и так живой WS-рендер каждую секунду, WebGL туда добавлять расточительно). Если CDN
-     недоступен — initChartPlaceholderGl() тихо ничего не делает, остаётся обычная иконка. -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="js/core-utils.js"></script>
 <script src="js/app.js"></script>
 </body>
