@@ -5727,10 +5727,14 @@ function updateGraphsPage() {
   redrawGraphsGrid();
 }
 setInterval(redrawGraphsGrid, GRAPHS_REDRAW_MS);
-setInterval(function () {
-  const page = document.getElementById('page-graphs');
-  if (page && page.classList.contains('active')) refreshGraphsCandles(graphsVisibleSymbols);
-}, GRAPHS_REFRESH_MS);
+// Раньше здесь просто перезапрашивались свечи для УЖЕ имеющегося graphsVisibleSymbols — сам список
+// (какие именно монеты сейчас в топе по выбранной метрике, например «Всплеск 5с») никогда не
+// пересчитывался периодически, только при заходе на страницу / смене фильтра. На быстрой метрике
+// вроде vol5s топ должен постоянно ротироваться — а у нас застывал на составе, что был на момент
+// открытия страницы, и выглядело так, будто сетка "не обновляется". updateGraphsPage() сам
+// пересчитывает computeGraphsVisibleSymbols() и перестраивает карточки, только если состав реально
+// изменился (см. её же переменную changed) — так что для неизменившегося топа это дешёвый no-op.
+setInterval(updateGraphsPage, GRAPHS_REFRESH_MS);
 ['graphsGridSize', 'graphsSortMetric', 'graphsTimeframe', 'graphsExchangeFilter', 'graphsFavoritesOnly'].forEach(function (id) {
   const el = document.getElementById(id);
   if (el) el.addEventListener('change', function () { graphsForceRebuild = true; updateGraphsPage(); });
