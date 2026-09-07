@@ -63,8 +63,8 @@ cp ../web/js/core-utils.js resources/js/core-utils.js
 import re
 with open('resources/index.html', encoding='utf-8') as f:
     html = f.read()
-marker = '<title>MEXC Screener</title>'
-assert html.count(marker) == 1, 'ожидался ровно один <title>MEXC Screener</title>'
+marker = '<title>Vision Screener</title>'
+assert html.count(marker) == 1, 'ожидался ровно один <title>Vision Screener</title>'
 html = html.replace(marker, marker + '\n<script src="/js/neutralino.js"></script>', 1)
 with open('resources/index.html', 'w', encoding='utf-8') as f:
     f.write(html)

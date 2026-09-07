@@ -11459,6 +11459,6 @@ window.__testOwnChart = function () {
 document.getElementById('langToggleLabel').textContent = currentLang === 'en' ? 'EN' : 'RU';
 applyStaticI18n();
 
-console.log('MEXC Screener запущен (MEXC Spot WS v3, protobuf)');
+console.log('Vision Screener запущен (MEXC Spot WS v3, protobuf)');
 
 })();
