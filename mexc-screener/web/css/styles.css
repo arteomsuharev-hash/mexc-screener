@@ -238,10 +238,6 @@ h2 span[data-i18n] {
 /* Маскот (редизайн 2026-09) — компактный icon-badge вместо freehand-лиц (те читались криво на
    маленьком размере) — оригинальная sci-fi/lab тема без узнаваемых персонажей. */
 .sidebar-mascot { padding: 8px 12px 6px; display: flex; flex-direction: column; align-items: center; gap: 8px; position: relative; }
-.mascot-sakura {
-  position: absolute; top: -2px; left: 50%; transform: translateX(-50%);
-  width: 100%; max-width: 220px; height: 56px; pointer-events: none;
-}
 .mascot-badge { position: relative;
   width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
   background: radial-gradient(circle, var(--neon-glow-soft), transparent 70%);
