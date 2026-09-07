@@ -56,6 +56,14 @@ body {
 /* Заголовки страниц (Графики/Паттерны/Аналитика/...) — тот же условный display-шрифт, что и у
    логотипа, вместо обычного Inter, по образцу постеров с крупной жирной типографикой. */
 h2 { font-family: var(--font-display); letter-spacing: .3px; }
+/* Градиентная заливка текста заголовков страниц (по образцу постера "VISION" — там огромный
+   заголовок залит розово-лавандовым градиентом). Иконки перед заголовком свой цвет не теряют —
+   у них собственный inline color, наследование transparent их не касается. */
+h2 span[data-i18n] {
+  background: linear-gradient(135deg, var(--text-primary) 0%, var(--accent-soft) 55%, var(--accent) 100%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+}
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #2B3139; border-radius: 2px; }
@@ -516,10 +524,17 @@ h2 { font-family: var(--font-display); letter-spacing: .3px; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 .topbar-metrics { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 /* Каждая метрика — своя тонкая стеклянная карточка (по образцу макета: ОБЩИЙ РЫНОК/ПОКАЗАНО/
-   СДЕЛОК/ВРЕМЯ РАБОТЫ были отдельными обведёнными блоками, а не голым инлайн-текстом). */
+   СДЕЛОК/ВРЕМЯ РАБОТЫ были отдельными обведёнными блоками, а не голым инлайн-текстом). Круглая
+   иконка слева — по образцу карточек статистики "ACTIVE USERS/GAMES ONLINE" с референса. */
 .metric {
+  display: flex; align-items: center; gap: 9px;
   text-align: left; padding: 4px 12px; border-radius: 6px;
   background: rgba(255,255,255,.02); box-shadow: inset 0 0 0 1px var(--border-color);
+}
+.metric-icon {
+  width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--neon-glow-soft); color: var(--accent); font-size: 13px;
 }
 .metric-label { font-size: 9.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
 .metric-value { font-size: 14px; font-weight: 700; color: var(--text-primary); font-family: var(--font-mono); display: inline-block; }
@@ -562,6 +577,15 @@ h2 { font-family: var(--font-display); letter-spacing: .3px; }
   font-size: 12px; cursor: pointer; transition: all .15s; white-space: nowrap;
 }
 .filter-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+/* Тонкая "в скобках" ссылка (по образцу Yokai Reborn — "( VIEW ON OPENSEA )") вместо заливной
+   кнопки: без рамки/фона, только текст в скобках с трекингом. */
+.filter-btn.bracket-label {
+  background: transparent; border-color: transparent;
+  color: var(--accent); text-transform: uppercase; letter-spacing: .08em; font-weight: 600; font-size: 11px;
+}
+.filter-btn.bracket-label::before { content: '( '; }
+.filter-btn.bracket-label::after { content: ' )'; }
+.filter-btn.bracket-label:hover { color: var(--text-primary); border-color: transparent; }
 .filter-btn.primary {
   background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700;
   display: flex; align-items: center; gap: 6px;
@@ -771,9 +795,17 @@ h2 { font-family: var(--font-display); letter-spacing: .3px; }
 .cell-price { position: relative; }
 .coin-cell { display: flex; align-items: center; gap: 8px; }
 .coin-icon {
+  position: relative;
   width: 24px; height: 24px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   font-size: 10px; font-weight: 700; color: #fff; flex-shrink: 0;
+}
+/* Диагональный акцент на строке #1 (по образцу диагональной "SORROW"-ленты с постера "NIHILISM") —
+   чистая геометрия, без текста, чтобы не перегружать плотную таблицу. */
+tr.rank-one .coin-icon::after {
+  content: ''; position: absolute; top: -3px; left: -3px; width: 14px; height: 14px;
+  background: var(--accent); clip-path: polygon(0 0, 100% 0, 0 100%);
+  box-shadow: 0 0 6px -1px var(--accent);
 }
 /* Маленький бейдж биржи перед парой у монет с других бирж (Binance/OKX) — см. coinDisplayLabel() в app.js. */
 .exch-tag {
@@ -1349,8 +1381,20 @@ h2 { font-family: var(--font-display); letter-spacing: .3px; }
 }
 .acct-wide-input { width: 320px !important; font-family: var(--font-mono); }
 @media (max-width: 900px) { .acct-wide-input { width: 100% !important; } }
-.empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); font-size: 14px; }
-.empty-state i { font-size: 48px; display: block; margin-bottom: 16px; }
+/* Драматичный пустой экран (по образцу постера "B&Y 404" — крупная фигура/номер в центре с
+   рассыпанными лепестками вокруг) — крупная светящаяся иконка + пара тусклых лепестков-акцентов
+   по бокам, чисто декоративная геометрия. */
+.empty-state { position: relative; text-align: center; padding: 60px 20px; color: var(--text-muted); font-size: 14px; }
+.empty-state i {
+  font-size: 52px; display: block; margin-bottom: 16px; color: var(--accent-soft);
+  text-shadow: 0 0 26px var(--neon-glow-soft);
+}
+.empty-state::before, .empty-state::after {
+  content: ''; position: absolute; top: 50%; width: 20px; height: 20px; margin-top: -46px;
+  background: radial-gradient(circle, var(--accent-soft), transparent 70%); opacity: .25; border-radius: 50%;
+}
+.empty-state::before { left: calc(50% - 90px); transform: scale(1.4, 1); }
+.empty-state::after { left: calc(50% + 70px); transform: scale(1, 1.4); }
 
 .grid-view { display: none; padding: 12px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
 .content.grid-mode .data-table { display: none; }

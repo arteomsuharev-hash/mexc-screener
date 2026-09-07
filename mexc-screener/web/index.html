@@ -17,10 +17,10 @@
     <div class="topbar-left">
       <div class="status-badge off" id="connectionStatus"><span class="status-dot"></span><span id="statusText" data-i18n>ПОДКЛЮЧЕНИЕ...</span></div>
       <div class="topbar-metrics">
-        <div class="metric"><div class="metric-label" data-i18n>Пары USDT</div><div class="metric-value" id="metricCoins">0</div></div>
-        <div class="metric"><div class="metric-label" data-i18n>Показано</div><div class="metric-value" id="metricShown">0</div></div>
-        <div class="metric"><div class="metric-label" data-i18n>Сделок</div><div class="metric-value" id="metricTrades">0</div></div>
-        <div class="metric"><div class="metric-label" data-i18n>Время работы</div><div class="metric-value" id="metricUptime">00:00:00</div></div>
+        <div class="metric"><div class="metric-icon"><i class="ri-coins-line"></i></div><div><div class="metric-label" data-i18n>Пары USDT</div><div class="metric-value" id="metricCoins">0</div></div></div>
+        <div class="metric"><div class="metric-icon"><i class="ri-eye-line"></i></div><div><div class="metric-label" data-i18n>Показано</div><div class="metric-value" id="metricShown">0</div></div></div>
+        <div class="metric"><div class="metric-icon"><i class="ri-exchange-line"></i></div><div><div class="metric-label" data-i18n>Сделок</div><div class="metric-value" id="metricTrades">0</div></div></div>
+        <div class="metric"><div class="metric-icon"><i class="ri-time-line"></i></div><div><div class="metric-label" data-i18n>Время работы</div><div class="metric-value" id="metricUptime">00:00:00</div></div></div>
       </div>
     </div>
     <div class="topbar-right">
@@ -233,7 +233,7 @@
               <button class="tf-btn" data-tf="D" data-i18n>1д</button>
             </div>
             <div id="chartPrice" style="font-family:var(--font-mono);font-size:13px;font-weight:600">--</div>
-            <a id="openOnMexcLink" href="#" target="_blank" rel="noopener" class="filter-btn" style="display:none;text-decoration:none;white-space:nowrap;">
+            <a id="openOnMexcLink" href="#" target="_blank" rel="noopener" class="filter-btn bracket-label" style="display:none;text-decoration:none;white-space:nowrap;">
               <span data-i18n>Открыть на бирже</span> <i class="ri-external-link-line"></i>
             </a>
             <button id="copyForVatagaBtn" type="button" class="filter-btn" title="Скопировать тикер для вставки в поиск Vataga.terminal" data-i18n-title style="display:none;">

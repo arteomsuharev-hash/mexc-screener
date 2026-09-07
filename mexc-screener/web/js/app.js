@@ -1683,7 +1683,8 @@ function renderTable() {
       ? '<span class="signal-badge signal-strategy" title="' + stratDef.short.replace(/"/g, '&quot;') + '"><span class="dot dot-strategy"></span>' + stratDef.badge + ' ' + (c.__score || 0).toFixed(1) + '</span>'
       : '<span class="signal-badge signal-' + sig + '"><span class="dot dot-' + sig + '"></span>' + c.signal + '</span>';
     const rowAnim = isFirstFill ? ' row-enter" style="animation-delay:' + Math.min(i, 24) * 12 + 'ms' : '';
-    return '<tr data-symbol="' + c.symbol + '" class="' + (sel ? 'selected' : '') + rowAnim + '">' +
+    const rankCls = i === 0 ? ' rank-one' : '';
+    return '<tr data-symbol="' + c.symbol + '" class="' + (sel ? 'selected' : '') + rankCls + rowAnim + '">' +
       '<td><i class="ri-star-line star ' + (c.fav ? 'active' : '') + '" data-symbol="' + c.symbol + '"></i></td>' +
       '<td>' + (i + 1) + '</td>' +
       '<td><div class="coin-cell"><div class="coin-icon" style="background:' + c.color + '">' + c.baseAsset.charAt(0) + '</div><span>' + coinDisplayLabel(c) + '</span></div></td>' +
