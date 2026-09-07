@@ -5435,7 +5435,7 @@ function graphsExchangeIdFor(coin) {
 // надолго с одной-двумя случайно повезшими карточками. Теперь — пул из GRAPHS_FETCH_CONCURRENCY
 // "воркеров", разбирающих общую очередь параллельно: тот же принцип "один не загрузился — остальные
 // не трогаем", но без искусственной сериализации там, где сеть это прекрасно позволяет.
-const GRAPHS_FETCH_CONCURRENCY = 6;
+const GRAPHS_FETCH_CONCURRENCY = 10;
 async function refreshGraphsCandles(symbols) {
   if (graphsRefreshInFlight || !symbols || !symbols.length) return;
   graphsRefreshInFlight = true;
@@ -5512,6 +5512,26 @@ function graphsMarkersForSymbol(symbol) {
   return markers;
 }
 
+// Живые цифры в шапке карточки (цена/изменение/Range 5м) — раньше вшивались в HTML только при
+// (пере)построении карточки (graphsMiniCardHtml), а карточка перестраивалась только при смене
+// СОСТАВА видимых монет, поэтому между перестройками цифры в шапке молча стояли на месте. Теперь
+// правим их прямо в DOM на каждой перерисовке (см. redrawGraphsGrid ниже) — дёшево (textContent/
+// className на 3 узла), не трогает сам canvas/его кэш свечей.
+function refreshGraphsCardHeader(card, symbol) {
+  const coin = coinMap.get(symbol);
+  if (!coin) return;
+  const changeCls = coin.change24 >= 0 ? 'up' : 'down';
+  const priceEl = card.querySelector('.mini-chart-price');
+  if (priceEl) { priceEl.textContent = fmtPrice(coin.price); priceEl.className = 'mini-chart-price ' + changeCls; }
+  const changeEl = card.querySelector('.mini-chart-change');
+  if (changeEl) {
+    changeEl.textContent = coin.change24 != null ? (coin.change24 >= 0 ? '+' : '') + coin.change24.toFixed(2) + '%' : '';
+    changeEl.className = 'mini-chart-change ' + changeCls;
+  }
+  const rangeEl = card.querySelector('.mini-chart-range');
+  if (rangeEl && Number.isFinite(coin.range5m)) rangeEl.textContent = 'Range 5м ' + coin.range5m.toFixed(1) + '%';
+}
+
 function redrawGraphsGrid() {
   const page = document.getElementById('page-graphs');
   if (!page || !page.classList.contains('active')) return;
@@ -5522,6 +5542,7 @@ function redrawGraphsGrid() {
     const candles = graphsCandles.get(symbol);
     const canvas = card.querySelector('.mini-chart-canvas');
     const coin = coinMap.get(symbol);
+    refreshGraphsCardHeader(card, symbol);
     if (!candles || candles.length < 2 || !canvas) return;
     // "Дышащая" последняя свеча — патчим close/high/low живой ценой из WS (coinMap), без нового
     // REST-запроса на каждый кадр; сам массив candles (кэш) не мутируем, чтобы следующий такой же
@@ -5709,20 +5730,55 @@ function updateGraphsPage() {
   const page = document.getElementById('page-graphs');
   if (!page || !page.classList.contains('active')) return;
   const symbols = computeGraphsVisibleSymbols();
-  const changed = graphsForceRebuild || symbols.join(',') !== graphsVisibleSymbols.join(',');
+  const forced = graphsForceRebuild; // пин/анпин/смена фильтра — статичная разметка карточки тоже могла поменяться
+  const prevSet = new Set(graphsVisibleSymbols);
+  // СОСТАВ (какие монеты вообще видны), а не порядок — раньше сравнивали symbols.join(',') целиком,
+  // и любая волатильная метрика (Всплеск 5с, Range 5м) меняет ПОРЯДОК почти на каждом тике даже без
+  // единой новой монеты в топе. Это заставляло периодический пересчёт (см. setInterval ниже) сносить
+  // ВСЮ сетку в grid.innerHTML = ... на каждый чих — canvas с уже загруженными свечами превращался
+  // обратно в чёрный пустой экран, и на большой сетке (5×5 = 25 монет) REST не успевал перезагрузить
+  // всё до следующего сноса — сетка выглядела вечно пустой. Теперь при чистой смене порядка карточки
+  // просто переставляются (см. ниже), без разрушения canvas/повторной загрузки свечей.
+  const membershipChanged = forced || symbols.length !== graphsVisibleSymbols.length ||
+    symbols.some(function (s) { return !prevSet.has(s); });
+  const newSymbols = symbols.filter(function (s) { return !prevSet.has(s); });
+  const orderChanged = symbols.join(',') !== graphsVisibleSymbols.join(',');
   graphsForceRebuild = false;
   graphsVisibleSymbols = symbols;
   const countEl = document.getElementById('graphsCount');
   if (countEl) countEl.textContent = symbols.length + ' ' + t('монет');
   const grid = document.getElementById('graphsGrid');
-  if (grid && changed) {
+  if (grid && (membershipChanged || orderChanged)) {
     if (!symbols.length) {
       grid.innerHTML = '<div class="finres-empty" style="grid-column:1/-1;"><i class="ri-layout-grid-line"></i>' +
         t('Нет монет, подходящих под текущий выбор.') + '</div>';
-    } else {
+    } else if (forced) {
+      // Форсированная перестройка — меняется и статичная разметка карточки (кнопка "открепить" и
+      // т.п.), не только состав, так что честно перестраиваем всё заново.
       grid.innerHTML = symbols.map(graphsMiniCardHtml).join('');
+    } else {
+      // Обычная периодическая ре-сортировка — переиспользуем DOM уже отрисованных карточек (не
+      // сбрасываем их canvas и не роняем уже загруженные свечи), новые узлы создаём только для
+      // монет, реально впервые вошедших в топ; выпавшие из топа узлы просто не переносим в новый
+      // порядок (сборщик мусора заберёт).
+      const existingCards = new Map();
+      grid.querySelectorAll('.mini-chart-card[data-symbol]').forEach(function (card) {
+        existingCards.set(card.dataset.symbol, card);
+      });
+      const frag = document.createDocumentFragment();
+      symbols.forEach(function (symbol) {
+        const card = existingCards.get(symbol);
+        if (card) { frag.appendChild(card); }
+        else {
+          const wrap = document.createElement('div');
+          wrap.innerHTML = graphsMiniCardHtml(symbol);
+          frag.appendChild(wrap.firstElementChild);
+        }
+      });
+      grid.innerHTML = '';
+      grid.appendChild(frag);
     }
-    refreshGraphsCandles(symbols);
+    if (symbols.length) refreshGraphsCandles(forced ? symbols : (newSymbols.length ? newSymbols : symbols));
   }
   redrawGraphsGrid();
 }
