@@ -5428,23 +5428,38 @@ function graphsExchangeIdFor(coin) {
   return null; // биржа без своего REST-клиента здесь (пока нет ни одной такой в TIER2_EXTERNAL_EXCHANGES)
 }
 
+// Раньше грузила свечи СТРОГО последовательно (один REST-запрос за раз, ждём ответа, только потом
+// следующий) — на сетке 5×5 (25 монет) это 25 запросов подряд, и если хоть один подвисает у таймаута
+// (fetchKlines — 10с, плюс на desktop ещё и резервный путь через curl.exe при неудаче браузерного
+// fetch), все СЛЕДУЮЩИЕ по очереди символы просто ждут своей очереди — отсюда почти пустая сетка
+// надолго с одной-двумя случайно повезшими карточками. Теперь — пул из GRAPHS_FETCH_CONCURRENCY
+// "воркеров", разбирающих общую очередь параллельно: тот же принцип "один не загрузился — остальные
+// не трогаем", но без искусственной сериализации там, где сеть это прекрасно позволяет.
+const GRAPHS_FETCH_CONCURRENCY = 6;
 async function refreshGraphsCandles(symbols) {
   if (graphsRefreshInFlight || !symbols || !symbols.length) return;
   graphsRefreshInFlight = true;
   const tf = (graphsTimeframeEl() && graphsTimeframeEl().value) || '1';
   try {
-    for (const symbol of symbols) {
-      const page = document.getElementById('page-graphs');
-      if (!page || !page.classList.contains('active')) break; // ушли со страницы — не тратим оставшиеся запросы впустую
-      const coin = coinMap.get(symbol);
-      if (!coin || !coin.raw) continue;
-      const exchangeId = graphsExchangeIdFor(coin);
-      if (!exchangeId) continue;
-      try {
-        const candles = await fetchKlines(coin.raw, tf, 200, exchangeId);
-        if (candles && candles.length) graphsCandles.set(symbol, candles);
-      } catch (e) { /* один символ не загрузился — остальные не трогаем */ }
+    let cursor = 0;
+    async function worker() {
+      while (cursor < symbols.length) {
+        const symbol = symbols[cursor++];
+        const page = document.getElementById('page-graphs');
+        if (!page || !page.classList.contains('active')) return; // ушли со страницы — не тратим оставшиеся запросы впустую
+        const coin = coinMap.get(symbol);
+        if (!coin || !coin.raw) continue;
+        const exchangeId = graphsExchangeIdFor(coin);
+        if (!exchangeId) continue;
+        try {
+          const candles = await fetchKlines(coin.raw, tf, 200, exchangeId);
+          if (candles && candles.length) graphsCandles.set(symbol, candles);
+        } catch (e) { /* один символ не загрузился — остальные не трогаем */ }
+      }
     }
+    const workers = [];
+    for (let i = 0; i < Math.min(GRAPHS_FETCH_CONCURRENCY, symbols.length); i++) workers.push(worker());
+    await Promise.all(workers);
   } finally {
     graphsRefreshInFlight = false;
   }
