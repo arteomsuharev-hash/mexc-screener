@@ -87,7 +87,7 @@ h2 span[data-i18n] {
      подгружается, виден только сам градиент (тихий fallback, без битой иконки/ошибки). */
   background:
     linear-gradient(180deg, rgba(10,10,12,.55) 0%, rgba(10,10,12,.88) 55%, var(--bg-primary) 85%),
-    url('assets/custom/sidebar.png') top center / cover no-repeat,
+    url('../assets/custom/sidebar.png') top center / cover no-repeat,
     linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
   border: 1px solid var(--border-color);
   border-radius: 16px;
