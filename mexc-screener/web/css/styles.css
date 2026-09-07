@@ -282,15 +282,28 @@ h2 span[data-i18n] {
 /* --- Финрез: отдельная страница с реализованным PnL по сделкам --- */
 .finres-layout { display: flex; flex: 1; min-height: 0; overflow: hidden; }
 .finres-subnav {
-  width: 196px; flex-shrink: 0; border-right: 1px solid var(--border-color); background: var(--bg-secondary);
+  width: 196px; flex-shrink: 0; border-right: 1px solid var(--border-color);
   padding: 18px 10px; overflow-y: auto;
+  /* Пользовательская картинка (web/assets/custom/analytics-panel.png или .gif, см. README.txt рядом)
+     — тот же приём слоёв, что у .sidebar: затемняющий градиент поверх, чтобы вкладки/заголовок
+     оставались читаемыми; .gif выше .png в списке слоёв (если есть — показывается он, анимированный);
+     нет ни того ни другого — виден только сам градиент, без битой иконки. */
+  background:
+    linear-gradient(180deg, rgba(10,10,12,.6) 0%, rgba(10,10,12,.82) 60%, var(--bg-secondary) 88%),
+    url('../assets/custom/analytics-panel.gif') top center / cover no-repeat,
+    url('../assets/custom/analytics-panel.png') top center / cover no-repeat,
+    var(--bg-secondary);
 }
-.finres-subnav-title { font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .07em; font-weight: 700; padding: 2px 10px 12px; }
+.finres-subnav-title {
+  font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .07em; font-weight: 700;
+  padding: 2px 10px 12px; text-shadow: 0 1px 3px rgba(0,0,0,.6); /* читаемость поверх analytics-panel.png/gif */
+}
 .finres-tab {
   position: relative;
   display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 11px; border-radius: 8px;
   border: none; background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 13px;
   text-align: left; margin-bottom: 3px; transition: background .18s ease, color .18s ease, box-shadow .18s ease, transform .15s ease;
+  text-shadow: 0 1px 3px rgba(0,0,0,.6); /* читаемость поверх analytics-panel.png/gif, тот же приём что в .nav-item */
 }
 .finres-tab i { font-size: 16px; width: 18px; text-align: center; flex-shrink: 0; color: var(--text-muted); transition: color .18s ease; }
 .finres-tab:hover { background: rgba(255,255,255,.05); color: #fff; transform: translateX(1px); }
