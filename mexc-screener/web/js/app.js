@@ -1167,6 +1167,13 @@ function isUsdtSpot(symbol) {
   return true;
 }
 
+// Окно ринг-буфера — 5 минут (было 70с): тот же буфер теперь ещё и источник для range5m (честный
+// диапазон max-min цены за 5 минут, см. rangePctFromSnaps) — по образцу метрики "range5m" у
+// oculusdei.pro (см. их публичный /api/graph/v1/candidates, поле range5_pct), но посчитанной
+// самостоятельно на своих тиковых данных, не скопированной. 5 минут при коалессинге тиков в ~900мс
+// — до ~333 точек на монету, на ~1600+ монет рынка это по-прежнему лёгкие {t,p,q}-объекты, не
+// заметно по памяти.
+const SNAP_WINDOW_MS = 300000;
 function pushSnap(symbol, price, quoteVol) {
   const now = Date.now();
   let arr = snapshots.get(symbol);
@@ -1177,8 +1184,55 @@ function pushSnap(symbol, price, quoteVol) {
   } else {
     arr.push({ t: now, p: price, q: quoteVol });
   }
-  const cut = now - 70000;
+  const cut = now - SNAP_WINDOW_MS;
   while (arr.length && arr[0].t < cut) arr.shift();
+}
+
+// Диапазон (max-min)/min*100 за последние windowMs — честный "range5m", а не приближение по двум
+// точкам (в отличие от vol5s/vol30s/vol60s выше, которые берут только цену НА границе окна, range
+// нужно сканировать ВЕСЬ отрезок буфера, иначе пропустим пик/провал внутри окна).
+function rangePctFromSnaps(symbol, windowMs) {
+  const arr = snapshots.get(symbol);
+  if (!arr || !arr.length) return 0;
+  const cutoff = Date.now() - windowMs;
+  let min = Infinity, max = -Infinity;
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (arr[i].t < cutoff) break;
+    if (arr[i].p < min) min = arr[i].p;
+    if (arr[i].p > max) max = arr[i].p;
+  }
+  if (min === Infinity || min <= 0) return 0;
+  return (max - min) / min * 100;
+}
+
+// NATR ("нормализованный ATR") за bucketCount минутных отрезков — честный tick-based аналог: делим
+// тиковый буфер на bucketCount корзин по bucketMs (по умолчанию 5×1мин), считаем диапазон
+// (max-min) ВНУТРИ каждой корзины отдельно (это и есть "истинный размах" за минуту, ближе к смыслу
+// ATR, чем общий range5m — который может занизиться, если цена внутри окна ходила туда-сюда и
+// вернулась к тому же уровню), затем усредняем по корзинам и нормализуем на текущую цену. Не
+// настоящий ATR по свечным open/close (candle-based ATR по всему рынку разом нам не по карману —
+// пришлось бы тянуть live-свечи на 1600+ пар одновременно), но такая же честная, посчитанная на
+// собственных тиковых данных метрика, а не выдуманное число.
+function natrPctFromSnaps(symbol, price, bucketMs, bucketCount) {
+  const arr = snapshots.get(symbol);
+  if (!arr || !arr.length || !price) return 0;
+  const now = Date.now();
+  const windowMs = bucketMs * bucketCount;
+  const mins = new Array(bucketCount).fill(Infinity);
+  const maxs = new Array(bucketCount).fill(-Infinity);
+  for (let i = arr.length - 1; i >= 0; i--) {
+    const age = now - arr[i].t;
+    if (age > windowMs) break;
+    const idx = Math.min(bucketCount - 1, Math.floor(age / bucketMs));
+    if (arr[i].p < mins[idx]) mins[idx] = arr[i].p;
+    if (arr[i].p > maxs[idx]) maxs[idx] = arr[i].p;
+  }
+  let sum = 0, count = 0;
+  for (let b = 0; b < bucketCount; b++) {
+    if (maxs[b] > -Infinity) { sum += (maxs[b] - mins[b]); count++; }
+  }
+  if (!count) return 0;
+  return (sum / count) / price * 100;
 }
 
 function metricsFromSnaps(symbol, price, quoteVol) {
@@ -1239,7 +1293,9 @@ function metricsFromSnaps(symbol, price, quoteVol) {
       rateCV = Math.sqrt(variance) / mean;
     }
   }
-  return { vol5: vol5, vol30: vol30, vol60: vol60, vol5s: vol5s, vol30s: vol30s, vol60s: vol60s, preMove: preMove, rateCV: rateCV, zoneLow: zoneLow, zoneHigh: zoneHigh, reverting: reverting };
+  const range5m = rangePctFromSnaps(symbol, SNAP_WINDOW_MS);
+  const natr5 = natrPctFromSnaps(symbol, price, 60000, 5);
+  return { vol5: vol5, vol30: vol30, vol60: vol60, vol5s: vol5s, vol30s: vol30s, vol60s: vol60s, range5m: range5m, natr5: natr5, preMove: preMove, rateCV: rateCV, zoneLow: zoneLow, zoneHigh: zoneHigh, reverting: reverting };
 }
 
 function upsertCoin(row) {
@@ -1272,6 +1328,8 @@ function upsertCoin(row) {
     vol5s: m.vol5s,
     vol30s: m.vol30s,
     vol60s: m.vol60s,
+    range5m: m.range5m,
+    natr5: m.natr5,
     preMove: m.preMove,
     rateCV: m.rateCV,
     zoneLow: m.zoneLow,
@@ -5121,13 +5179,13 @@ function graphsTimeframeEl() { return document.getElementById('graphsTimeframe')
 function graphsExchangeFilterEl() { return document.getElementById('graphsExchangeFilter'); }
 function graphsFavoritesOnlyEl() { return document.getElementById('graphsFavoritesOnly'); }
 
-// Ранжирование — по уже посчитанным полям монеты (объём/изменение/всплеск), те же метрики, что и
-// в остальном приложении (никакой новой "5-минутной" метрики не вводим — 5с/30с/60с всплески уже
-// есть и честно посчитаны по реальному тиковому потоку, см. metricsFromSnaps). "Все биржи" здесь
-// значит "все биржи с настоящим Tier-2" (MEXC + TIER2_EXTERNAL_EXCHANGES, сейчас Binance) — не
-// вообще любая подключённая биржа, у остальных (BINANCEFUT/OKX) честно нет тикового потока для
-// самого графика ("своя" история свечей у fetchKlines есть, но сортировка по vol5s/change24 для
-// них была бы на данных 4с-REST-поллинга, а не реального рынка).
+// Ранжирование — по уже посчитанным полям монеты (объём/изменение/всплеск/range5m), честно
+// посчитанным по реальному тиковому потоку MEXC (см. metricsFromSnaps/rangePctFromSnaps).
+// "Все биржи" здесь значит "все биржи с настоящим Tier-2" (MEXC + TIER2_EXTERNAL_EXCHANGES, сейчас
+// Binance) — не вообще любая подключённая биржа, у остальных (BINANCEFUT/OKX) честно нет тикового
+// потока для самого графика ("своя" история свечей у fetchKlines есть, но сортировка по
+// vol5s/change24/range5m для них была бы на данных 4с-REST-поллинга, а не реального рынка) —
+// range5m для не-MEXC монет просто undefined, сортировка трактует как 0 (см. Number(...)||0 ниже).
 function computeGraphsVisibleSymbols() {
   const n = parseInt((graphsGridSizeEl() && graphsGridSizeEl().value) || '16', 10);
   const metric = (graphsSortMetricEl() && graphsSortMetricEl().value) || 'vol24';
