@@ -1427,7 +1427,7 @@ h2 { font-family: var(--font-display); letter-spacing: .3px; }
 .info-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
 .info-value { font-size: 13px; font-weight: 600; font-family: var(--font-mono); }
 
-.chart-area { flex: 5 1 0; display: flex; flex-direction: column; border-right: none; min-width: 0; min-height: 460px; }
+.chart-area { flex: 5 1 0; display: flex; flex-direction: column; border-right: none; min-width: 0; min-height: 430px; }
 .chart-header {
   /* Раньше рассчитан на широкую горизонтальную нижнюю панель — в узкой правой колонке (редизайн
      2026-09) 7 кнопок таймфрейма + цена + кнопка "Открыть на бирже" переносились на несколько
@@ -1589,14 +1589,14 @@ h2 { font-family: var(--font-display); letter-spacing: .3px; }
 .right-panel {
   width: auto; display: flex; flex-direction: column; flex-shrink: 0;
   background: linear-gradient(180deg, rgba(255,255,255,.015), transparent 140px);
-  border-bottom: 1px solid var(--border-color);
-  /* Правая колонка (редизайн 2026-09): алгоритмы+статистика выбранной монеты идут ПЕРЕД большим
-     графиком (.chart-area, flex:5 min-height:460 ниже) — тот же порядок, что в макете
-     (шапка монеты → активные алгоритмы → статистика → график). Капаем высоту и даём свой скролл,
-     чтобы график всё равно стабильно получал основную часть пространства колонки. */
-  max-height: 300px; overflow-y: auto;
+  border-top: 1px solid var(--border-color);
+  /* Правая колонка (редизайн 2026-09-4, по фидбэку "график должен быть НАВЕРХУ и без скролла") —
+     алгоритмы+статистика+сделки идут ПОСЛЕ графика (.chart-area, flex:5 min-height:460 выше), а не
+     перед ним, чтобы график был виден сразу под шапкой монеты без прокрутки колонки. Капаем высоту
+     плотнее (было 300) и даём свой скролл только этому блоку — график в приоритете. */
+  max-height: 220px; overflow-y: auto;
 }
-.trades-panel { flex: 1; min-height: 90px; display: flex; flex-direction: column; overflow: hidden; }
+.trades-panel { flex: 1; min-height: 70px; display: flex; flex-direction: column; overflow: hidden; }
 .panel-title {
   padding: 10px 16px; font-size: 11px; font-weight: 600;
   color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px;
