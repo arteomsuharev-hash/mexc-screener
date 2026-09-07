@@ -1341,6 +1341,14 @@ function upsertCoin(row) {
   };
   coin.signal = getSignal(coin);
   coin.__wlScore = computeWatchlistCandidateScore(coin);
+  // OI5m/Dvol5m — честно только у watchlist-монет (реальный стакан/поток сделок), см. oi5mForSymbol/
+  // dvol5mForSymbol. Дешёвая проверка членства на КАЖДЫЙ тик всего рынка (~1600 монет), а не сам
+  // расчёт — он и так уже дешёвый внутри, но незачем звать его для 1600 монет без стакана.
+  if (isTier2Watchlisted(display)) {
+    coin.tpm = tpmForSymbol(display);
+    coin.oi5m = oi5mForSymbol(display);
+    coin.dvol5m = dvol5mForSymbol(display);
+  }
   coinMap.set(display, coin);
   return coin;
 }
@@ -1623,6 +1631,44 @@ function tpmForSymbol(symbol) {
     count++;
   }
   return count;
+}
+
+// OI 5м ("Order Imbalance", по мотивам сортировки oculusdei.pro, см. коммит про Range5m/NATR5m/TPM)
+// — дисбаланс объёма стакана бид/аск, усреднённый по снимкам стакана за последние 5 минут, в
+// процентах: +100% — весь видимый объём на покупку, -100% — весь на продажу. Это НЕ open interest
+// (спот, открытого интереса в принципе нет) — честно только у watchlist-монет, тот же tier2Depth,
+// что у depthWallsForSymbol выше.
+function oi5mForSymbol(symbol) {
+  const depth = tier2DepthForSymbol(symbol);
+  if (!depth || !depth.length) return 0;
+  const cutoff = Date.now() - SNAP_WINDOW_MS;
+  let sum = 0, count = 0;
+  for (let i = depth.length - 1; i >= 0; i--) {
+    const snap = depth[i];
+    if (snap.t < cutoff) break;
+    const total = snap.bidVol + snap.askVol;
+    if (total > 0) { sum += (snap.bidVol - snap.askVol) / total; count++; }
+  }
+  return count ? (sum / count) * 100 : 0;
+}
+
+// Dvol 5м ("Delta Volume") — чистая дельта покупки/продажи по РЕАЛЬНЫМ сделкам за последние 5 минут,
+// в процентах от общего объёма за то же окно (+100% — все сделки на покупку, -100% — все на продажу).
+// Честно только у watchlist-монет — тот же tier2Trades, что у tpmForSymbol/deltaSeriesForSymbol.
+// DTPL с того же сайта сознательно НЕ добавляем — непонятная формула, по открытому API не
+// восстанавливается, а выдумывать что-то под чужое название не стали (см. обсуждение в этой сессии).
+function dvol5mForSymbol(symbol) {
+  const trades = tier2TradesForSymbol(symbol);
+  if (!trades || !trades.length) return 0;
+  const cutoff = Date.now() - SNAP_WINDOW_MS;
+  let buy = 0, sell = 0;
+  for (let i = trades.length - 1; i >= 0; i--) {
+    const tr = trades[i];
+    if (tr.t < cutoff) break;
+    if (tr.side === 'sell') sell += tr.qty; else buy += tr.qty;
+  }
+  const total = buy + sell;
+  return total > 0 ? ((buy - sell) / total) * 100 : 0;
 }
 
 // "Краткая статистика" в правой панели — только реальные, уже посчитанные где-то ещё числа
@@ -11518,6 +11564,7 @@ window.__patternEvents = function () { return activePatternEvents.map(function (
 window.__patternFeed = function () { return patternFeed.map(function (e) { return Object.assign({ explanation: explainPatternEvent(e.ev), firstSeenAt: e.firstSeenAt, lastSeenAt: e.lastSeenAt }, e.ev); }); };
 window.__drawMiniCandleChart = drawMiniCandleChart; // отладка рендера сетки "Графики" без реальной сети (см. её же комментарий)
 window.__graphsCandlesFor = function (symbol) { return graphsCandles.get(symbol) || null; };
+window.__coinFor = function (symbol) { return coinMap.get(symbol) || null; }; // отладка полей монеты (tpm/oi5m/dvol5m/range5m и т.д.)
 window.__patternHistory = function () { return patternHistory; };
 window.__sweepPatternOutcomesNow = sweepPatternOutcomes;
 // Только для ручной проверки UI страницы "Паттерны" без ожидания реальных срабатываний детекторов
