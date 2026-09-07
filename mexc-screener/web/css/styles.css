@@ -317,15 +317,24 @@ h2 span[data-i18n] {
 /* Пользовательская картинка (web/assets/custom/finres-hero.png, см. README.txt в той же папке) —
    баннер виден ВСЕГДА, даже без подключённого API-ключа (раньше при пустом балансе блок схлопывался
    в padding:0 — теперь у него есть min-height специально чтобы декоративный баннер не пропадал).
-   Затемняющий градиент по краям — чтобы плитки баланса/переключатель бирж поверх не терялись. */
+   ВАЖНО: картинка сидит на псевдоэлементе С ФИКСИРОВАННОЙ высотой (170px), а НЕ прямо в background
+   самого .finres-hero-bar — тот растягивается под реальный контент (сумма портфеля + 4 стат-плитки,
+   легко 300px+), и картинка-баннер (широкая, невысокая по задумке) при cover на такую высоту дико
+   зумируется/обрезается и лезет под текст цифр. Так картинка всегда одного и того же масштаба
+   независимо от того, сколько реальных данных под ней. */
 .finres-hero-bar {
   position: relative; padding: 20px 26px 4px; flex-shrink: 0; min-height: 96px;
   margin: 0 20px 6px; border-radius: 14px; overflow: hidden;
+  background: var(--bg-secondary);
+}
+.finres-hero-bar::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 170px; z-index: 0;
   background:
-    linear-gradient(100deg, rgba(10,10,12,.78) 0%, rgba(10,10,12,.4) 45%, rgba(10,10,12,.78) 100%),
+    linear-gradient(100deg, rgba(10,10,12,.82) 0%, rgba(10,10,12,.55) 45%, rgba(10,10,12,.82) 100%),
     url('../assets/custom/finres-hero.gif') center / cover no-repeat,
     url('../assets/custom/finres-hero.png') center / cover no-repeat;
 }
+.finres-hero-bar > * { position: relative; z-index: 1; }
 .finres-hero-bar:empty { padding: 0 26px; }
 /* Переключатель "чей Финрез сейчас показан" — крупнее и заметнее, чем такой же (тот же .exch-switch-btn)
    в тулбаре скринера, т.к. тут он один на всю страницу, а не рядом с другими элементами тулбара. */
@@ -1034,7 +1043,10 @@ tr.rank-one .coin-icon::after {
   position: relative; overflow: hidden;
   display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap;
   padding: 18px 20px; margin-bottom: 18px; border: 1px solid var(--border-color); border-radius: 10px;
-  background: linear-gradient(135deg, rgba(201,143,160,.06), rgba(201,143,160,0) 60%);
+  /* Непрозрачная (не растворяющаяся в фоне) подложка — эта карточка теперь сидит поверх
+     пользовательской картинки-баннера (.finres-hero-bar::before), сумма портфеля должна читаться
+     на ЛЮБОЙ картинке, а не только на пустом тёмном фоне. */
+  background: rgba(10,10,12,.62); backdrop-filter: blur(10px) saturate(1.3); -webkit-backdrop-filter: blur(10px) saturate(1.3);
   box-shadow: 0 0 32px -12px rgba(201,143,160,.25);
 }
 /* Тонкий диагональный блик сверху-слева — лёгкий стеклянный акцент, без перегруза интерфейса */
