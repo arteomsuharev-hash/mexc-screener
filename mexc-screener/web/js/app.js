@@ -1608,6 +1608,23 @@ function standingWallForSymbol(symbol) {
   return symbol.indexOf('BINANCE:') === 0 ? detectStandingWallBinance(symbol) : detectStandingWall(symbol);
 }
 
+// TPM ("сделок в минуту", по образцу oculusdei.pro) — считаем РЕАЛЬНЫЕ сделки за последние 60с из
+// того же буфера, что и Tier-2 детекторы (tier2Trades/binanceTier2Trades). Честно только для
+// watchlist-монет (~20-25 шт, «Паттерны») — у MEXC поток по ВСЕМУ рынку (miniTicker) не содержит
+// счётчика сделок вообще, посчитать TPM на все 1600+ пар одновременно физически нечем (см. коммит
+// про Range5m/NATR5m), выдумывать приближение вместо реальных сделок не стали.
+function tpmForSymbol(symbol) {
+  const trades = tier2TradesForSymbol(symbol);
+  if (!trades || !trades.length) return 0;
+  const cutoff = Date.now() - 60000;
+  let count = 0;
+  for (let i = trades.length - 1; i >= 0; i--) {
+    if (trades[i].t < cutoff) break;
+    count++;
+  }
+  return count;
+}
+
 // "Краткая статистика" в правой панели — только реальные, уже посчитанные где-то ещё числа
 // (никаких новых тяжёлых вычислений на каждый рендер): объём/изменение уже на объекте монеты,
 // волатильность 60с — то же metricsFromSnaps, что раньше было отдельной колонкой таблицы.
@@ -1620,10 +1637,12 @@ function miniStatsListHtml(c) {
   const vol24 = c.vol24 || 0;
   const liquidity = vol24 >= 5000000 ? 'HIGH' : vol24 >= 500000 ? 'MED' : 'LOW';
   const chg = c.change24 || 0;
+  const tpm = inWatchlist ? tpmForSymbol(c.symbol) : null;
   const rows = [
     ['Объём 24ч', fmtNum(vol24), ''],
     ['Изм. 24ч', (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%', chg >= 0 ? 'up' : 'down'],
     ['Волатильность', (c.vol60s || 0).toFixed(2) + '%', ''],
+    ['Сделок/мин', tpm === null ? '—' : String(tpm), ''],
     ['Плотность', density, ''],
     ['Ликвидность', liquidity, '']
   ];
