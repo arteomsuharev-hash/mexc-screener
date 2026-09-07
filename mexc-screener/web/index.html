@@ -38,7 +38,25 @@
       <a class="nav-item" data-page="finres"><i class="ri-funds-line"></i><span data-i18n>Финрез</span></a>
       <div class="sidebar-mascot" aria-hidden="true">
         <!-- Freehand SVG faces read as crude/broken at this size — заменено на компактный
-           icon-badge (та же лаборатория/sci-fi тема, без попытки рисовать лица). -->
+           icon-badge (та же лаборатория/sci-fi тема, без попытки рисовать лица). Веточка сакуры
+           по бокам — тот же элемент, что цветёт на присланных референсах, чистая декоративная
+           геометрия (не персонаж), очень тускло, не мешает читать пункты меню. -->
+        <svg class="mascot-sakura" viewBox="0 0 220 60" xmlns="http://www.w3.org/2000/svg">
+          <g opacity=".5">
+            <path d="M14 30 Q 28 18 40 22" stroke="var(--accent-soft)" stroke-width="1.2" fill="none"/>
+            <circle cx="10" cy="32" r="5" fill="var(--accent-soft)"/>
+            <circle cx="17" cy="24" r="5" fill="var(--accent-soft)"/>
+            <circle cx="24" cy="33" r="5" fill="var(--accent-soft)"/>
+            <circle cx="16" cy="31" r="3" fill="var(--accent)"/>
+          </g>
+          <g opacity=".5" transform="translate(220,60) rotate(180)">
+            <path d="M14 30 Q 28 18 40 22" stroke="var(--accent-soft)" stroke-width="1.2" fill="none"/>
+            <circle cx="10" cy="32" r="5" fill="var(--accent-soft)"/>
+            <circle cx="17" cy="24" r="5" fill="var(--accent-soft)"/>
+            <circle cx="24" cy="33" r="5" fill="var(--accent-soft)"/>
+            <circle cx="16" cy="31" r="3" fill="var(--accent)"/>
+          </g>
+        </svg>
         <div class="mascot-badge"><i class="ri-flask-line"></i></div>
         <div class="sidebar-mascot-bubble" data-i18n>Хороших сделок!</div>
       </div>

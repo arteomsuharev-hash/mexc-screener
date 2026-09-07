@@ -2921,11 +2921,15 @@ function updateInfoPanel() {
   // gaugeFill.style.color управляет и SVG-обводкой (currentColor в CSS), и ambient-свечением
   // всего виджета (--gauge-glow), чтобы цвет статуса, глоу вокруг дуги и фон совпадали.
   if (score >= 75) {
+    // Шкала активности — не финансовая семантика (не рост/падение цены), а общий "насколько
+    // горячая монета прямо сейчас" индикатор, поэтому верхний ярус красится в фирменный акцент
+    // (магента), а не в зелёный — иначе на фоне остального розово-лавандового UI зелёный кружок
+    // читался бы как чужеродный обрывок старой темы.
     statusEl.innerHTML = '<i class="ri-fire-line"></i> Высокая активность';
-    statusEl.style.color = 'var(--green)';
-    gaugeFill.setAttribute('stroke', 'var(--green)');
-    gaugeFill.style.color = 'var(--green)';
-    if (algoPanel) algoPanel.style.setProperty('--gauge-glow', 'rgba(0,192,118,.14)');
+    statusEl.style.color = 'var(--accent)';
+    gaugeFill.setAttribute('stroke', 'var(--accent)');
+    gaugeFill.style.color = 'var(--accent)';
+    if (algoPanel) algoPanel.style.setProperty('--gauge-glow', 'var(--neon-glow-soft)');
   } else if (score >= 45) {
     statusEl.innerHTML = '<i class="ri-pulse-line"></i> Средняя активность';
     statusEl.style.color = 'var(--orange)';
