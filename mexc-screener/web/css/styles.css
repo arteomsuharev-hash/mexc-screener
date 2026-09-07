@@ -116,6 +116,11 @@ h2 span[data-i18n] {
   gap: 12px;
   border-bottom: 1px solid var(--border-color);
   min-height: 72px;
+  /* Своя тёмная подложка под лого/подзаголовок — сайдбар может нести пользовательскую картинку
+     (web/assets/custom/sidebar.png) прямо от самого верха, а общий затемняющий градиент сайдбара
+     тут ещё слабый, без этого текст лого терялся на светлых/пёстрых местах картинки. */
+  background: rgba(10, 10, 12, .5);
+  position: relative;
 }
 .logo-icon {
   width: 34px; height: 34px;
@@ -138,7 +143,7 @@ h2 span[data-i18n] {
   color: var(--text-primary); text-transform: uppercase; font-style: italic;
   text-shadow: 0 0 16px var(--neon-glow-soft);
 }
-.logo-sub { font-size: 9px; color: var(--text-muted); letter-spacing: 2.2px; text-transform: uppercase; font-weight: 600; margin-top: 3px; }
+.logo-sub { font-size: 9px; color: var(--text-muted); letter-spacing: 2.2px; text-transform: uppercase; font-weight: 600; margin-top: 3px; text-shadow: 0 1px 4px rgba(0,0,0,.9); }
 .nav { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 10px 8px; }
 .nav-section {
   font-size: 10px;
@@ -150,6 +155,7 @@ h2 span[data-i18n] {
   white-space: nowrap;
   overflow: hidden;
   transition: opacity .2s;
+  text-shadow: 0 1px 4px rgba(0,0,0,.85);
 }
 .nav-item {
   display: flex; align-items: center; gap: 12px;
@@ -160,6 +166,7 @@ h2 span[data-i18n] {
   border-radius: 10px;
   margin-bottom: 2px;
   position: relative;
+  text-shadow: 0 1px 4px rgba(0,0,0,.7);
 }
 .nav-item span { overflow: hidden; transition: opacity .2s; }
 .nav-item i { font-size: 18px; width: 22px; text-align: center; flex-shrink: 0; }
@@ -319,8 +326,18 @@ h2 span[data-i18n] {
 /* Хиро-панель Финреза (общая стоимость портфеля + стат-плитки + график) — единственное место в
    приложении, где теперь показывается баланс: раньше дублировался на "Настройки аккаунта", с
    этого раунда живёт только здесь, видна над всеми вкладками Финреза сразу. */
-.finres-hero-bar { padding: 20px 26px 4px; flex-shrink: 0; }
-.finres-hero-bar:empty { padding: 0; }
+/* Пользовательская картинка (web/assets/custom/finres-hero.png, см. README.txt в той же папке) —
+   баннер виден ВСЕГДА, даже без подключённого API-ключа (раньше при пустом балансе блок схлопывался
+   в padding:0 — теперь у него есть min-height специально чтобы декоративный баннер не пропадал).
+   Затемняющий градиент по краям — чтобы плитки баланса/переключатель бирж поверх не терялись. */
+.finres-hero-bar {
+  position: relative; padding: 20px 26px 4px; flex-shrink: 0; min-height: 96px;
+  margin: 0 20px 6px; border-radius: 14px; overflow: hidden;
+  background:
+    linear-gradient(100deg, rgba(10,10,12,.78) 0%, rgba(10,10,12,.4) 45%, rgba(10,10,12,.78) 100%),
+    url('../assets/custom/finres-hero.png') center / cover no-repeat;
+}
+.finres-hero-bar:empty { padding: 0 26px; }
 /* Переключатель "чей Финрез сейчас показан" — крупнее и заметнее, чем такой же (тот же .exch-switch-btn)
    в тулбаре скринера, т.к. тут он один на всю страницу, а не рядом с другими элементами тулбара. */
 .finres-exchange-tabs { margin: 18px 26px 0; padding: 3px; align-self: flex-start; }
@@ -1525,7 +1542,14 @@ tr.rank-one .coin-icon::after {
   display: flex; align-items: center; justify-content: center;
   color: var(--text-muted); font-size: 14px;
   flex-direction: column; gap: 12px; pointer-events: none;
-  background: #131722;
+  /* Пользовательская картинка (web/assets/custom/chart-placeholder.png, см. README.txt в той же
+     папке) — та же схема, что и у сайдбара: под затемняющим виньеточным градиентом, чтобы текст
+     "Выберите монету..." и 3D-акцент поверх оставались читаемыми. Нет файла — просто не подгружается,
+     виден один #131722 (родной фон-заглушка TradingView), как и раньше. */
+  background:
+    radial-gradient(ellipse at center, rgba(19,23,34,.45), rgba(19,23,34,.88) 75%),
+    url('../assets/custom/chart-placeholder.png') center / cover no-repeat,
+    #131722;
 }
 .chart-placeholder i { font-size: 32px; }
 /* Точечный 3D-акцент (three.js, см. initChartPlaceholderGl в app.js) — только здесь, на пустом
