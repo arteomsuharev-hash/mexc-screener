@@ -1,30 +1,29 @@
 /* ... весь ваш CSS без изменений ... */
 :root {
-  /* Тёмная "moodboard" тема (редизайн 2026-09-2, по образцу присланных постеров: сакура/иероглиф
-     на почти-чёрном, ч/б "NIHILISM", розово-лавандовый "VISION", неоновая магента "METAVERSE",
-     "Yokai" и "B&Y") — почти-чёрный фон с лёгким сливовым оттенком вместо зелёного, акцент
-     магента/роза + лавандовый вместо зелёного/голубого бренд-акцента. --green/--red НЕ трогаем —
-     это финансовая семантика (рост/падение, LONG/SHORT), а не бренд-цвет, её смена запутала бы
-     чтение сигналов. --blue переопределён на лавандовый — он и раньше был "вторичный акцент/активная
-     вкладка" по всему приложению (Финрез/Профили/Паттерны и т.д.), не ценовая семантика, поэтому
-     одна смена значения безопасно перекрашивает все те места разом. */
-  --bg-primary: #0a0710;
-  --bg-secondary: #0f0a17;
-  --bg-card: #170e21;
-  --bg-hover: #26162f;
-  --border-color: #2b1c38;
-  --text-primary: #f3ecf5;
-  --text-secondary: #b6a2c2;
-  --text-muted: #6c5c78;
-  --green: #1fdb74;
-  --red: #ff3d63;
-  --orange: #ffb238;
-  --blue: #c084fc;
-  --accent: #ec4899;
-  --accent-soft: #c084fc;
-  --neon: #ec4899;
-  --neon-glow: rgba(236, 72, 153, .38);
-  --neon-glow-soft: rgba(236, 72, 153, .16);
+  /* Editorial luxury-tech тема (редизайн 2026-09-3, по точному ТЗ пользователя: "85% black/graphite,
+     10% white/silver, 5% dusty pink accent", тонкие 1px обводки с приглушённым серебристым/розовым
+     свечением вместо неона — сознательный переход от предыдущей яркой сливово-магентовой темы,
+     которую сам же попросили заменить на приглушённую editorial-палитру). --green/--red НЕ трогаем —
+     финансовая семантика, не бренд-цвет. --blue переопределён на тёплый серебристо-серый — вторичный
+     акцент/активная вкладка по всему приложению (Финрез/Профили/Паттерны и т.д.), не ценовая
+     семантика, одна смена значения безопасно перекрашивает все те места разом. */
+  --bg-primary: #0a0a0c;
+  --bg-secondary: #101012;
+  --bg-card: #161618;
+  --bg-hover: #1e1e21;
+  --border-color: #2a2a2e;
+  --text-primary: #f2eeee;
+  --text-secondary: #a89ea0;
+  --text-muted: #665f60;
+  --green: #3ecf8e;
+  --red: #e8566f;
+  --orange: #d9a25c;
+  --blue: #b7aeab;
+  --accent: #c98fa0;
+  --accent-soft: #cdbfba;
+  --neon: #c98fa0;
+  --neon-glow: rgba(201, 143, 160, .26);
+  --neon-glow-soft: rgba(201, 143, 160, .09);
   --sidebar-width: 248px;
   --header-height: 56px;
   --font-main: 'Inter', system-ui, -apple-system, sans-serif;
@@ -502,6 +501,14 @@ h2 span[data-i18n] {
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 20px; flex-shrink: 0;
   position: relative; overflow: hidden;
+}
+/* Editorial-типографика на фоне (по ТЗ: "large-scale editorial typography... oversized and
+   partially cropped... feel like fashion magazine typography... must NOT interfere with data") —
+   огромное, еле видимое слово, обрезанное краем шапки, не задевает ни одной живой цифры. */
+.topbar::before {
+  content: 'MARKET'; position: absolute; right: -14px; top: 50%; transform: translateY(-50%);
+  font-family: var(--font-display); font-weight: 600; font-size: 84px; letter-spacing: .04em;
+  color: var(--text-primary); opacity: .035; white-space: nowrap; pointer-events: none; user-select: none;
 }
 .topbar-left { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .status-badge {

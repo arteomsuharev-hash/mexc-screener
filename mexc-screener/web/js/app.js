@@ -1906,22 +1906,25 @@ function initChartPlaceholderGl() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   mount.appendChild(renderer.domElement);
 
-  scene.add(new THREE.AmbientLight(0x3a2a44, 1.4));
-  const key = new THREE.PointLight(0xec4899, 3.2, 12);
+  // Материалы под editorial luxury-палитру (по ТЗ: "polished chrome, subtle pink reflections,
+  // silver highlights" — не насыщенная неоновая магента, как раньше, а приглушённая пыльная роза +
+  // серебро, ближе к дорогому CGI-рендеру, чем к игровому неону).
+  scene.add(new THREE.AmbientLight(0x2a2628, 1.4));
+  const key = new THREE.PointLight(0xc98fa0, 3.0, 12);
   key.position.set(2.5, 2, 3);
   scene.add(key);
-  const rim = new THREE.PointLight(0xc084fc, 2.4, 12);
+  const rim = new THREE.PointLight(0xd8d0cc, 2.2, 12);
   rim.position.set(-2.5, -1.5, 2);
   scene.add(rim);
 
   const mesh = new THREE.Mesh(
     new THREE.IcosahedronGeometry(1.3, 0),
-    new THREE.MeshStandardMaterial({ color: 0x170e21, metalness: 0.35, roughness: 0.25, flatShading: true })
+    new THREE.MeshStandardMaterial({ color: 0x18181a, metalness: 0.6, roughness: 0.18, flatShading: true })
   );
   scene.add(mesh);
   const wire = new THREE.Mesh(
     new THREE.IcosahedronGeometry(1.34, 0),
-    new THREE.MeshBasicMaterial({ color: 0xec4899, wireframe: true, transparent: true, opacity: 0.35 })
+    new THREE.MeshBasicMaterial({ color: 0xc98fa0, wireframe: true, transparent: true, opacity: 0.28 })
   );
   scene.add(wire);
 
