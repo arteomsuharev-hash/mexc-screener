@@ -2598,9 +2598,14 @@ function drawMiniCandleChart(canvas, candles, opts) {
   const padRight = 42, padTop = 4, padBottom = 2;
   const plotW = w - padRight;
   const showVolume = opts.showVolume !== false;
-  const volumeH = showVolume ? Math.round((h - padTop - padBottom) * 0.18) : 0;
-  const plotH = h - padTop - padBottom - volumeH;
+  const hasDelta = !!(opts.deltaSeries && opts.deltaSeries.length);
+  const showTimeAxis = opts.timeAxis !== false;
+  const volumeH = showVolume ? Math.round(h * 0.15) : 0;
+  const deltaH = hasDelta ? Math.round(h * 0.16) : 0;
+  const timeAxisH = showTimeAxis ? 11 : 0;
+  const plotH = h - padTop - padBottom - volumeH - deltaH - timeAxisH;
   const volTop = padTop + plotH;
+  const deltaTop = volTop + volumeH;
 
   // offsetFromEnd/maxCandles — окно просмотра для зума/панорамы конкретной карточки (см.
   // graphsChartView в wireGraphsGridClick): offset=0 значит "последние maxCandles свечей" (как
@@ -2627,6 +2632,19 @@ function drawMiniCandleChart(canvas, candles, opts) {
   const bodyW = Math.max(1, Math.min(6, slot * 0.6));
   function yOf(v) { return padTop + plotH - ((v - min) / (max - min)) * plotH; }
   function volYOf(vv) { return volTop + volumeH - (vv / maxVol) * volumeH; }
+
+  // Водяной знак — крупный тикер бледным фоном за свечами (reference-дизайн по мотивам GodsEye) —
+  // рисуем ПЕРВЫМ, чтобы сетка/свечи/стены легли поверх и остались читаемыми.
+  if (opts.watermark) {
+    const fontSize = Math.max(18, Math.min(40, Math.round(plotH * 0.5)));
+    ctx.save();
+    ctx.font = '700 ' + fontSize + 'px var(--font-display, sans-serif)';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(255,255,255,.045)';
+    ctx.fillText(opts.watermark, plotW / 2, padTop + plotH / 2);
+    ctx.restore();
+  }
 
   ctx.font = '9px var(--font-mono, monospace)';
   ctx.textBaseline = 'middle';
@@ -2660,6 +2678,25 @@ function drawMiniCandleChart(canvas, candles, opts) {
     ctx.fillRect(x - bodyW / 2, top, bodyW, bh);
   });
 
+  // Плашки уровней стакана (см. depthWallsForSymbol) — поверх свечей, прижаты к правому краю
+  // области цены, только те уровни, что попадают в видимый ценовой диапазон текущего окна.
+  if (opts.depthWalls && opts.depthWalls.length) {
+    const chipW = Math.min(38, Math.max(24, plotW * 0.22)), chipH = 11;
+    opts.depthWalls.forEach(function (wall) {
+      if (wall.price < min || wall.price > max) return;
+      const y = Math.max(padTop + chipH / 2, Math.min(padTop + plotH - chipH / 2, yOf(wall.price)));
+      const bid = wall.side === 'bid';
+      ctx.fillStyle = bid ? 'rgba(38,166,154,.28)' : 'rgba(239,83,80,.28)';
+      ctx.fillRect(plotW - chipW - 2, y - chipH / 2, chipW, chipH);
+      ctx.fillStyle = bid ? '#8fe6d6' : '#ffb3ae';
+      ctx.font = '8px var(--font-mono, monospace)';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(fmtWallSize(wall.notional), plotW - 4, y);
+    });
+    ctx.textAlign = 'left';
+  }
+
   // Пунктирная линия последней цены + бейдж на оси — тот же приём, что в drawCandleChart.
   const last = slice[n - 1];
   const lastColor = last.c >= last.o ? OCHART_UP : OCHART_DOWN;
@@ -2674,6 +2711,50 @@ function drawMiniCandleChart(canvas, candles, opts) {
   ctx.fillStyle = '#0b0e14';
   ctx.font = 'bold 9px var(--font-mono, monospace)';
   ctx.fillText(fmtPrice(last.c), plotW + 4, ly);
+
+  // Панель дельты (покупки-продажи по бакетам, см. deltaSeriesForSymbol) — честно только у
+  // watchlist-монет, реальные данные потока сделок. Гистограмма от нулевой линии по центру полосы.
+  if (hasDelta) {
+    const series = opts.deltaSeries;
+    let maxAbs = 0;
+    series.forEach(function (d) { maxAbs = Math.max(maxAbs, Math.abs(d.delta)); });
+    if (maxAbs <= 0) maxAbs = 1;
+    const zeroY = deltaTop + deltaH / 2;
+    ctx.strokeStyle = 'rgba(255,255,255,.08)';
+    ctx.beginPath(); ctx.moveTo(0, zeroY); ctx.lineTo(plotW, zeroY); ctx.stroke();
+    series.forEach(function (d, i) {
+      const x = i * slot + slot / 2;
+      const half = (Math.abs(d.delta) / maxAbs) * (deltaH / 2 - 1);
+      ctx.fillStyle = d.delta >= 0 ? 'rgba(38,166,154,.55)' : 'rgba(239,83,80,.55)';
+      if (d.delta >= 0) ctx.fillRect(x - bodyW / 2, zeroY - half, bodyW, half);
+      else ctx.fillRect(x - bodyW / 2, zeroY, bodyW, half);
+    });
+    ctx.fillStyle = 'rgba(255,255,255,.3)';
+    ctx.font = '8px var(--font-mono, monospace)';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(t('Дельта'), 2, deltaTop + 6);
+  }
+
+  // Ось времени внизу — 3 метки (начало/середина/конец видимого окна), формат ЧЧ:ММ, тот же приём
+  // форматирования, что и в остальном приложении (см. историю сделок/журнал).
+  if (showTimeAxis) {
+    const axisY = h - padBottom - timeAxisH / 2;
+    ctx.fillStyle = 'rgba(255,255,255,.25)';
+    ctx.font = '8px var(--font-mono, monospace)';
+    ctx.textBaseline = 'middle';
+    function hm(ts) {
+      const d = new Date(ts);
+      return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    }
+    ctx.textAlign = 'left';
+    ctx.fillText(hm(slice[0].t), 2, axisY);
+    ctx.textAlign = 'center';
+    ctx.fillText(hm(slice[Math.floor(n / 2)].t), plotW / 2, axisY);
+    ctx.textAlign = 'right';
+    ctx.fillText(hm(slice[n - 1].t), plotW - 2, axisY);
+    ctx.textAlign = 'left';
+  }
 
   // Маркеры алгоритмов (стр. «Паттерны», см. graphsMarkersForSymbol) поверх свечей — необязательные.
   // Экранные координаты каждого нарисованного маркера складываем на сам canvas (__markerHits) —
@@ -5175,6 +5256,57 @@ function updatePatternValidationPanel() {
 // ============================================================================
 const GRAPHS_REFRESH_MS = 20000; // как часто перезапрашиваем историю свечей по REST
 const GRAPHS_REDRAW_MS = 2000;   // как часто просто перерисовываем уже загруженное (живая цена)
+
+// Компактное число для плашек стакана на мини-графике ("2K", "71K") — сознательно без десятичных
+// (в отличие от fmtNum), чтобы плашка была короче на маленьком canvas.
+function fmtWallSize(n) {
+  const a = Math.abs(n);
+  if (a >= 1e6) return Math.round(n / 1e6) + 'M';
+  if (a >= 1e3) return Math.round(n / 1e3) + 'K';
+  return String(Math.round(n));
+}
+
+// Уровни стакана прямо на мини-графике (стр. «Графики», reference-дизайн по мотивам GodsEye) —
+// честно ТОЛЬКО для watchlist-монет: реальный стакан (tier2Depth) есть только у ~20-25 монет
+// «Паттернов», у остального рынка (miniTicker-поток) стакана нет вообще — см. тот же принцип, что
+// уже применён для TPM (tpmForSymbol) и объяснён в коммите про Range5m/NATR5m. Берём по несколько
+// самых весомых по нотионалу (price*qty) уровней с каждой стороны — не обязательно ближайшие к
+// цене, а самые заметные "стены" (тот же сигнал, что ловит standingWallForSymbol, только сразу
+// несколько сразу, а не один).
+const GRAPHS_WALL_LEVELS = 4;
+function depthWallsForSymbol(symbol) {
+  if (!isTier2Watchlisted(symbol)) return [];
+  const ring = tier2DepthForSymbol(symbol);
+  const snap = ring && ring.length ? ring[ring.length - 1] : null;
+  if (!snap) return [];
+  function topLevels(levels, side) {
+    return (levels || [])
+      .map(function (l) { return { price: l.p, qty: l.q, notional: l.p * l.q, side: side }; })
+      .filter(function (l) { return l.notional > 0; })
+      .sort(function (a, b) { return b.notional - a.notional; })
+      .slice(0, GRAPHS_WALL_LEVELS);
+  }
+  return topLevels(snap.bids, 'bid').concat(topLevels(snap.asks, 'ask'));
+}
+
+// Дельта (объём покупок - объём продаж) по тем же временным бакетам, что и видимые свечи — тоже
+// честно только для watchlist (реальный поток сделок tier2Trades, см. комментарий выше). Один
+// проход по буферу сделок (не N проходов на свечу) — бакет по индексу, а не вложенный фильтр.
+function deltaSeriesForSymbol(symbol, slice) {
+  if (!isTier2Watchlisted(symbol) || !slice || slice.length < 2) return [];
+  const trades = tier2TradesForSymbol(symbol);
+  if (!trades || !trades.length) return [];
+  const t0 = slice[0].t;
+  const bucketMs = Math.max(1000, slice[1].t - t0);
+  const buckets = new Array(slice.length).fill(0);
+  for (let i = 0; i < trades.length; i++) {
+    const tr = trades[i];
+    const idx = Math.floor((tr.t - t0) / bucketMs);
+    if (idx < 0 || idx >= buckets.length) continue;
+    buckets[idx] += (tr.side === 'sell' ? -1 : 1) * tr.qty;
+  }
+  return slice.map(function (k, i) { return { t: k.t, delta: buckets[i] }; });
+}
 let graphsCandles = new Map();   // symbol -> candles[] (последний REST-снимок)
 // Индивидуальный зум/пан КАЖДОЙ карточки (колесо мыши / зажать-потащить на canvas, см.
 // wireGraphsGridClick) — symbol -> {count, offset}, живёт отдельно от graphsCandles, поэтому
@@ -5276,15 +5408,18 @@ function graphsMiniCardHtml(symbol) {
   const coin = coinMap.get(symbol);
   const changeCls = coin && coin.change24 >= 0 ? 'up' : 'down';
   const pinned = graphsPinned.has(symbol);
+  const rich = isTier2Watchlisted(symbol); // стены стакана + панель дельты доступны только этим монетам, см. depthWallsForSymbol
   const safeSymbol = symbol.replace(/"/g, '&quot;');
+  const range5m = coin && Number.isFinite(coin.range5m) ? coin.range5m : null;
   // Карточка больше не открывает Скринер по клику на сам график — колесо мыши/зажать-потащить
   // на canvas теперь масштабируют/двигают ЭТОТ конкретный мини-график (см. graphsChartView,
   // wireGraphsGridClick), а не уводят со страницы. Полный переход в Скринер — отдельная кнопка
   // (mini-chart-open), копия тикера — тоже отдельная кнопка, обе в шапке карточки.
-  return '<div class="mini-chart-card' + (pinned ? ' pinned' : '') + '" data-symbol="' + safeSymbol + '">' +
+  return '<div class="mini-chart-card' + (pinned ? ' pinned' : '') + (rich ? ' rich' : '') + '" data-symbol="' + safeSymbol + '">' +
     '<div class="mini-chart-head">' +
       (pinned ? '<button class="mini-chart-unpin" data-unpin="' + safeSymbol + '" title="' + t('Открепить') + '">×</button>' : '') +
-      '<span class="mini-chart-symbol">' + (coin ? coinDisplayLabel(coin) : symbol).replace(/</g, '&lt;') + '</span>' +
+      '<span class="mini-chart-symbol">' + (coin ? coinDisplayLabel(coin) : symbol) + '</span>' +
+      (range5m !== null ? '<span class="mini-chart-range" title="' + t('Диапазон цены за 5 минут') + '">Range 5м ' + range5m.toFixed(1) + '%</span>' : '') +
       '<span class="mini-chart-price ' + changeCls + '">' + (coin ? fmtPrice(coin.price) : '—') + '</span>' +
       '<span class="mini-chart-change ' + changeCls + '">' + (coin && coin.change24 != null ? (coin.change24 >= 0 ? '+' : '') + coin.change24.toFixed(2) + '%' : '') + '</span>' +
       '<button class="mini-chart-copy" data-copy="' + safeSymbol + '" title="' + t('Скопировать тикер') + '"><i class="ri-file-copy-line"></i></button>' +
@@ -5339,10 +5474,26 @@ function redrawGraphsGrid() {
       });
     }
     const view = graphsChartView.get(symbol);
+    const rich = isTier2Watchlisted(symbol);
+    const watermark = (coin && coin.baseAsset) || rawSymbol(symbol).replace(/USDT$/, '');
+    // Дельта считается по ТОМУ ЖЕ окну свечей, что реально сейчас на экране (зум/пан карточки, см.
+    // graphsChartView) — та же формула среза, что drawMiniCandleChart применит к patched внутри себя,
+    // иначе при панораме назад по истории бары дельты уедут от своих свечей.
+    let deltaSeries = null;
+    if (rich) {
+      const maxCandles = Math.max(8, view ? view.count : 96);
+      const offsetFromEnd = Math.max(0, Math.min(patched.length - 2, view ? view.offset : 0));
+      const sliceEnd = patched.length - offsetFromEnd;
+      const sliceStart = Math.max(0, sliceEnd - maxCandles);
+      deltaSeries = deltaSeriesForSymbol(symbol, patched.slice(sliceStart, sliceEnd));
+    }
     drawMiniCandleChart(canvas, patched, {
       markers: graphsMarkersForSymbol(symbol),
       maxCandles: view ? view.count : undefined,
-      offsetFromEnd: view ? view.offset : 0
+      offsetFromEnd: view ? view.offset : 0,
+      watermark: watermark,
+      depthWalls: rich ? depthWallsForSymbol(symbol) : null,
+      deltaSeries: deltaSeries
     });
   });
 }

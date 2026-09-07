@@ -944,6 +944,10 @@ tr.rank-one .coin-icon::after {
 .mini-chart-card:hover { border-color: var(--blue); transform: translateY(-1px); }
 .mini-chart-head { display: flex; align-items: center; gap: 6px; padding: 6px 8px; font-size: 11px; font-family: var(--font-mono); }
 .mini-chart-symbol { font-weight: 600; color: var(--text-primary); }
+.mini-chart-range {
+  font-size: 9px; color: var(--text-muted); background: var(--bg-hover); border-radius: 4px;
+  padding: 1px 5px; white-space: nowrap;
+}
 .mini-chart-price { margin-left: auto; }
 .mini-chart-change { min-width: 52px; text-align: right; }
 .mini-chart-price.up, .mini-chart-change.up { color: var(--green); }
@@ -952,6 +956,11 @@ tr.rank-one .coin-icon::after {
 .mini-chart-canvas { width: 100%; height: 130px; display: block; cursor: grab; touch-action: none; }
 .mini-chart-canvas.dragging { cursor: grabbing; }
 .mini-chart-card.pinned { border-color: rgba(201,143,160,.45); }
+/* .rich — монета в Tier-2 watchlist («Паттерны»): у неё есть настоящий стакан/поток сделок, поэтому
+   мини-график выше — под стены стакана (depthWallsForSymbol) и панель дельты (deltaSeriesForSymbol).
+   У остальных ~1600+ монет рынка такой карточки честно быть не может (нет данных), см. коммит. */
+.mini-chart-card.rich .mini-chart-canvas { height: 190px; }
+.mini-chart-card.rich { border-color: rgba(129,140,248,.28); }
 .mini-chart-unpin, .mini-chart-copy, .mini-chart-open {
   border: 0; background: none; color: var(--text-muted); font-size: 13px; line-height: 1; cursor: pointer;
   padding: 2px 3px; margin-right: 2px; border-radius: 4px; display: inline-flex; align-items: center;
