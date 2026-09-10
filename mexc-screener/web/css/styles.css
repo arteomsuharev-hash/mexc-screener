@@ -864,6 +864,10 @@ tr.rank-one .coin-icon::after {
 .exch-tag-binance { background: rgba(240,185,11,.16); color: #F0B90B; }
 .exch-tag-okx { background: rgba(255,255,255,.14); color: var(--text-primary); }
 .exch-tag-mexc { background: rgba(201,143,160,.14); color: var(--blue); }
+.exch-tag-bitget { background: rgba(0,240,183,.16); color: #00F0B7; }
+.exch-tag-bingx { background: rgba(31,41,55,.35); color: #9aa4b2; }
+.exch-tag-kucoin { background: rgba(36,174,143,.16); color: #24AE8F; }
+.exch-tag-gateio { background: rgba(227,69,61,.16); color: #E3453D; }
 .star { color: var(--text-muted); cursor: pointer; font-size: 14px; transition: color .15s; }
 .star:hover, .star.active { color: var(--orange); }
 .price-up { color: var(--green); }

@@ -627,7 +627,14 @@ function getCoinColor(symbol) {
 // "BINANCEFUT" (см. upsertExternalCoin/EXCHANGE_CONNECTORS.binance.exchangeTags) красится ТЕМ ЖЕ
 // жёлтым, что и обычный Binance (exch-tag-binance, суффикс FUT снят только у класса цвета) — это та
 // же биржа, просто другой рынок — но подписывается отдельно "FUT", не "BIN", чтобы не перепутать со спотом.
-const EXCHANGE_BADGE_TEXT = { BINANCE: 'BIN', BINANCEFUT: 'FUT', OKX: 'OKX' };
+// Раньше OKX/BITGET/BINGX/KUCOIN/GATEIO падали в фолбэк c.exchange.slice(0,3) — это давало и
+// Binance, и BingX одинаковый текст "BIN" (визуально неотличимо, см. пользовательский фидбэк), плюс
+// Bitget/BingX/KuCoin/Gate.io вообще не имели своего цвета в .exch-tag-* (styles.css) и выглядели
+// одинаковым серым. Теперь у каждой биржи — своя ГАРАНТИРОВАННО уникальная буква и свой цвет, те же,
+// что уже приняты в переключателе бирж скринера (см. EXCHANGE_SWITCH_LABELS/.exch-switch-btn.exch-switch-*).
+const EXCHANGE_BADGE_TEXT = {
+  BINANCE: 'B', BINANCEFUT: 'F', OKX: 'O', BITGET: 'G', BINGX: 'X', KUCOIN: 'K', GATEIO: 'T'
+};
 
 // Подпись под названием монеты в инфо-панели справа ("MEXC Spot"/"Binance Futures"/...) — раньше
 // была жёстко "MEXC Spot" всегда, даже для монет с других бирж/рынков (см. updateInfoPanel).
