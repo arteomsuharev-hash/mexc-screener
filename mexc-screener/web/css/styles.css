@@ -702,6 +702,7 @@ h2 span[data-i18n] {
 .exch-switch-btn.exch-switch-bitget { background: #00F0B7; color: #0a0a0a; }
 .exch-switch-btn.exch-switch-bingx { background: #1F2937; color: #fff; }
 .exch-switch-btn.exch-switch-kucoin { background: #24AE8F; color: #0a0a0a; }
+.exch-switch-btn.exch-switch-gateio { background: #E3453D; color: #fff; }
 
 /* Группа с несколькими рынками (сейчас — только Binance: спот+фьючерсы, см. exchangeTags у
    EXCHANGE_CONNECTORS в app.js). Клик по самой букве не фильтрует напрямую — выдвигает ленту
@@ -1059,6 +1060,7 @@ tr.rank-one .coin-icon::after {
 .exch-tab-icon-bitget { background: #00F0B7; color: #0a0a0a; }
 .exch-tab-icon-bingx { background: #1F2937; color: #fff; }
 .exch-tab-icon-kucoin { background: #24AE8F; color: #0a0a0a; }
+.exch-tab-icon-gateio { background: #E3453D; color: #fff; }
 .exch-tab-mid { display: flex; flex-direction: column; gap: 2px; }
 .exch-tab-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
 .exch-tab-dot { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted); }

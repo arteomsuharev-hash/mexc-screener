@@ -884,6 +884,7 @@ function exchangeTerminalUrl(symbol) {
   if (exch === 'BITGET') return 'https://www.bitget.com/spot/' + encodeURIComponent(base) + 'USDT';
   if (exch === 'BINGX') return 'https://bingx.com/en/spot/' + encodeURIComponent(base) + 'USDT';
   if (exch === 'KUCOIN') return 'https://www.kucoin.com/trade/' + encodeURIComponent(base) + '-USDT';
+  if (exch === 'GATEIO') return 'https://www.gate.io/trade/' + encodeURIComponent(base) + '_USDT';
   return mexcTerminalUrl(symbol);
 }
 
@@ -1377,7 +1378,7 @@ function upsertCoin(row) {
 // тиковых метрик — тем взяться неоткуда до того, как WS уже открыт). Для бирж вне этого набора
 // (BINANCEFUT и т.д.) — по-прежнему 0, такие пары навсегда остаются тикером без глубокого анализа,
 // честно.
-const TIER2_EXTERNAL_EXCHANGES = new Set(['BINANCE', 'OKX', 'BITGET', 'BINGX', 'KUCOIN']);
+const TIER2_EXTERNAL_EXCHANGES = new Set(['BINANCE', 'OKX', 'BITGET', 'BINGX', 'KUCOIN', 'GATEIO']);
 function computeExternalWatchlistCandidateScore(vol24) {
   return (Number.isFinite(vol24) && vol24 >= STRATEGY_MIN_LIQUID_VOL24) ? vol24 : -1;
 }
@@ -1627,6 +1628,7 @@ function isTier2Watchlisted(symbol) {
   if (symbol.indexOf('BITGET:') === 0) return bitgetWatchlist.has(symbol);
   if (symbol.indexOf('BINGX:') === 0) return bingxWatchlist.has(symbol);
   if (symbol.indexOf('KUCOIN:') === 0) return kucoinWatchlist.has(symbol);
+  if (symbol.indexOf('GATEIO:') === 0) return gateioWatchlist.has(symbol);
   if (symbol.indexOf('BINANCE:') === 0) return binanceWatchlist.has(symbol);
   return watchlist.has(symbol);
 }
@@ -1635,6 +1637,7 @@ function standingWallForSymbol(symbol) {
   if (symbol.indexOf('BITGET:') === 0) return detectStandingWallBitget(symbol);
   if (symbol.indexOf('BINGX:') === 0) return detectStandingWallBingx(symbol);
   if (symbol.indexOf('KUCOIN:') === 0) return detectStandingWallKucoin(symbol);
+  if (symbol.indexOf('GATEIO:') === 0) return detectStandingWallGateio(symbol);
   if (symbol.indexOf('BINANCE:') === 0) return detectStandingWallBinance(symbol);
   return detectStandingWall(symbol);
 }
@@ -2129,6 +2132,15 @@ function kucoinKlineSeconds(tf) {
 function kucoinInstIdForRaw(raw) {
   return String(raw || '').replace(/USDT$/, '-USDT');
 }
+// Gate.io — обозначения интервала как у Binance ("1m"/"1h"/"1d"), но пара через НИЖНЕЕ ПОДЧЁРКИВАНИЕ
+// ("BTC_USDT") — третий отдельный разделитель среди шести бирж здесь.
+function gateioKlineInterval(tf) {
+  const map = { '1': '1m', '5': '5m', '15': '15m', '30': '30m', '60': '1h', '240': '4h', 'D': '1d' };
+  return map[tf] || '5m';
+}
+function gateioInstIdForRaw(raw) {
+  return String(raw || '').replace(/USDT$/, '_USDT');
+}
 
 // exchangeId — необязательный, тот же смысл, что и у fetchMyTrades: не задан (или 'mexc') — поведение
 // как раньше (MEXC_REST); Binance — тот же путь, но на её собственный REST (тот же /api/v3/klines и
@@ -2141,6 +2153,7 @@ async function fetchKlines(raw, tf, limit, exchangeId) {
   const isBitget = exchangeId === 'bitget';
   const isBingx = exchangeId === 'bingx';
   const isKucoin = exchangeId === 'kucoin';
+  const isGateio = exchangeId === 'gateio';
   const base = (!exchangeId || exchangeId === 'mexc') ? MEXC_REST : EXCHANGE_CONNECTORS[exchangeId].baseUrl;
   const nowSec = Math.floor(Date.now() / 1000);
   const url = isOkx
@@ -2152,6 +2165,8 @@ async function fetchKlines(raw, tf, limit, exchangeId) {
     : isKucoin
     ? base + '/api/v1/market/candles?symbol=' + encodeURIComponent(kucoinInstIdForRaw(raw)) + '&type=' + kucoinKlineType(tf)
       + '&startAt=' + (nowSec - (limit || 200) * kucoinKlineSeconds(tf)) + '&endAt=' + nowSec
+    : isGateio
+    ? base + '/api/v4/spot/candlesticks?currency_pair=' + encodeURIComponent(gateioInstIdForRaw(raw)) + '&interval=' + gateioKlineInterval(tf) + '&limit=' + (limit || 200)
     : base + '/api/v3/klines?symbol=' + encodeURIComponent(raw) + '&interval=' + mexcKlineInterval(tf) + '&limit=' + (limit || 200);
   let bodyText = null;
   try {
@@ -2213,6 +2228,18 @@ async function fetchKlines(raw, tf, limit, exchangeId) {
     if (!data || !Array.isArray(data.data)) throw new Error((data && data.msg) ? data.msg : 'Некорректный ответ KuCoin');
     return data.data.slice().reverse().map(function (k) {
       return { t: Number(k[0]) * 1000, o: Number(k[1]), c: Number(k[2]), h: Number(k[3]), l: Number(k[4]), v: Number(k[5]) };
+    }).filter(function (k) { return Number.isFinite(k.o) && Number.isFinite(k.c) && Number.isFinite(k.h) && Number.isFinite(k.l); });
+  }
+  if (isGateio) {
+    // Gate.io — голый массив (без {code,data} обёртки, как у MEXC/Binance), время в СЕКУНДАХ, и
+    // позиционный формат [time,volume,open,high,low,close] — том (не время-открытия-другого-поля)
+    // на второй позиции, close — последним, а не третьим, как у большинства. Порядок по времени
+    // (ascending/descending) документацией явно не подтверждён — реализовано без разворота (по
+    // аналогии с Binance-стилем большинства других полей этого API); при необходимости меняется
+    // добавлением .slice().reverse() в одну строку, как у OKX/KuCoin.
+    if (!Array.isArray(data)) throw new Error((data && data.message) ? data.message : 'Некорректный ответ Gate.io');
+    return data.map(function (k) {
+      return { t: Number(k[0]) * 1000, v: Number(k[1]), o: Number(k[2]), h: Number(k[3]), l: Number(k[4]), c: Number(k[5]) };
     }).filter(function (k) { return Number.isFinite(k.o) && Number.isFinite(k.c) && Number.isFinite(k.h) && Number.isFinite(k.l); });
   }
   if (!Array.isArray(data)) throw new Error((data && data.msg) ? data.msg : 'Некорректный ответ MEXC');
@@ -4991,16 +5018,217 @@ function evaluateKucoinWatchlist() {
 setInterval(evaluateKucoinWatchlist, KUCOIN_WATCHLIST_EVAL_INTERVAL_MS);
 setTimeout(evaluateKucoinWatchlist, 5000);
 
+// ============================================================================
+// TIER 2 — GATE.IO (мультибиржевой Tier 2, последняя из шести бирж). Один общий публичный WS
+// (wss://api.gateio.ws/ws/v4/) на всю биржу. Протокол проще остальных: подписка/отписка —
+// {"time":<сек>,"channel":"spot.trades"/"spot.order_book","event":"subscribe"/"unsubscribe",
+// "payload":["BTC_USDT",...]}, приходящие данные — {"channel",..,"result":{...}}, никакого
+// отдельного "welcome"-рукопожатия (можно подписываться сразу после onopen). Keepalive — сам
+// протокол WebSocket (браузер отвечает на ping-фреймы автоматически, без нашего участия), но Gate
+// поддерживает и явный app-level {"channel":"spot.ping"} — шлём его тоже для верности, ответ
+// "spot.pong" просто игнорируем (сам факт открытого соединения уже достаточен).
+//
+// Глубина — spot.order_book (снимок топ-N уровней, не инкрементальный spot.order_book_update —
+// тот требует ресинк по u/U последовательностям, сознательно не связываемся, как и с полным
+// "level2" у остальных бирж). Пара — через НИЖНЕЕ ПОДЧЁРКИВАНИЕ ("BTC_USDT").
+// ============================================================================
+const GATEIO_WS_URL = 'wss://api.gateio.ws/ws/v4/';
+const GATEIO_ORDER_BOOK_LEVEL = '20';
+const GATEIO_WATCHLIST_SIZE = 15;
+const GATEIO_WATCHLIST_HARD_CAP = 20;
+const GATEIO_WATCHLIST_EVICT_MARGIN = 8;
+const GATEIO_WATCHLIST_ADD_STREAK = 2;
+const GATEIO_WATCHLIST_EVICT_STREAK = 3;
+const GATEIO_WATCHLIST_EVAL_INTERVAL_MS = 20000;
+const GATEIO_WATCHLIST_COOLDOWN_MS = 5 * 60 * 1000;
+const GATEIO_TIER2_TRADES_CAP = 2000;
+const GATEIO_TIER2_DEPTH_CAP = 600;
+const GATEIO_WS_RECONNECT_DELAY_MS = 3000;
+const GATEIO_WS_PING_INTERVAL_MS = 20000;
+
+const gateioTier2Trades = new Map();  // "GATEIO:BTC/USDT" -> ring buffer {t,price,qty,side}
+const gateioTier2Depth = new Map();   // "GATEIO:BTC/USDT" -> ring buffer {t,bids,asks,bestBid,bestAsk,bidVol,askVol}
+const gateioWatchlist = new Map();    // symbol -> {addedAt, instId}
+const gateioWatchlistCandidateStreaks = new Map();
+const gateioWatchlistEvictStreaks = new Map();
+const gateioWatchlistCooldowns = new Map();
+const gateioInstIdToSymbol = new Map(); // "BTC_USDT" -> "GATEIO:BTC/USDT"
+const gateioDensityAbsorptionBreakoutState = new Map();
+const gateioFailedBreakoutState = new Map();
+const gateioPossibleHiddenAbsorptionState = new Map();
+const gateioCrossExchangeDivergenceState = new Map();
+const gateioTwapState = new Map();
+const gateioTier2Health = { watchlistSize: 0, connectionAttempts: 0, tradesIngested: 0, depthPushesIngested: 0, cooldownDrops: 0 };
+
+let gateioWs = null;
+let gateioWsReady = false;
+let gateioWsReconnectTimer = null;
+let gateioPingTimer = null;
+
+function gateioWatchlistInCooldown(symbol) {
+  const until = gateioWatchlistCooldowns.get(symbol);
+  if (until == null) return false;
+  if (Date.now() >= until) { gateioWatchlistCooldowns.delete(symbol); return false; }
+  return true;
+}
+
+function gateioWsSend(obj) {
+  if (!gateioWs || gateioWs.readyState !== WebSocket.OPEN) return;
+  try { gateioWs.send(JSON.stringify(obj)); } catch (e) {}
+}
+function gateioSubOrUnsub(instId, event) {
+  const t = Math.floor(Date.now() / 1000);
+  gateioWsSend({ time: t, channel: 'spot.trades', event: event, payload: [instId] });
+  gateioWsSend({ time: t, channel: 'spot.order_book', event: event, payload: [instId, GATEIO_ORDER_BOOK_LEVEL, '100ms'] });
+}
+
+// Именованная функция — проверяема напрямую (window.__gateioHandleMessage) без реального сокета.
+function handleGateioWsMessage(raw) {
+  let msg;
+  try { msg = JSON.parse(raw); } catch (e) { return; }
+  if (!msg || msg.event !== 'update' || !msg.result) return; // подтверждения подписки (event:"subscribe") и spot.pong — не данные
+  const result = msg.result;
+  if (msg.channel === 'spot.trades') {
+    const instId = result.currency_pair;
+    const symbol = gateioInstIdToSymbol.get(instId);
+    if (!symbol) return;
+    pushRing(gateioTier2Trades, symbol, {
+      t: Math.round(Number(result.create_time_ms)) || Date.now(), price: num(result.price), qty: num(result.amount), side: result.side === 'sell' ? 'sell' : 'buy'
+    }, GATEIO_TIER2_TRADES_CAP);
+    gateioTier2Health.tradesIngested++;
+  } else if (msg.channel === 'spot.order_book') {
+    const instId = result.s || result.currency_pair;
+    const symbol = gateioInstIdToSymbol.get(instId);
+    if (!symbol) return;
+    const bids = (result.bids || []).map(function (x) { return { p: num(x[0]), q: num(x[1]) }; });
+    const asks = (result.asks || []).map(function (x) { return { p: num(x[0]), q: num(x[1]) }; });
+    const bidVol = bids.reduce(function (a, x) { return a + x.p * x.q; }, 0);
+    const askVol = asks.reduce(function (a, x) { return a + x.p * x.q; }, 0);
+    pushRing(gateioTier2Depth, symbol, {
+      t: Date.now(), bids: bids, asks: asks,
+      bestBid: bids.length ? bids[0].p : null, bestAsk: asks.length ? asks[0].p : null,
+      bidVol: bidVol, askVol: askVol
+    }, GATEIO_TIER2_DEPTH_CAP);
+    gateioTier2Health.depthPushesIngested++;
+  }
+}
+
+function ensureGateioWs() {
+  if (gateioWs && (gateioWs.readyState === WebSocket.OPEN || gateioWs.readyState === WebSocket.CONNECTING)) return;
+  gateioTier2Health.connectionAttempts++;
+  let sock;
+  try {
+    sock = new WebSocket(GATEIO_WS_URL);
+  } catch (e) {
+    logW('Watchlist', 'Gate.io: не удалось создать сокет — ' + e.message);
+    scheduleGateioReconnect();
+    return;
+  }
+  gateioWs = sock;
+  gateioWsReady = false;
+  sock.onopen = function () {
+    if (gateioWs !== sock) return;
+    clearTimeout(gateioWsReconnectTimer);
+    gateioWatchlist.forEach(function (entry) { gateioSubOrUnsub(entry.instId, 'subscribe'); });
+    gateioWsReady = true;
+    clearInterval(gateioPingTimer);
+    gateioPingTimer = setInterval(function () {
+      if (gateioWs === sock && sock.readyState === WebSocket.OPEN) gateioWsSend({ time: Math.floor(Date.now() / 1000), channel: 'spot.ping' });
+    }, GATEIO_WS_PING_INTERVAL_MS);
+  };
+  sock.onmessage = function (ev) { handleGateioWsMessage(ev.data); };
+  sock.onerror = function () {};
+  sock.onclose = function () {
+    if (gateioWs !== sock) return;
+    gateioWs = null;
+    gateioWsReady = false;
+    clearInterval(gateioPingTimer);
+    if (!gateioWatchlist.size) return;
+    scheduleGateioReconnect();
+  };
+}
+function scheduleGateioReconnect() {
+  clearTimeout(gateioWsReconnectTimer);
+  gateioWsReconnectTimer = setTimeout(function () { if (gateioWatchlist.size) ensureGateioWs(); }, GATEIO_WS_RECONNECT_DELAY_MS);
+}
+
+function subscribeGateioWatchlistSymbol(symbol, raw) {
+  if (gateioWatchlist.has(symbol)) return;
+  const instId = gateioInstIdForRaw(raw);
+  const entry = { addedAt: Date.now(), instId: instId };
+  gateioWatchlist.set(symbol, entry);
+  gateioInstIdToSymbol.set(instId, symbol);
+  logI('Watchlist', 'Gate.io ' + symbol + ' добавлена в глубокий анализ (' + raw + ')');
+  ensureGateioWs();
+  if (gateioWsReady) gateioSubOrUnsub(instId, 'subscribe');
+}
+function unsubscribeGateioWatchlistSymbol(symbol) {
+  const entry = gateioWatchlist.get(symbol);
+  if (!entry) return;
+  if (gateioWsReady) gateioSubOrUnsub(entry.instId, 'unsubscribe');
+  gateioInstIdToSymbol.delete(entry.instId);
+  gateioWatchlist.delete(symbol);
+  gateioWatchlistEvictStreaks.delete(symbol);
+  gateioDensityAbsorptionBreakoutState.delete(symbol);
+  gateioFailedBreakoutState.delete(symbol);
+  gateioPossibleHiddenAbsorptionState.delete(symbol);
+  gateioCrossExchangeDivergenceState.delete(symbol);
+  gateioTwapState.delete(symbol);
+  logI('Watchlist', 'Gate.io ' + symbol + ' исключена из глубокого анализа');
+  if (!gateioWatchlist.size && gateioWs) { try { gateioWs.close(); } catch (e) {} }
+}
+
+function gateioTier2ForcedSymbols() {
+  const forced = new Set();
+  if (currentCoin && currentCoin.exchange === 'GATEIO') forced.add(currentCoin.symbol);
+  allCoins.forEach(function (c) { if (c.fav && c.exchange === 'GATEIO') forced.add(c.symbol); });
+  return forced;
+}
+
+function evaluateGateioWatchlist() {
+  const ranked = allCoins
+    .filter(function (c) { return c.exchange === 'GATEIO' && c.__wlScore >= 0 && !gateioWatchlistInCooldown(c.symbol); })
+    .slice()
+    .sort(function (a, b) { return b.__wlScore - a.__wlScore; })
+    .map(function (c) { return c.symbol; });
+
+  const forced = gateioTier2ForcedSymbols();
+  const currentMembers = new Set(gateioWatchlist.keys());
+
+  const transitions = MexcCore.computeWatchlistTransitions({
+    rankedSymbols: ranked,
+    currentMembers: currentMembers,
+    candidateStreaks: gateioWatchlistCandidateStreaks,
+    evictStreaks: gateioWatchlistEvictStreaks,
+    size: GATEIO_WATCHLIST_SIZE,
+    evictMargin: GATEIO_WATCHLIST_EVICT_MARGIN,
+    addStreakNeeded: GATEIO_WATCHLIST_ADD_STREAK,
+    evictStreakNeeded: GATEIO_WATCHLIST_EVICT_STREAK,
+    forced: forced,
+    maxSize: GATEIO_WATCHLIST_HARD_CAP
+  });
+
+  transitions.toEvict.forEach(unsubscribeGateioWatchlistSymbol);
+  transitions.toAdd.forEach(function (symbol) {
+    const coin = coinMap.get(symbol);
+    if (coin) subscribeGateioWatchlistSymbol(symbol, coin.raw);
+  });
+  gateioTier2Health.watchlistSize = gateioWatchlist.size;
+}
+setInterval(evaluateGateioWatchlist, GATEIO_WATCHLIST_EVAL_INTERVAL_MS);
+setTimeout(evaluateGateioWatchlist, 5000);
+
 // Единственные два места во всём детекторном движке, которым честно нужно прочитать буфер ПО ЛЮБОЙ
 // поддерживаемой бирже, а не только MEXC (см. sweepCyclicalOutcomes/flushTimeWindowIfDue ниже) —
 // не переписываем сами tier2Trades/tier2Depth (MEXC-only, трогать лишний раз рискованно), просто
-// выбираем нужную Map по префиксу символа ("OKX:"/"BINANCE:"/"BITGET:"/"BINGX:"/"KUCOIN:" -> своя
-// биржа, иначе MEXC).
+// выбираем нужную Map по префиксу символа ("OKX:"/"BINANCE:"/"BITGET:"/"BINGX:"/"KUCOIN:"/"GATEIO:"
+// -> своя биржа, иначе MEXC).
 function tier2TradesForSymbol(symbol) {
   if (symbol.indexOf('OKX:') === 0) return okxTier2Trades.get(symbol);
   if (symbol.indexOf('BITGET:') === 0) return bitgetTier2Trades.get(symbol);
   if (symbol.indexOf('BINGX:') === 0) return bingxTier2Trades.get(symbol);
   if (symbol.indexOf('KUCOIN:') === 0) return kucoinTier2Trades.get(symbol);
+  if (symbol.indexOf('GATEIO:') === 0) return gateioTier2Trades.get(symbol);
   return symbol.indexOf('BINANCE:') === 0 ? binanceTier2Trades.get(symbol) : tier2Trades.get(symbol);
 }
 function tier2DepthForSymbol(symbol) {
@@ -5008,6 +5236,7 @@ function tier2DepthForSymbol(symbol) {
   if (symbol.indexOf('BITGET:') === 0) return bitgetTier2Depth.get(symbol);
   if (symbol.indexOf('BINGX:') === 0) return bingxTier2Depth.get(symbol);
   if (symbol.indexOf('KUCOIN:') === 0) return kucoinTier2Depth.get(symbol);
+  if (symbol.indexOf('GATEIO:') === 0) return gateioTier2Depth.get(symbol);
   return symbol.indexOf('BINANCE:') === 0 ? binanceTier2Depth.get(symbol) : tier2Depth.get(symbol);
 }
 
@@ -6676,6 +6905,270 @@ function detectPossibleMarketMakerBotKucoin(symbol) {
   if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
   return ev;
 }
+
+// Gate.io-версии всех детекторов выше — тот же контракт detect(symbol) -> event|null, только читают
+// gateioTier2Trades/gateioTier2Depth и свои gateio*State карты (см. блок "TIER 2 — GATE.IO" выше).
+// Пороги/opts — намеренно один в один с остальными пятью биржами того же алгоритма.
+// ------------------------------------------------------------------------------------------
+function detectRepeatedTradeSizesGateio(symbol) {
+  const ev = MexcCore.detectRepeatedTradeSizes(gateioTier2Trades.get(symbol), {
+    tolerance: PATTERN_CLUSTER_TOLERANCE, minRepeats: DETECTOR_DEFS.repeatSize.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectRepeatedIntervalsGateio(symbol) {
+  const ev = MexcCore.detectRepeatedIntervals(gateioTier2Trades.get(symbol), {
+    tolerance: PATTERN_CLUSTER_TOLERANCE, minRepeats: DETECTOR_DEFS.repeatInterval.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectBurstNoFollowThroughGateio(symbol) {
+  const ev = MexcCore.detectBurstNoFollowThrough(gateioTier2Trades.get(symbol), {
+    bucketMs: PATTERN_BURST_BUCKET_MS, minRepeats: DETECTOR_DEFS.burstNoFollow.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectCyclicityGateio(symbol) {
+  const ev = MexcCore.detectCyclicity(gateioTier2Trades.get(symbol), {
+    bucketMs: 2000, minRepeats: DETECTOR_DEFS.cycle.minRepeats, tolerance: PATTERN_CLUSTER_TOLERANCE, lookback: 2000
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectRepeatingSequenceGateio(symbol) {
+  const ev = MexcCore.detectRepeatingSequence(gateioTier2Trades.get(symbol), {
+    minLen: 3, maxLen: 6, minRepeats: DETECTOR_DEFS.sequence.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectLadderGateio(symbol) {
+  const ev = MexcCore.detectLadder(gateioTier2Trades.get(symbol), {
+    tolerance: 0.3, minRepeats: DETECTOR_DEFS.ladder.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectErshikGateio(symbol) {
+  const ev = MexcCore.detectErshik(gateioTier2Trades.get(symbol), {
+    tolerance: 0.2, minRepeats: DETECTOR_DEFS.ershik.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectImbalanceGateio(symbol) {
+  const ev = MexcCore.detectImbalance(gateioTier2Depth.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.imbalance.minRepeats, minZ: 2.5, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectAbsorptionGateio(symbol) {
+  const ev = MexcCore.detectAbsorption(gateioTier2Depth.get(symbol), gateioTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.absorption.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectFakeLiquidityGateio(symbol) {
+  const ev = MexcCore.detectFakeLiquidity(gateioTier2Depth.get(symbol), gateioTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.fakeLiquidity.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectExhaustionGateio(symbol) {
+  const ev = MexcCore.detectExhaustion(gateioTier2Trades.get(symbol), {
+    bucketMs: PATTERN_BURST_BUCKET_MS, minRepeats: DETECTOR_DEFS.exhaustion.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectZoneReturnGateio(symbol) {
+  const ev = MexcCore.detectZoneReturn(gateioTier2Trades.get(symbol), {
+    tolerance: 0.005, minRepeats: DETECTOR_DEFS.zoneReturn.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectStandingWallGateio(symbol) {
+  const ev = MexcCore.detectStandingWall(gateioTier2Depth.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.standingWall.minRepeats, lookback: 20, minWallRatio: 5, maxDistancePct: 1.5
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDensityBreakGateio(symbol) {
+  const ev = MexcCore.detectDensityBreak(gateioTier2Depth.get(symbol), gateioTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.densityBreak.minRepeats, lookback: 300, minWallRatio: 5, minShrinkRatio: 0.5
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDensityAbsorptionGateio(symbol) {
+  const ev = MexcCore.detectDensityAbsorption(gateioTier2Depth.get(symbol), gateioTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.densityAbsorption.minRepeats, lookback: 300, minWallRatio: 5
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectLiquiditySweepGateio(symbol) {
+  const ev = MexcCore.detectLiquiditySweep(gateioTier2Trades.get(symbol), gateioTier2Depth.get(symbol), { lookback: 200 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectImpulsePullbackContinuationGateio(symbol) {
+  const ev = MexcCore.detectImpulsePullbackContinuation(gateioTier2Trades.get(symbol), { lookback: 300 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPriceVolumeInefficiencyGateio(symbol) {
+  const ev = MexcCore.detectPriceVolumeInefficiency(gateioTier2Trades.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDensityAbsorptionBreakoutGateio(symbol) {
+  const state = gateioDensityAbsorptionBreakoutState.get(symbol) || {};
+  const result = MexcCore.detectDensityAbsorptionBreakout(gateioTier2Depth.get(symbol), gateioTier2Trades.get(symbol), {
+    minWallRatio: 5, maxDistancePct: 1.0, minTestCount: DETECTOR_DEFS.densityAbsorptionBreakout.minRepeats
+  }, state);
+  gateioDensityAbsorptionBreakoutState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPumpReversalGateio(symbol) {
+  const ev = MexcCore.detectPumpReversal(gateioTier2Trades.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDumpReversalGateio(symbol) {
+  const ev = MexcCore.detectDumpReversal(gateioTier2Trades.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectCompressionBreakGateio(symbol) {
+  const ev = MexcCore.detectCompressionBreak(gateioTier2Trades.get(symbol), gateioTier2Depth.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectFailedBreakoutGateio(symbol) {
+  const state = gateioFailedBreakoutState.get(symbol) || {};
+  const result = MexcCore.detectFailedBreakout(gateioTier2Trades.get(symbol), { lookback: 300 }, state);
+  gateioFailedBreakoutState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectVolumeAnomalyGateio(symbol) {
+  const ev = MexcCore.detectVolumeAnomaly(gateioTier2Trades.get(symbol), gateioTier2Depth.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectLiquidityWithdrawalGateio(symbol) {
+  const ev = MexcCore.detectLiquidityWithdrawal(gateioTier2Depth.get(symbol), gateioTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.liquidityWithdrawal.minRepeats, lookback: 200
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPossibleHiddenAbsorptionGateio(symbol) {
+  const state = gateioPossibleHiddenAbsorptionState.get(symbol) || {};
+  const result = MexcCore.detectPossibleHiddenAbsorption(gateioTier2Depth.get(symbol), gateioTier2Trades.get(symbol), {}, state);
+  gateioPossibleHiddenAbsorptionState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+// base монеты из "GATEIO:BTC/USDT" -> "BTC" — сравниваем цену Gateio с MEXC (всегда доступна) и
+// любой ДРУГОЙ подключённой биржей (не с самим Gateio).
+function crossExchangeCandidatesForGateio(symbol) {
+  const base = symbol.split(':').pop().split('/')[0];
+  const candidates = [];
+  const mexcCoin = coinMap.get(base + '/USDT');
+  if (mexcCoin && mexcCoin.price > 0) candidates.push({ exchange: 'MEXC', price: mexcCoin.price });
+  Object.keys(EXCHANGE_CONNECTORS).forEach(function (id) {
+    if (id === 'gateio') return;
+    if (!exchangeConnections[id] || !exchangeConnections[id].connected) return;
+    EXCHANGE_CONNECTORS[id].exchangeTags.filter(function (tag) { return !/FUT$/.test(tag); }).forEach(function (tag) {
+      const coin = coinMap.get(tag + ':' + base + '/USDT');
+      if (coin && coin.price > 0) candidates.push({ exchange: tag, price: coin.price });
+    });
+  });
+  return candidates;
+}
+function detectCrossExchangeDivergenceGateio(symbol) {
+  const coin = coinMap.get(symbol);
+  if (!coin || !(coin.price > 0)) return null;
+  const candidates = crossExchangeCandidatesForGateio(symbol);
+  if (!candidates.length) return null;
+  const state = gateioCrossExchangeDivergenceState.get(symbol) || {};
+  const result = MexcCore.detectCrossExchangeDivergence(coin.price, candidates, { now: Date.now() }, state);
+  gateioCrossExchangeDivergenceState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+// #12/#16 честно переиспользуют ОБЩИЕ cyclicalLibrary/timeBucketStats (обычные объекты, не Map,
+// ключ — уже уникальный "GATEIO:BTC/USDT" строкой, коллизий с MEXC-символами нет) — и уже
+// обобщённые выше flushTimeWindowIfDue/symbolOverallMedianVolume (см. tier2TradesForSymbol).
+function detectCyclicalPatternGateio(symbol) {
+  const trades = gateioTier2Trades.get(symbol);
+  const library = cyclicalLibrary[symbol] || [];
+  const result = MexcCore.detectCyclicalPattern(trades, library, {});
+  if (result.library !== library) {
+    const added = result.library[result.library.length - 1];
+    if (added && added.priceAtEpisode == null && trades && trades.length) added.priceAtEpisode = trades[trades.length - 1].price;
+    cyclicalLibrary[symbol] = result.library;
+    saveCyclicalLibrary();
+  }
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectTimeBasedImpulseGateio(symbol) {
+  const coin = coinMap.get(symbol);
+  if (!coin || !(coin.price > 0)) return null;
+  const now = Date.now();
+  flushTimeWindowIfDue(symbol, now, coin.price);
+  const bucketKey = MexcCore.timeBucketKeyFromDate(new Date(now));
+  const stats = (timeBucketStats[symbol] || {})[bucketKey];
+  const ev = MexcCore.detectTimeBasedImpulse(stats, symbolOverallMedianVolume(symbol), coin.price, {});
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectTwapGateio(symbol) {
+  const state = gateioTwapState.get(symbol) || {};
+  const result = MexcCore.detectTwap(gateioTier2Trades.get(symbol), {}, state);
+  gateioTwapState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPossibleMarketMakerBotGateio(symbol) {
+  const ev = MexcCore.detectPossibleMarketMakerBot(gateioTier2Trades.get(symbol), gateioTier2Depth.get(symbol), {});
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+const GATEIO_DETECTOR_FNS = {
+  repeatSize: detectRepeatedTradeSizesGateio, repeatInterval: detectRepeatedIntervalsGateio,
+  burstNoFollow: detectBurstNoFollowThroughGateio, cycle: detectCyclicityGateio,
+  sequence: detectRepeatingSequenceGateio, ladder: detectLadderGateio, ershik: detectErshikGateio,
+  imbalance: detectImbalanceGateio, absorption: detectAbsorptionGateio, fakeLiquidity: detectFakeLiquidityGateio,
+  exhaustion: detectExhaustionGateio, zoneReturn: detectZoneReturnGateio, standingWall: detectStandingWallGateio,
+  densityBreak: detectDensityBreakGateio, densityAbsorption: detectDensityAbsorptionGateio,
+  liquiditySweep: detectLiquiditySweepGateio, impulsePullbackContinuation: detectImpulsePullbackContinuationGateio,
+  priceVolumeInefficiency: detectPriceVolumeInefficiencyGateio, densityAbsorptionBreakout: detectDensityAbsorptionBreakoutGateio,
+  pumpReversal: detectPumpReversalGateio, dumpReversal: detectDumpReversalGateio,
+  compressionBreak: detectCompressionBreakGateio, failedBreakout: detectFailedBreakoutGateio,
+  volumeAnomaly: detectVolumeAnomalyGateio, liquidityWithdrawal: detectLiquidityWithdrawalGateio,
+  possibleHiddenAbsorption: detectPossibleHiddenAbsorptionGateio, crossExchangeDivergence: detectCrossExchangeDivergenceGateio,
+  cyclicalPattern: detectCyclicalPatternGateio, timeBasedImpulse: detectTimeBasedImpulseGateio,
+  twap: detectTwapGateio, possibleMarketMakerBot: detectPossibleMarketMakerBotGateio
+};
 const KUCOIN_DETECTOR_FNS = {
   repeatSize: detectRepeatedTradeSizesKucoin, repeatInterval: detectRepeatedIntervalsKucoin,
   burstNoFollow: detectBurstNoFollowThroughKucoin, cycle: detectCyclicityKucoin,
@@ -7186,6 +7679,9 @@ function runPatternDetectors() {
   kucoinWatchlist.forEach(function (entry, symbol) {
     runDetectorsForSymbolInto(symbol, KUCOIN_DETECTOR_FNS, events, cycleNow);
   });
+  gateioWatchlist.forEach(function (entry, symbol) {
+    runDetectorsForSymbolInto(symbol, GATEIO_DETECTOR_FNS, events, cycleNow);
+  });
 
   // Мульти-детекторное подтверждение (ТЗ #8, фактор "confirmation") — если на одной монете в ОДНОМ
   // прогоне сработало ≥2 разных детектора, это взаимное подтверждение: пересчитываем им score с
@@ -7543,6 +8039,7 @@ function graphsExchangeIdFor(coin) {
   if (coin.exchange === 'BITGET') return 'bitget';
   if (coin.exchange === 'BINGX') return 'bingx';
   if (coin.exchange === 'KUCOIN') return 'kucoin';
+  if (coin.exchange === 'GATEIO') return 'gateio';
   return null; // биржа без своего REST-клиента здесь (пока нет ни одной такой в TIER2_EXTERNAL_EXCHANGES)
 }
 
@@ -8439,6 +8936,22 @@ async function hmacSha256Base64(secret, message) {
   let binary = '';
   new Uint8Array(sigBuf).forEach(function (b) { binary += String.fromCharCode(b); });
   return btoa(binary);
+}
+
+// HMAC-SHA512 в hex — нужен только Gate.io (EXCHANGE_CONNECTORS.gateio.sign ниже), единственная из
+// шести бирж здесь, что подписывает запросы через SHA-512, а не SHA-256.
+async function hmacSha512Hex(secret, message) {
+  const enc = new TextEncoder();
+  const cryptoKey = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-512' }, false, ['sign']);
+  const sigBuf = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(message));
+  return Array.from(new Uint8Array(sigBuf)).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+}
+// Обычный (не HMAC) SHA-512 в hex — Gate.io требует хэш ТЕЛА запроса как отдельную часть подписываемой
+// строки (см. sign ниже), не сам HMAC.
+async function sha512Hex(message) {
+  const enc = new TextEncoder();
+  const digest = await crypto.subtle.digest('SHA-512', enc.encode(message));
+  return Array.from(new Uint8Array(digest)).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
 }
 
 // fetch() без таймаута может зависнуть на десятки секунд/минуты, если сеть просто "молчит"
@@ -11957,6 +12470,49 @@ const EXCHANGE_CONNECTORS = {
         upsertExternalCoin(rawSymbol, num(row.last), num(row.changeRate) * 100, num(row.volValue), num(row.high), num(row.low), exchangeTag);
       });
     }
+  },
+  gateio: {
+    label: 'Gate.io',
+    baseUrl: 'https://api.gateio.ws',
+    verifyPath: '/api/v4/spot/accounts',
+    needsPassphrase: false,
+    // ЕДИНСТВЕННАЯ из шести бирж здесь с HMAC-SHA512 (не SHA256): подписываемая строка — пять частей
+    // через "\n" (МЕТОД, URL-путь, query-строка, hex(SHA512(тело)), timestamp) — не просто конкатенация,
+    // как у остальных. timestamp — В СЕКУНДАХ (не мс, как у всех остальных бирж здесь).
+    sign: async function (conn, path, params, method) {
+      const qs = params && Object.keys(params).length
+        ? Object.keys(params).map(function (k) { return k + '=' + encodeURIComponent(params[k]); }).join('&')
+        : '';
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      const bodyHash = await sha512Hex(''); // GET без тела — хэш пустой строки
+      const signString = (method || 'GET').toUpperCase() + '\n' + path + '\n' + qs + '\n' + bodyHash + '\n' + timestamp;
+      const signature = await hmacSha512Hex(conn.apiSecret, signString);
+      return {
+        url: this.baseUrl + path + (qs ? '?' + qs : ''),
+        headers: { 'KEY': conn.apiKey, 'SIGN': signature, 'Timestamp': timestamp }
+      };
+    },
+    // В отличие от OKX/Bitget/KuCoin, Gate.io не оборачивает успешный ответ в {code,...} — ошибки
+    // приходят самим HTTP-статусом (уже отсеиваются res.ok в вызывающем коде), а тело может нести
+    // {label,message}. Проверяем на всякий случай, но обычно тут просто нечего проверять.
+    checkError: function (data) {
+      if (data && typeof data === 'object' && !Array.isArray(data) && data.label) {
+        throw new Error(data.message || data.label);
+      }
+    },
+    // change_percentage у Gate.io — уже ГОТОВЫЙ процент (как у BingX), не доля. Пара — через НИЖНЕЕ
+    // ПОДЧЁРКИВАНИЕ ("BTC_USDT") — третий отдельный разделитель среди шести бирж (дефис у OKX/BingX/
+    // KuCoin, ничего у MEXC/Binance/Bitget). Ответ — голый массив, без обёртки {code,data}.
+    exchangeTags: ['GATEIO'],
+    feeds: [{ exchangeTag: 'GATEIO', url: 'https://api.gateio.ws/api/v4/spot/tickers' }],
+    parseTickers: function (body, exchangeTag) {
+      const rows = JSON.parse(body);
+      if (!Array.isArray(rows)) throw new Error('неожиданный формат ответа Gate.io');
+      rows.forEach(function (row) {
+        const rawSymbol = String(row.currency_pair || '').replace('_', '');
+        upsertExternalCoin(rawSymbol, num(row.last), num(row.change_percentage), num(row.quote_volume), num(row.high_24h), num(row.low_24h), exchangeTag);
+      });
+    }
   }
 };
 
@@ -12400,8 +12956,8 @@ function setExchangeStatus(id, state, msg) {
 // "BINANCEFUT" — псевдо-биржа для фьючерсов Binance (см. exchangeTags/feeds у EXCHANGE_CONNECTORS.binance
 // выше) — своя буква "F" и своё полное имя для подсказки, но цвет кнопки (см. styles.css) намеренно
 // тот же жёлтый, что и у обычного Binance — это та же биржа, просто другой рынок.
-const EXCHANGE_SWITCH_LABELS = { MEXC: 'M', BINANCE: 'B', BINANCEFUT: 'F', OKX: 'O', BITGET: 'G', BINGX: 'X', KUCOIN: 'K' };
-const EXCHANGE_SWITCH_TITLES = { MEXC: 'MEXC', BINANCE: 'Binance Spot', BINANCEFUT: 'Binance Futures', OKX: 'OKX', BITGET: 'Bitget', BINGX: 'BingX', KUCOIN: 'KuCoin' };
+const EXCHANGE_SWITCH_LABELS = { MEXC: 'M', BINANCE: 'B', BINANCEFUT: 'F', OKX: 'O', BITGET: 'G', BINGX: 'X', KUCOIN: 'K', GATEIO: 'T' };
+const EXCHANGE_SWITCH_TITLES = { MEXC: 'MEXC', BINANCE: 'Binance Spot', BINANCEFUT: 'Binance Futures', OKX: 'OKX', BITGET: 'Bitget', BINGX: 'BingX', KUCOIN: 'KuCoin', GATEIO: 'Gate.io' };
 const EXCHANGE_MARKET_LABEL = { BINANCE: 'Спот', BINANCEFUT: 'Фьючерсы' };
 
 // Какая группа переключателя сейчас раскрыта (см. .exch-switch-submenu в styles.css) — только одна
@@ -13950,6 +14506,12 @@ window.__kucoinHandleMessage = handleKucoinWsMessage; // отладка разб
 window.__kucoinTier2Health = kucoinTier2Health;
 window.__kucoinInstIdToSymbol = kucoinInstIdToSymbol;
 window.__kucoinFetchBullet = kucoinFetchBullet; // отладка REST bullet-токена (без WS)
+window.__gateioWatchlist = function () { return Array.from(gateioWatchlist.keys()); };
+window.__gateioTier2TradesFor = function (symbol) { return gateioTier2Trades.get(symbol) || []; };
+window.__gateioTier2DepthFor = function (symbol) { return gateioTier2Depth.get(symbol) || []; };
+window.__gateioHandleMessage = handleGateioWsMessage; // отладка разбора сообщений Gate.io WS без реального сокета
+window.__gateioTier2Health = gateioTier2Health;
+window.__gateioInstIdToSymbol = gateioInstIdToSymbol;
 window.__patternHistory = function () { return patternHistory; };
 window.__sweepPatternOutcomesNow = sweepPatternOutcomes;
 // Только для ручной проверки UI страницы "Паттерны" без ожидания реальных срабатываний детекторов
