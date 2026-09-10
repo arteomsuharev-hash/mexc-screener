@@ -2624,6 +2624,32 @@ function drawCandleChart(canvas, candles) {
   };
 }
 
+// Честный "грузится" вместо молчаливого чёрного экрана, пока для карточки ещё не пришли свечи
+// (см. её же вызов в redrawGraphsGrid) — небольшая крутящаяся дуга + подпись. Дуга просто берёт угол
+// из текущего времени (без requestAnimationFrame — перерисовывается вместе с остальной сеткой раз в
+// GRAPHS_REDRAW_MS, этого достаточно, чтобы было видно, что экран живой, а не завис).
+function drawGraphsLoadingPlaceholder(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth || 220, h = canvas.clientHeight || 120;
+  if (!w || !h) return;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  const cx = w / 2, cy = h / 2 - 6, r = Math.min(14, Math.max(8, Math.round(Math.min(w, h) * 0.12)));
+  const angle = (Date.now() / 500) % (Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,255,255,.12)';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  ctx.strokeStyle = '#c98fa0'; // тот же акцент, что --accent в CSS — canvas не резолвит var() для цвета надёжно
+  ctx.beginPath(); ctx.arc(cx, cy, r, angle, angle + Math.PI * 0.6); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,.3)';
+  ctx.font = '10px var(--font-mono, monospace)';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(t('Загрузка…'), cx, cy + r + 16);
+}
+
 // Упрощённый рендерер для сетки мини-графиков (стр. «Графики», по мотивам разбора GodsEye,
 // 2026-09) — сознательно НЕ переиспользует drawCandleChart напрямую: тот завязан на глобальное
 // состояние одного-единственного "своего" графика (зум/пан ownChartView, инструменты построений,
@@ -5354,6 +5380,21 @@ function deltaSeriesForSymbol(symbol, slice) {
   return slice.map(function (k, i) { return { t: k.t, delta: buckets[i] }; });
 }
 let graphsCandles = new Map();   // symbol -> candles[] (последний REST-снимок)
+// Когда именно последний раз реально дошли до REST за этим символом (не когда карточка попала в
+// топ) — на desktop-сборке КАЖДЫЙ такой запрос идёт через curl.exe (браузерный fetch к api.mexc.com
+// почти всегда падает по CORS, см. fetchKlines/nativeCurlGet), а спавн процесса иногда придерживает
+// антивирус на секунды-десятки секунд (см. развёрнутый комментарий у nativeCurlGet про
+// execCommandSelfTest/bridgeTimeoutMs=22с). На сетке 5×5 это означает, что КАЖДЫЙ лишний повторный
+// запрос за уже виденной монетой — не бесплатная мелочь, а реальная плата в секундах. Явно решаем,
+// нужно ли перезапрашивать (см. graphsSymbolNeedsFetch), а не тянем заново любую монету, что просто
+// сменила позицию в топе.
+let graphsCandlesFetchedAt = new Map();
+const GRAPHS_CANDLE_STALE_MS = 60000; // старше минуты — можно освежить, свежее — не трогаем лишний раз
+function graphsSymbolNeedsFetch(symbol) {
+  if (!graphsCandles.has(symbol)) return true;
+  const fetchedAt = graphsCandlesFetchedAt.get(symbol) || 0;
+  return (Date.now() - fetchedAt) > GRAPHS_CANDLE_STALE_MS;
+}
 // Индивидуальный зум/пан КАЖДОЙ карточки (колесо мыши / зажать-потащить на canvas, см.
 // wireGraphsGridClick) — symbol -> {count, offset}, живёт отдельно от graphsCandles, поэтому
 // переживает переперестройку сетки (смену фильтра/сортировки) и REST-обновление свечей той же
@@ -5447,13 +5488,18 @@ async function refreshGraphsCandles(symbols) {
         const symbol = symbols[cursor++];
         const page = document.getElementById('page-graphs');
         if (!page || !page.classList.contains('active')) return; // ушли со страницы — не тратим оставшиеся запросы впустую
+        if (!graphsSymbolNeedsFetch(symbol)) continue; // уже есть свежий кэш — не тратим лишний curl.exe
         const coin = coinMap.get(symbol);
         if (!coin || !coin.raw) continue;
         const exchangeId = graphsExchangeIdFor(coin);
         if (!exchangeId) continue;
         try {
           const candles = await fetchKlines(coin.raw, tf, 200, exchangeId);
-          if (candles && candles.length) graphsCandles.set(symbol, candles);
+          if (candles && candles.length) {
+            graphsCandles.set(symbol, candles);
+            graphsCandlesFetchedAt.set(symbol, Date.now());
+            redrawGraphsGrid(); // не ждём, пока догрузится вся пачка — эта карточка уже готова прямо сейчас
+          }
         } catch (e) { /* один символ не загрузился — остальные не трогаем */ }
       }
     }
@@ -5543,7 +5589,14 @@ function redrawGraphsGrid() {
     const canvas = card.querySelector('.mini-chart-canvas');
     const coin = coinMap.get(symbol);
     refreshGraphsCardHeader(card, symbol);
-    if (!candles || candles.length < 2 || !canvas) return;
+    if (!candles || candles.length < 2) {
+      // Свечи ещё не пришли (см. graphsSymbolNeedsFetch/refreshGraphsCandles) — честный "грузится",
+      // а не молча чёрный экран: на desktop-сборке единичный REST-запрос может реально занять
+      // секунды из-за curl.exe-моста (см. её же комментарий), непонятно ли это подвисло или правда
+      // ещё грузится — пусть видно, что второе.
+      if (canvas) drawGraphsLoadingPlaceholder(canvas);
+      return;
+    }
     // "Дышащая" последняя свеча — патчим close/high/low живой ценой из WS (coinMap), без нового
     // REST-запроса на каждый кадр; сам массив candles (кэш) не мутируем, чтобы следующий такой же
     // патч не накапливал ошибку поверх уже пропатченной копии.
@@ -5741,7 +5794,6 @@ function updateGraphsPage() {
   // просто переставляются (см. ниже), без разрушения canvas/повторной загрузки свечей.
   const membershipChanged = forced || symbols.length !== graphsVisibleSymbols.length ||
     symbols.some(function (s) { return !prevSet.has(s); });
-  const newSymbols = symbols.filter(function (s) { return !prevSet.has(s); });
   const orderChanged = symbols.join(',') !== graphsVisibleSymbols.join(',');
   graphsForceRebuild = false;
   graphsVisibleSymbols = symbols;
@@ -5778,8 +5830,12 @@ function updateGraphsPage() {
       grid.innerHTML = '';
       grid.appendChild(frag);
     }
-    if (symbols.length) refreshGraphsCandles(forced ? symbols : (newSymbols.length ? newSymbols : symbols));
   }
+  // Список отдаём ВЕСЬ видимый набор — какие из них реально нуждаются в свежих свечах, решает сам
+  // graphsSymbolNeedsFetch внутри refreshGraphsCandles (нет кэша ИЛИ кэш старше минуты), так что
+  // лишний REST/curl.exe за уже свежей монетой не улетает просто потому что она поменяла позицию
+  // в топе или карточка была форс-пересобрана.
+  if (symbols.length) refreshGraphsCandles(symbols);
   redrawGraphsGrid();
 }
 setInterval(redrawGraphsGrid, GRAPHS_REDRAW_MS);
@@ -11638,6 +11694,8 @@ window.__tier2DepthFor = function (symbol) { return tier2Depth.get(symbol) || []
 window.__patternEvents = function () { return activePatternEvents.map(function (ev) { return Object.assign({ explanation: explainPatternEvent(ev) }, ev); }); };
 window.__patternFeed = function () { return patternFeed.map(function (e) { return Object.assign({ explanation: explainPatternEvent(e.ev), firstSeenAt: e.firstSeenAt, lastSeenAt: e.lastSeenAt }, e.ev); }); };
 window.__drawMiniCandleChart = drawMiniCandleChart; // отладка рендера сетки "Графики" без реальной сети (см. её же комментарий)
+window.__drawGraphsLoadingPlaceholder = drawGraphsLoadingPlaceholder;
+window.__redrawGraphsGrid = redrawGraphsGrid;
 window.__graphsCandlesFor = function (symbol) { return graphsCandles.get(symbol) || null; };
 window.__coinFor = function (symbol) { return coinMap.get(symbol) || null; }; // отладка полей монеты (tpm/oi5m/dvol5m/range5m и т.д.)
 window.__patternHistory = function () { return patternHistory; };
