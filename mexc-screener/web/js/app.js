@@ -5779,6 +5779,22 @@ function copyGraphsTicker(symbol) {
   });
 })();
 
+// Растягивает сетку на реальное число ВИДИМЫХ карточек (не на выбранный "2×2/3×3/..." в фильтре —
+// тот только задаёт МАКСИМУМ монет, реальных карточек может быть меньше из-за фильтров/избранного),
+// иначе при небольшом числе карточек они жмутся в угол (auto-fill считает колонки по ширине окна,
+// а не по факту "мало карточек — потому покажи их покрупнее на всю высоту"). Квадратное разбиение —
+// ближайшее к NxN под фактический count, столбцы всегда 1fr (тянутся по ширине), строки —
+// minmax(130px, 1fr): есть место — растут и заполняют; тесно (много карточек на невысоком окне) —
+// не сжимаются меньше читаемого предела, тогда включается прокрутка обёртки (см. её же CSS flex:1;
+// overflow-y:auto в index.html).
+function applyGraphsGridLayout(grid, count) {
+  if (!count) { grid.style.gridTemplateColumns = ''; grid.style.gridTemplateRows = ''; return; }
+  const cols = Math.max(1, Math.ceil(Math.sqrt(count)));
+  const rows = Math.max(1, Math.ceil(count / cols));
+  grid.style.gridTemplateColumns = 'repeat(' + cols + ', minmax(0, 1fr))';
+  grid.style.gridTemplateRows = 'repeat(' + rows + ', minmax(130px, 1fr))';
+}
+
 function updateGraphsPage() {
   const page = document.getElementById('page-graphs');
   if (!page || !page.classList.contains('active')) return;
@@ -5830,6 +5846,7 @@ function updateGraphsPage() {
       grid.innerHTML = '';
       grid.appendChild(frag);
     }
+    applyGraphsGridLayout(grid, symbols.length);
   }
   // Список отдаём ВЕСЬ видимый набор — какие из них реально нуждаются в свежих свечах, решает сам
   // graphsSymbolNeedsFetch внутри refreshGraphsCandles (нет кэша ИЛИ кэш старше минуты), так что
