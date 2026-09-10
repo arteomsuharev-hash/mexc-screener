@@ -3753,12 +3753,21 @@ function subscribeDeals(raw) {
 // tests/verify_watchlist_hysteresis.js), чтобы монета на границе топа не дёргала WS туда-обратно
 // каждый цикл.
 // ============================================================================
-const WATCHLIST_SIZE = 20;
+// Размер увеличен с 20 (2026-09, по просьбе пользователя — метрики "Сделок/мин"/"Дисбаланс
+// стакана"/"Дельта объёма" честно доступны только watchlist-монетам, и 20 монет из ~400+ на MEXC
+// многим казалось мало). Живой тест показал: поднимать сильно выше (пробовал 35) — плохая идея не
+// из-за "ресурсов браузера", а из-за реальной нестабильности ранжирования MEXC на этой глубине —
+// объёмы мелких альткоинов в районе рангов 25-40 слишком близки друг к другу и постоянно меняются
+// местами в реальном времени, из-за чего гистерезис (WATCHLIST_EVICT_MARGIN и очередь подписок
+// WATCHLIST_SUBSCRIBE_STAGGER_MS ниже) не успевает стабилизироваться — список не растёт к цели, а
+// просто "мигает" (постоянные добавления/исключения одних и тех же монет), и сделки по ним толком
+// не успевают дойти. 26 — умеренное увеличение, где топ рынка ещё достаточно стабилен.
+const WATCHLIST_SIZE = 26;
 // Жёсткий потолок общего размера watchlist (см. комментарий у MexcCore.computeWatchlistTransitions
 // про то, почему "топ-N по рангу" без явного потолка не ограничивает суммарный размер списка на
 // волатильном рынке) — WATCHLIST_SIZE обычных мест + запас на форсированные (открытая монета +
 // избранное), которые добавляются вне очереди рейтинга.
-const WATCHLIST_HARD_CAP = 25;
+const WATCHLIST_HARD_CAP = 31;
 const WATCHLIST_EVICT_MARGIN = 10;
 const WATCHLIST_ADD_STREAK = 2;
 const WATCHLIST_EVICT_STREAK = 3;
@@ -4056,8 +4065,8 @@ setTimeout(evaluateWatchlist, 5000); // не ждать первые 20с без
 // принцип, что и у канала стакана MEXC — никакой инкрементальной версии/resync не требуется.
 // ============================================================================
 const BINANCE_WS_STREAM = 'wss://stream.binance.com:9443/stream';
-const BINANCE_WATCHLIST_SIZE = 15;         // скромнее MEXC — новая, менее обкатанная ветка
-const BINANCE_WATCHLIST_HARD_CAP = 20;
+const BINANCE_WATCHLIST_SIZE = 20;          // скромнее MEXC — новая, менее обкатанная ветка (см. WATCHLIST_SIZE про то, почему не задран сильно выше)
+const BINANCE_WATCHLIST_HARD_CAP = 25;
 const BINANCE_WATCHLIST_EVICT_MARGIN = 8;
 const BINANCE_WATCHLIST_ADD_STREAK = 2;
 const BINANCE_WATCHLIST_EVICT_STREAK = 3;
@@ -4259,8 +4268,8 @@ setTimeout(evaluateBinanceWatchlist, 5000);
 // ограничение канала, а не наша недоработка; стены здесь будут грубее, но настоящие.
 // ============================================================================
 const OKX_WS_PUBLIC = 'wss://ws.okx.com:8443/ws/v5/public';
-const OKX_WATCHLIST_SIZE = 15;
-const OKX_WATCHLIST_HARD_CAP = 20;
+const OKX_WATCHLIST_SIZE = 20;
+const OKX_WATCHLIST_HARD_CAP = 25;
 const OKX_WATCHLIST_EVICT_MARGIN = 8;
 const OKX_WATCHLIST_ADD_STREAK = 2;
 const OKX_WATCHLIST_EVICT_STREAK = 3;
@@ -4473,8 +4482,8 @@ setTimeout(evaluateOkxWatchlist, 5000);
 // в отличие от OKX (там всегда через дефис).
 // ============================================================================
 const BITGET_WS_PUBLIC = 'wss://ws.bitget.com/v2/ws/public';
-const BITGET_WATCHLIST_SIZE = 15;
-const BITGET_WATCHLIST_HARD_CAP = 20;
+const BITGET_WATCHLIST_SIZE = 20;
+const BITGET_WATCHLIST_HARD_CAP = 25;
 const BITGET_WATCHLIST_EVICT_MARGIN = 8;
 const BITGET_WATCHLIST_ADD_STREAK = 2;
 const BITGET_WATCHLIST_EVICT_STREAK = 3;
@@ -4679,8 +4688,8 @@ setTimeout(evaluateBitgetWatchlist, 5000);
 // Символ — через дефис ("BTC-USDT"), как у OKX.
 // ============================================================================
 const BINGX_WS_MARKET = 'wss://open-api-ws.bingx.com/market';
-const BINGX_WATCHLIST_SIZE = 15;
-const BINGX_WATCHLIST_HARD_CAP = 20;
+const BINGX_WATCHLIST_SIZE = 20;
+const BINGX_WATCHLIST_HARD_CAP = 25;
 const BINGX_WATCHLIST_EVICT_MARGIN = 8;
 const BINGX_WATCHLIST_ADD_STREAK = 2;
 const BINGX_WATCHLIST_EVICT_STREAK = 3;
@@ -4891,8 +4900,8 @@ setTimeout(evaluateBingxWatchlist, 5000);
 // ============================================================================
 const KUCOIN_BULLET_URL = 'https://api.kucoin.com/api/v1/bullet-public';
 const KUCOIN_DEFAULT_PING_INTERVAL_MS = 18000;
-const KUCOIN_WATCHLIST_SIZE = 15;
-const KUCOIN_WATCHLIST_HARD_CAP = 20;
+const KUCOIN_WATCHLIST_SIZE = 20;
+const KUCOIN_WATCHLIST_HARD_CAP = 25;
 const KUCOIN_WATCHLIST_EVICT_MARGIN = 8;
 const KUCOIN_WATCHLIST_ADD_STREAK = 2;
 const KUCOIN_WATCHLIST_EVICT_STREAK = 3;
@@ -5128,8 +5137,8 @@ setTimeout(evaluateKucoinWatchlist, 5000);
 // ============================================================================
 const GATEIO_WS_URL = 'wss://api.gateio.ws/ws/v4/';
 const GATEIO_ORDER_BOOK_LEVEL = '20';
-const GATEIO_WATCHLIST_SIZE = 15;
-const GATEIO_WATCHLIST_HARD_CAP = 20;
+const GATEIO_WATCHLIST_SIZE = 20;
+const GATEIO_WATCHLIST_HARD_CAP = 25;
 const GATEIO_WATCHLIST_EVICT_MARGIN = 8;
 const GATEIO_WATCHLIST_ADD_STREAK = 2;
 const GATEIO_WATCHLIST_EVICT_STREAK = 3;
