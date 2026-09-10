@@ -64,6 +64,18 @@ if [ -d ../web/assets ]; then cp -r ../web/assets/. resources/assets/; fi
 import re
 with open('resources/index.html', encoding='utf-8') as f:
     html = f.read()
+
+# ВАЖНО: ../web/index.html может уже нести встроенный base64 предыдущей сборки (см. шаг --embed
+# ниже) — если скопировать его как есть в ресурсы, новый .exe будет содержать внутри себя копию
+# самого себя (той предыдущей сборки), новый zip после упаковки — расти на этот же довесок, и при
+# каждом следующем "--embed" размер будет примерно УДВАИВАТЬСЯ (реально наблюдалось: 2.7МБ base64 ->
+# 5.5МБ после одной лишней пересборки). Поэтому перед копированием в ресурсы всегда вырезаем старый
+# встроенный блок — сборка должна идти только от исходников, а не от результата прошлой сборки.
+html = re.sub(r'\s*<!-- Десктоп-версия MEXC Screener для Windows.*?-->\s*'
+              r'<script type="text/plain" id="desktopAppData">.*?</script>\s*',
+              '\n', html, count=1, flags=re.S)
+html = re.sub(r'\s*<script type="text/plain" id="desktopAppData">.*?</script>\s*', '\n', html, count=1, flags=re.S)
+
 marker = '<title>Vision Screener</title>'
 assert html.count(marker) == 1, 'ожидался ровно один <title>Vision Screener</title>'
 html = html.replace(marker, marker + '\n<script src="/js/neutralino.js"></script>', 1)
