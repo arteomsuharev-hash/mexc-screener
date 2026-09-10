@@ -361,6 +361,7 @@
           <option value="MEXC">MEXC</option>
           <option value="BINANCE">Binance</option>
           <option value="OKX">OKX</option>
+          <option value="BITGET">Bitget</option>
         </select>
         <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-secondary);cursor:pointer;">
           <input type="checkbox" id="graphsFavoritesOnly"><span data-i18n>Только избранное</span>
@@ -636,6 +637,10 @@
             <div class="exch-tab-icon exch-tab-icon-okx">O</div>
             <div class="exch-tab-mid"><div class="exch-tab-name">OKX</div><div class="exch-tab-dot" id="acctTabDotOkx">Не подключено</div></div>
           </div>
+          <div class="exch-tab" data-exch-tab="bitget">
+            <div class="exch-tab-icon exch-tab-icon-bitget">G</div>
+            <div class="exch-tab-mid"><div class="exch-tab-name">Bitget</div><div class="exch-tab-dot" id="acctTabDotBitget">Не подключено</div></div>
+          </div>
         </div>
 
         <div class="settings-group exch-tab-panel active" id="acctPanelMexc">
@@ -762,6 +767,51 @@
             <div class="setting-control">
               <button class="settings-btn" id="okxConnectBtn" data-i18n>Подключить</button>
               <button class="settings-btn secondary" id="okxDisconnectBtn" data-i18n>Отключить</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-group exch-tab-panel" id="acctPanelBitget">
+          <div class="settings-group-title">Bitget</div>
+          <div class="acct-security-note" data-i18n-block data-i18n-key="acct-other-exchanges-note">
+            <i class="ri-information-line"></i> Подключите биржу — её монеты появятся в таблице скринера
+            (переключатель «Все/M/B/O» сверху). Ключи хранятся только в этом браузере/приложении, как и у MEXC.
+          </div>
+          <div class="setting-row">
+            <span class="setting-label" data-i18n>Статус</span>
+            <div class="setting-control">
+              <span class="status-badge off" id="bitgetStatusBadge" style="position:static;"><span class="status-dot"></span><span id="bitgetStatusText" data-i18n>Не подключено</span></span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">API Key</span>
+            <div class="setting-control">
+              <input type="text" id="bitgetApiKey" class="acct-wide-input" placeholder="..." autocomplete="off" spellcheck="false">
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">Secret Key</span>
+            <div class="setting-control">
+              <div class="acct-input-wrap">
+                <input type="password" id="bitgetApiSecret" class="acct-wide-input" placeholder="••••••••••••••••" autocomplete="off" spellcheck="false">
+                <i class="ri-eye-line acct-toggle-eye" id="bitgetToggleEye"></i>
+              </div>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">Passphrase</span>
+            <div class="setting-control">
+              <div class="acct-input-wrap">
+                <input type="password" id="bitgetApiPassphrase" class="acct-wide-input" placeholder="••••••••••••••••" autocomplete="off" spellcheck="false">
+                <i class="ri-eye-line acct-toggle-eye" id="bitgetPassphraseToggleEye"></i>
+              </div>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label" data-i18n>Управление</span>
+            <div class="setting-control">
+              <button class="settings-btn" id="bitgetConnectBtn" data-i18n>Подключить</button>
+              <button class="settings-btn secondary" id="bitgetDisconnectBtn" data-i18n>Отключить</button>
             </div>
           </div>
         </div>
