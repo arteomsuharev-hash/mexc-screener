@@ -604,6 +604,23 @@ h2 span[data-i18n] {
   font-size: 12px; cursor: pointer; transition: all .15s; white-space: nowrap;
 }
 .filter-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+/* Мульти-select "какие биржи показывать" (стр. «Графики») — обычный <select> не умеет несколько
+   значений сразу без Ctrl+клик (не очевидно пользователю), поэтому свой маленький дропдаун:
+   кнопка в стиле .filter-select + всплывающая панель чекбоксов. */
+.ms-dropdown { position: relative; }
+.ms-dropdown-btn { display: flex; align-items: center; gap: 4px; }
+.ms-dropdown-btn i { font-size: 13px; color: var(--text-muted); }
+.ms-dropdown-panel {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; min-width: 150px;
+  background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 6px;
+  padding: 6px; box-shadow: 0 8px 24px -6px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 1px;
+}
+.ms-dropdown-item {
+  display: flex; align-items: center; gap: 7px; padding: 5px 8px; border-radius: 4px;
+  font-size: 12px; color: var(--text-secondary); cursor: pointer; white-space: nowrap;
+}
+.ms-dropdown-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+.ms-dropdown-item input { accent-color: var(--accent); cursor: pointer; }
 /* Тонкая "в скобках" ссылка (по образцу Yokai Reborn — "( VIEW ON OPENSEA )") вместо заливной
    кнопки: без рамки/фона, только текст в скобках с трекингом. */
 .filter-btn.bracket-label {

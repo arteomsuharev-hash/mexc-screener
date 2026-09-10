@@ -1302,6 +1302,91 @@ function metricsFromSnaps(symbol, price, quoteVol) {
   return { vol5: vol5, vol30: vol30, vol60: vol60, vol5s: vol5s, vol30s: vol30s, vol60s: vol60s, range5m: range5m, natr5: natr5, preMove: preMove, rateCV: rateCV, zoneLow: zoneLow, zoneHigh: zoneHigh, reverting: reverting };
 }
 
+// Тот же набор метрик, что и metricsFromSnaps выше, но честно посчитанный по РЕАЛЬНЫМ СДЕЛКАМ
+// (tier2Trades/tier2TradesForSymbol) вместо тикового ринг-буфера — единственный способ получить
+// что-то похожее на vol5s/range5m/natr5 для монет ЛЮБОЙ из шести внешних бирж (Binance/OKX/Bitget/
+// BingX/KuCoin/Gate.io): у них нет своего WS-тикера на ВЕСЬ рынок (только периодический REST-опрос,
+// см. pollExternalTickers), а Tier-2 watchlist (~15-20 монет на биржу) — единственное место, где для
+// НИХ есть настоящий поток сделок. Честно только для watchlist-монет (см. вызов в
+// upsertExternalCoin) — для остальных этих полей просто нет, а не выдуманный ноль/фейк.
+function metricsFromTrades(trades, price) {
+  if (!trades || !trades.length || !price) {
+    return { vol5: 0, vol30: 0, vol60: 0, vol5s: 0, vol30s: 0, vol60s: 0, range5m: 0, natr5: 0, preMove: null, rateCV: null, zoneLow: null, zoneHigh: null, reverting: false };
+  }
+  const now = Date.now();
+  // Ближайшая К ГРАНИЦЕ окна сделка (аналог snapshot.at(ms) у metricsFromSnaps) — сделки в буфере
+  // по возрастанию времени, идём с конца, первая сделка СТАРШЕ cutoff и есть точка на границе.
+  function tradeAt(ms) {
+    const cutoff = now - ms;
+    for (let i = trades.length - 1; i >= 0; i--) {
+      if (trades[i].t <= cutoff) return trades[i];
+    }
+    return trades[0] || null;
+  }
+  function quoteVolSince(ms) {
+    const cutoff = now - ms;
+    let sum = 0;
+    for (let i = trades.length - 1; i >= 0; i--) {
+      if (trades[i].t < cutoff) break;
+      sum += trades[i].price * trades[i].qty; // в квоте (USDT), как и quoteVol у MEXC vol5/vol30/vol60
+    }
+    return sum;
+  }
+  const s2 = tradeAt(2000), s5 = tradeAt(5000), s30 = tradeAt(30000), s60 = tradeAt(60000);
+  const vol5 = quoteVolSince(5000), vol30 = quoteVolSince(30000), vol60 = quoteVolSince(60000);
+  const vol5s = s5 && s5.price ? Math.abs(price - s5.price) / s5.price * 100 : 0;
+  const vol30s = s30 && s30.price ? Math.abs(price - s30.price) / s30.price * 100 : 0;
+  const vol60s = s60 && s60.price ? Math.abs(price - s60.price) / s60.price * 100 : 0;
+  let reverting = false;
+  if (s2 && s2.price && s5 && s5.price) {
+    const fullMove = price - s5.price;
+    const recentMove = price - s2.price;
+    if (Math.abs(fullMove) > 1e-12 && Math.abs(recentMove) > 1e-12) reverting = (fullMove > 0) !== (recentMove > 0);
+  }
+  const preMove = (s60 && s30 && s60.price) ? Math.abs(s30.price - s60.price) / s60.price * 100 : null;
+  const zoneLow = (s60 && s30) ? Math.min(s60.price, s30.price) : null;
+  const zoneHigh = (s60 && s30) ? Math.max(s60.price, s30.price) : null;
+  const rate5 = vol5 / 5, rate30 = s30 ? vol30 / 30 : null, rate60 = s60 ? vol60 / 60 : null;
+  const rates = [rate5, rate30, rate60].filter(function (r) { return r != null; });
+  let rateCV = null;
+  if (rates.length >= 2) {
+    const mean = rates.reduce(function (a, b) { return a + b; }, 0) / rates.length;
+    if (mean > 0) {
+      const variance = rates.reduce(function (a, b) { return a + Math.pow(b - mean, 2); }, 0) / rates.length;
+      rateCV = Math.sqrt(variance) / mean;
+    }
+  }
+  // range5m/natr5 — тот же принцип, что rangePctFromSnaps/natrPctFromSnaps, но сканируем массив
+  // сделок напрямую (buffer уже передан вызывающим кодом, отдельная Map по символу не нужна).
+  let min = Infinity, max = -Infinity;
+  for (let i = trades.length - 1; i >= 0; i--) {
+    if (trades[i].t < now - SNAP_WINDOW_MS) break;
+    if (trades[i].price < min) min = trades[i].price;
+    if (trades[i].price > max) max = trades[i].price;
+  }
+  const range5m = (min !== Infinity && min > 0) ? (max - min) / min * 100 : 0;
+  const bucketMs = 60000, bucketCount = 5;
+  const mins = new Array(bucketCount).fill(Infinity);
+  const maxs = new Array(bucketCount).fill(-Infinity);
+  for (let i = trades.length - 1; i >= 0; i--) {
+    const age = now - trades[i].t;
+    if (age > bucketMs * bucketCount) break;
+    const idx = Math.min(bucketCount - 1, Math.floor(age / bucketMs));
+    if (trades[i].price < mins[idx]) mins[idx] = trades[i].price;
+    if (trades[i].price > maxs[idx]) maxs[idx] = trades[i].price;
+  }
+  let bsum = 0, bcount = 0;
+  for (let b = 0; b < bucketCount; b++) { if (maxs[b] > -Infinity) { bsum += (maxs[b] - mins[b]); bcount++; } }
+  const natr5 = bcount ? (bsum / bcount) / price * 100 : 0;
+  return { vol5: vol5, vol30: vol30, vol60: vol60, vol5s: vol5s, vol30s: vol30s, vol60s: vol60s, range5m: range5m, natr5: natr5, preMove: preMove, rateCV: rateCV, zoneLow: zoneLow, zoneHigh: zoneHigh, reverting: reverting };
+}
+// Обёртка — читает буфер СВОЕЙ биржи через уже существующий tier2TradesForSymbol (сам знает, в
+// какую Map полезть по префиксу символа), поэтому одна и та же функция годится для watchlist-монеты
+// любой из шести внешних бирж (см. вызов в upsertExternalCoin).
+function tier2MetricsForSymbol(symbol, price) {
+  return metricsFromTrades(tier2TradesForSymbol(symbol), price);
+}
+
 function upsertCoin(row) {
   const symbolRaw = row.symbol || row.s;
   if (!isUsdtSpot(symbolRaw)) return null;
@@ -1414,6 +1499,15 @@ function upsertExternalCoin(rawSymbol, price, change24, vol24, high, low, exchan
     coin.tpm = tpmForSymbol(key);
     coin.oi5m = oi5mForSymbol(key);
     coin.dvol5m = dvol5mForSymbol(key);
+    // Всплеск объёма/range5m/natr5/алгоритмы (см. tier2MetricsForSymbol выше) — те же поля, что
+    // у MEXC-монет из metricsFromSnaps, но посчитанные по реальным сделкам Tier-2 watchlist этой
+    // биржи вместо тикового ринг-буфера (которого у внешних бирж просто нет).
+    const tm = tier2MetricsForSymbol(key, coin.price);
+    coin.vol5 = tm.vol5; coin.vol30 = tm.vol30; coin.vol60 = tm.vol60;
+    coin.vol5s = tm.vol5s; coin.vol30s = tm.vol30s; coin.vol60s = tm.vol60s;
+    coin.range5m = tm.range5m; coin.natr5 = tm.natr5;
+    coin.preMove = tm.preMove; coin.rateCV = tm.rateCV;
+    coin.zoneLow = tm.zoneLow; coin.zoneHigh = tm.zoneHigh; coin.reverting = tm.reverting;
   }
   coinMap.set(key, coin);
   return coin;
@@ -7999,8 +8093,58 @@ function saveGraphsPinned() {
 function graphsGridSizeEl() { return document.getElementById('graphsGridSize'); }
 function graphsSortMetricEl() { return document.getElementById('graphsSortMetric'); }
 function graphsTimeframeEl() { return document.getElementById('graphsTimeframe'); }
-function graphsExchangeFilterEl() { return document.getElementById('graphsExchangeFilter'); }
 function graphsFavoritesOnlyEl() { return document.getElementById('graphsFavoritesOnly'); }
+
+// Мульти-select "какие биржи показывать" (см. #graphsExchangeFilterPanel в index.html) — раньше
+// был обычный <select> с ОДНИМ значением ("ALL"/одна конкретная биржа), теперь — набор чекбоксов,
+// можно смотреть сразу несколько бирж одновременно (например MEXC+OKX, без остальных). Persist —
+// тот же localStorage-идиом, что у graphsPinned/disabledDetectorKeys. Пустое/повреждённое
+// сохранённое значение — все биржи отмечены (то же поведение, что раньше было у "Все биржи").
+const GRAPHS_EXCHANGE_ALL = ['MEXC', 'BINANCE', 'OKX', 'BITGET', 'BINGX', 'KUCOIN', 'GATEIO'];
+const GRAPHS_EXCHANGE_FILTER_KEY = 'mexc_graphs_exchange_filter';
+let graphsExchangeFilterSet = (function loadGraphsExchangeFilter() {
+  try {
+    const raw = localStorage.getItem(GRAPHS_EXCHANGE_FILTER_KEY);
+    const arr = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(arr)) return new Set(arr.filter(function (x) { return GRAPHS_EXCHANGE_ALL.indexOf(x) !== -1; }));
+  } catch (e) { /* переживём без сохранения между сессиями */ }
+  return new Set(GRAPHS_EXCHANGE_ALL);
+})();
+function saveGraphsExchangeFilter() {
+  try { persistSet(GRAPHS_EXCHANGE_FILTER_KEY, JSON.stringify(Array.from(graphsExchangeFilterSet))); } catch (e) { /* переживём без сохранения между сессиями */ }
+}
+function graphsExchangeFilterLabelText() {
+  if (graphsExchangeFilterSet.size >= GRAPHS_EXCHANGE_ALL.length) return t('Все биржи');
+  if (!graphsExchangeFilterSet.size) return t('Ни одной биржи');
+  if (graphsExchangeFilterSet.size === 1) return Array.from(graphsExchangeFilterSet)[0];
+  return graphsExchangeFilterSet.size + ' ' + t('биржи');
+}
+(function wireGraphsExchangeFilterDropdown() {
+  const wrap = document.getElementById('graphsExchangeFilterWrap');
+  const btn = document.getElementById('graphsExchangeFilterBtn');
+  const panel = document.getElementById('graphsExchangeFilterPanel');
+  const label = document.getElementById('graphsExchangeFilterLabel');
+  if (!wrap || !btn || !panel) return;
+  function refreshLabel() { if (label) label.textContent = graphsExchangeFilterLabelText(); }
+  panel.querySelectorAll('input[type="checkbox"]').forEach(function (cb) {
+    cb.checked = graphsExchangeFilterSet.has(cb.value);
+    cb.addEventListener('change', function () {
+      if (cb.checked) graphsExchangeFilterSet.add(cb.value); else graphsExchangeFilterSet.delete(cb.value);
+      saveGraphsExchangeFilter();
+      refreshLabel();
+      graphsForceRebuild = true;
+      updateGraphsPage();
+    });
+  });
+  refreshLabel();
+  btn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    panel.hidden = !panel.hidden;
+  });
+  document.addEventListener('click', function (e) {
+    if (!panel.hidden && !wrap.contains(e.target)) panel.hidden = true;
+  });
+})();
 
 // Ранжирование — по уже посчитанным полям монеты (объём/изменение/всплеск/range5m), честно
 // посчитанным по реальному тиковому потоку MEXC (см. metricsFromSnaps/rangePctFromSnaps).
@@ -8012,13 +8156,10 @@ function graphsFavoritesOnlyEl() { return document.getElementById('graphsFavorit
 function computeGraphsVisibleSymbols() {
   const n = parseInt((graphsGridSizeEl() && graphsGridSizeEl().value) || '16', 10);
   const metric = (graphsSortMetricEl() && graphsSortMetricEl().value) || 'vol24';
-  const exchangeFilter = (graphsExchangeFilterEl() && graphsExchangeFilterEl().value) || 'ALL';
   const favOnly = !!(graphsFavoritesOnlyEl() && graphsFavoritesOnlyEl().checked);
 
   function exchangeOk(c) {
-    const ex = c.exchange || 'MEXC';
-    if (exchangeFilter === 'ALL') return ex === 'MEXC' || TIER2_EXTERNAL_EXCHANGES.has(ex);
-    return ex === exchangeFilter;
+    return graphsExchangeFilterSet.has(c.exchange || 'MEXC');
   }
 
   const pinned = Array.from(graphsPinned).filter(function (s) { return coinMap.has(s); });
@@ -8438,7 +8579,7 @@ setInterval(redrawGraphsGrid, GRAPHS_REDRAW_MS);
 // пересчитывает computeGraphsVisibleSymbols() и перестраивает карточки, только если состав реально
 // изменился (см. её же переменную changed) — так что для неизменившегося топа это дешёвый no-op.
 setInterval(updateGraphsPage, GRAPHS_REFRESH_MS);
-['graphsGridSize', 'graphsSortMetric', 'graphsTimeframe', 'graphsExchangeFilter', 'graphsFavoritesOnly'].forEach(function (id) {
+['graphsGridSize', 'graphsSortMetric', 'graphsTimeframe', 'graphsFavoritesOnly'].forEach(function (id) {
   const el = document.getElementById(id);
   if (el) el.addEventListener('change', function () { graphsForceRebuild = true; updateGraphsPage(); });
 });
@@ -14480,6 +14621,10 @@ window.__drawGraphsLoadingPlaceholder = drawGraphsLoadingPlaceholder;
 window.__redrawGraphsGrid = redrawGraphsGrid;
 window.__graphsCandlesFor = function (symbol) { return graphsCandles.get(symbol) || null; };
 window.__coinFor = function (symbol) { return coinMap.get(symbol) || null; }; // отладка полей монеты (tpm/oi5m/dvol5m/range5m и т.д.)
+window.__upsertExternalCoin = upsertExternalCoin; // отладка REST-тикера + tier2MetricsForSymbol любой внешней биржи без реального сокета
+window.__tier2MetricsForSymbol = tier2MetricsForSymbol;
+window.__okxWatchlistSet = okxWatchlist; // прямая ссылка на Map watchlist OKX — можно .set() вручную для отладки без реального сокета
+window.__okxTier2TradesMap = okxTier2Trades; // прямая ссылка на Map буфера сделок OKX — можно .set() вручную для отладки без реального сокета
 window.__okxWatchlist = function () { return Array.from(okxWatchlist.keys()); };
 window.__okxTier2TradesFor = function (symbol) { return okxTier2Trades.get(symbol) || []; };
 window.__okxTier2DepthFor = function (symbol) { return okxTier2Depth.get(symbol) || []; };
