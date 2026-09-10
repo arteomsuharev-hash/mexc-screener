@@ -1366,14 +1366,15 @@ function upsertCoin(row) {
 // c.symbol здесь ("BINANCE:BTC/USDT") — НЕ то же самое, что видит пользователь (см.
 // coinDisplayLabel) — подробности почему именно так см. в её комментарии.
 //
-// Мультибиржевой Tier 2 (2026-09): для бирж из TIER2_EXTERNAL_EXCHANGES ниже (сейчас — спот
-// Binance) заводится РЕАЛЬНЫЙ watchlist глубокого анализа — свои WS-подписки на сделки/стакан этой
-// биржи (см. блок "TIER 2 — BINANCE" ниже), не просто цена по REST. __wlScore здесь — только
-// дешёвая Tier-1 оценка "стоит ли вообще открывать WS-подписку" (честный объём 24ч с биржи, тот же
-// принцип, что у MEXC в computeWatchlistCandidateScore, но без тиковых метрик — тем взяться неоткуда
-// до того, как WS уже открыт). Для бирж вне этого набора (BINANCEFUT/OKX и т.д.) — по-прежнему 0,
-// такие пары навсегда остаются тикером без глубокого анализа, честно.
-const TIER2_EXTERNAL_EXCHANGES = new Set(['BINANCE']);
+// Мультибиржевой Tier 2 (2026-09, расширено на OKX): для бирж из TIER2_EXTERNAL_EXCHANGES ниже
+// (сейчас — спот Binance и OKX) заводится РЕАЛЬНЫЙ watchlist глубокого анализа — свои WS-подписки
+// на сделки/стакан этой биржи (см. блоки "TIER 2 — BINANCE"/"TIER 2 — OKX" ниже), не просто цена по
+// REST. __wlScore здесь — только дешёвая Tier-1 оценка "стоит ли вообще открывать WS-подписку"
+// (честный объём 24ч с биржи, тот же принцип, что у MEXC в computeWatchlistCandidateScore, но без
+// тиковых метрик — тем взяться неоткуда до того, как WS уже открыт). Для бирж вне этого набора
+// (BINANCEFUT и т.д.) — по-прежнему 0, такие пары навсегда остаются тикером без глубокого анализа,
+// честно.
+const TIER2_EXTERNAL_EXCHANGES = new Set(['BINANCE', 'OKX']);
 function computeExternalWatchlistCandidateScore(vol24) {
   return (Number.isFinite(vol24) && vol24 >= STRATEGY_MIN_LIQUID_VOL24) ? vol24 : -1;
 }
@@ -1401,6 +1402,15 @@ function upsertExternalCoin(rawSymbol, price, change24, vol24, high, low, exchan
     signal: 'WAIT', // нет тикового потока по ЭТОЙ (Tier-1) цене -> нет тиковых сигналов, см. комментарий выше
     __wlScore: TIER2_EXTERNAL_EXCHANGES.has(exchange) ? computeExternalWatchlistCandidateScore(vol24) : 0
   };
+  // TPM/OI5m/Dvol5m (сортировки "Графиков", см. коммит про них у MEXC) — честно те же поля и здесь,
+  // если эта монета реально в Tier-2 watchlist СВОЕЙ биржи (Binance/OKX): реальный стакан/поток
+  // сделок для них уже есть (tier2TradesForSymbol/tier2DepthForSymbol сами знают про префикс
+  // "BINANCE:"/"OKX:"), просто раньше этот periodic REST-апдейтер их не считал вообще.
+  if (isTier2Watchlisted(key)) {
+    coin.tpm = tpmForSymbol(key);
+    coin.oi5m = oi5mForSymbol(key);
+    coin.dvol5m = dvol5mForSymbol(key);
+  }
   coinMap.set(key, coin);
   return coin;
 }
@@ -1610,10 +1620,14 @@ function activeAlgosPanelHtml(symbol) {
 }
 
 function isTier2Watchlisted(symbol) {
-  return symbol.indexOf('BINANCE:') === 0 ? binanceWatchlist.has(symbol) : watchlist.has(symbol);
+  if (symbol.indexOf('OKX:') === 0) return okxWatchlist.has(symbol);
+  if (symbol.indexOf('BINANCE:') === 0) return binanceWatchlist.has(symbol);
+  return watchlist.has(symbol);
 }
 function standingWallForSymbol(symbol) {
-  return symbol.indexOf('BINANCE:') === 0 ? detectStandingWallBinance(symbol) : detectStandingWall(symbol);
+  if (symbol.indexOf('OKX:') === 0) return detectStandingWallOkx(symbol);
+  if (symbol.indexOf('BINANCE:') === 0) return detectStandingWallBinance(symbol);
+  return detectStandingWall(symbol);
 }
 
 // TPM ("сделок в минуту", по образцу oculusdei.pro) — считаем РЕАЛЬНЫЕ сделки за последние 60с из
@@ -2067,18 +2081,33 @@ function mexcKlineInterval(tf) {
   const map = { '1': '1m', '5': '5m', '15': '15m', '30': '30m', '60': '60m', '240': '4h', 'D': '1d' };
   return map[tf] || '5m';
 }
+// OKX использует свои обозначения интервала ("1H"/"1D" с большой буквы для часа/дня, не "1h"/"1d")
+// и отдельный REST-эндпоинт (/api/v5/market/candles), см. fetchKlines ниже.
+function okxKlineBar(tf) {
+  const map = { '1': '1m', '5': '5m', '15': '15m', '30': '30m', '60': '1H', '240': '4H', 'D': '1D' };
+  return map[tf] || '5m';
+}
+// "BTCUSDT" (наш внутренний raw, без разделителя) -> "BTC-USDT" (instId OKX, всегда через дефис).
+function okxInstIdForRaw(raw) {
+  return String(raw || '').replace(/USDT$/, '-USDT');
+}
 
 // exchangeId — необязательный, тот же смысл, что и у fetchMyTrades: не задан (или 'mexc') — поведение
-// как раньше (MEXC_REST); любая другая подключённая биржа (сейчас — только Binance, см. журнал
-// сделок/openJournalForAsset) — тот же путь, но на её собственный REST (тот же /api/v3/klines и тот
-// же формат ответа — массив [openTime,open,high,low,close,volume,...], MEXC его 1:1 клонирует).
+// как раньше (MEXC_REST); Binance — тот же путь, но на её собственный REST (тот же /api/v3/klines и
+// тот же формат ответа — массив [openTime,open,high,low,close,volume,...], MEXC его 1:1 клонирует).
+// OKX — свой путь целиком (другой эндпоинт, другой конверт ответа, другой порядок свечей — см. ветку
+// ниже), но результат приводится к тому же {t,o,h,l,c,v}, так что вызывающему коду (drawMiniCandleChart,
+// graphsCandles и т.д.) разница между биржами не видна.
 async function fetchKlines(raw, tf, limit, exchangeId) {
+  const isOkx = exchangeId === 'okx';
   const base = (!exchangeId || exchangeId === 'mexc') ? MEXC_REST : EXCHANGE_CONNECTORS[exchangeId].baseUrl;
-  const url = base + '/api/v3/klines?symbol=' + encodeURIComponent(raw) + '&interval=' + mexcKlineInterval(tf) + '&limit=' + (limit || 200);
+  const url = isOkx
+    ? base + '/api/v5/market/candles?instId=' + encodeURIComponent(okxInstIdForRaw(raw)) + '&bar=' + okxKlineBar(tf) + '&limit=' + (limit || 200)
+    : base + '/api/v3/klines?symbol=' + encodeURIComponent(raw) + '&interval=' + mexcKlineInterval(tf) + '&limit=' + (limit || 200);
   let bodyText = null;
   try {
     const res = await fetchWithTimeout(url, { method: 'GET' }, 10000);
-    if (!res.ok) throw new Error('MEXC ответил ' + res.status);
+    if (!res.ok) throw new Error('Биржа ответила ' + res.status);
     bodyText = await res.text();
   } catch (browserErr) {
     // Браузер не смог достучаться ("Failed to fetch" — CORS, сеть или антивирус блокирует запрос) —
@@ -2095,7 +2124,17 @@ async function fetchKlines(raw, tf, limit, exchangeId) {
     bodyText = native.body;
   }
   let data;
-  try { data = JSON.parse(bodyText); } catch (e) { throw new Error('Некорректный ответ MEXC'); }
+  try { data = JSON.parse(bodyText); } catch (e) { throw new Error('Некорректный ответ биржи'); }
+  if (isOkx) {
+    // OKX оборачивает массив в {code,msg,data} и отдаёт свечи от НОВОЙ к СТАРОЙ (в отличие от
+    // MEXC/Binance, где уже по возрастанию времени) — разворачиваем, чтобы дальше по коду не
+    // пришлось знать про разницу между биржами. Позиционный формат полей внутри строки тот же
+    // [ts,o,h,l,c,vol,...], что и у MEXC/Binance.
+    if (!data || !Array.isArray(data.data)) throw new Error((data && data.msg) ? data.msg : 'Некорректный ответ OKX');
+    return data.data.slice().reverse().map(function (k) {
+      return { t: Number(k[0]), o: Number(k[1]), h: Number(k[2]), l: Number(k[3]), c: Number(k[4]), v: Number(k[5]) };
+    }).filter(function (k) { return Number.isFinite(k.o) && Number.isFinite(k.c) && Number.isFinite(k.h) && Number.isFinite(k.l); });
+  }
   if (!Array.isArray(data)) throw new Error((data && data.msg) ? data.msg : 'Некорректный ответ MEXC');
   return data.map(function (k) {
     return { t: Number(k[0]), o: Number(k[1]), h: Number(k[2]), l: Number(k[3]), c: Number(k[4]), v: Number(k[5]) };
@@ -3995,14 +4034,238 @@ function evaluateBinanceWatchlist() {
 setInterval(evaluateBinanceWatchlist, BINANCE_WATCHLIST_EVAL_INTERVAL_MS);
 setTimeout(evaluateBinanceWatchlist, 5000);
 
+// ============================================================================
+// TIER 2 — OKX (мультибиржевой Tier 2, продолжение — тот же принцип, что у Binance выше: свои
+// отдельные Map'ы/состояние, ключ "OKX:BTC/USDT", MEXC/Binance не трогаем). ЧЕСТНЫЙ ПРЕДОХРАНИТЕЛЬ
+// тот же: OKX-монеты попадают в coinMap только когда пользователь сам подключил биржу (см.
+// connectExchange) — без этого allCoins.filter(exchange==='OKX') просто пуст, и блок ничего не
+// подключает.
+//
+// Протокол ОТЛИЧАЕТСЯ от Binance ещё сильнее, чем Binance от MEXC: у OKX нет отдельного сокета на
+// монету — ОДИН публичный WS (wss://ws.okx.com:8443/ws/v5/public) на ВСЮ биржу разом, а какие именно
+// инструменты слушать, сообщается op:"subscribe"/"unsubscribe" сообщениями поверх уже открытого
+// соединения. Значит: (1) подписка/отписка — это не "открыть/закрыть сокет", а отправка сообщения
+// в уже живой канал; (2) при обрыве и переподключении нужно заново переподписаться на ВСЕ текущие
+// watchlist-монеты разом (сервер ничего не помнит про разорванное соединение); (3) OKX требует
+// keepalive: если за 30с в канале не было вообще никакого сообщения (включая наши), сервер сам рвёт
+// соединение — шлём литеральный текст "ping" каждые ~20с, сервер отвечает "pong" (не JSON, отдельная
+// ветка в onmessage).
+//
+// Глубина стакана — books5 (топ-5 уровней, снимок целиком на каждое сообщение): у OKX это
+// единственный snapshot-канал без необходимости поддерживать инкрементальный ресинк с чек-суммой
+// (полный "books" — 400 уровней, но diff+seqId+checksum, ощутимо сложнее и не даёт принципиально
+// лучших детекций на нашем горизонте). Честно меньше уровней, чем 20 у MEXC/Binance — это реальное
+// ограничение канала, а не наша недоработка; стены здесь будут грубее, но настоящие.
+// ============================================================================
+const OKX_WS_PUBLIC = 'wss://ws.okx.com:8443/ws/v5/public';
+const OKX_WATCHLIST_SIZE = 15;
+const OKX_WATCHLIST_HARD_CAP = 20;
+const OKX_WATCHLIST_EVICT_MARGIN = 8;
+const OKX_WATCHLIST_ADD_STREAK = 2;
+const OKX_WATCHLIST_EVICT_STREAK = 3;
+const OKX_WATCHLIST_EVAL_INTERVAL_MS = 20000;
+const OKX_WATCHLIST_COOLDOWN_MS = 5 * 60 * 1000;
+const OKX_TIER2_TRADES_CAP = 2000;
+const OKX_TIER2_DEPTH_CAP = 600;
+const OKX_WS_RECONNECT_DELAY_MS = 3000;
+const OKX_WS_PING_INTERVAL_MS = 20000;
+
+const okxTier2Trades = new Map();  // "OKX:BTC/USDT" -> ring buffer {t,price,qty,side}, тот же формат что tier2Trades
+const okxTier2Depth = new Map();   // "OKX:BTC/USDT" -> ring buffer {t,bids,asks,bestBid,bestAsk,bidVol,askVol}
+const okxWatchlist = new Map();    // symbol -> {addedAt, instId}
+const okxWatchlistCandidateStreaks = new Map();
+const okxWatchlistEvictStreaks = new Map();
+const okxWatchlistCooldowns = new Map();
+const okxInstIdToSymbol = new Map(); // "BTC-USDT" -> "OKX:BTC/USDT", для быстрого разбора входящих сообщений
+// Состояние алгоритмов #6/#10/#14/#15/#17 для OKX — те же 5 карт, что у MEXC/Binance, но отдельные.
+const okxDensityAbsorptionBreakoutState = new Map();
+const okxFailedBreakoutState = new Map();
+const okxPossibleHiddenAbsorptionState = new Map();
+const okxCrossExchangeDivergenceState = new Map();
+const okxTwapState = new Map();
+const okxTier2Health = { watchlistSize: 0, connectionAttempts: 0, tradesIngested: 0, depthPushesIngested: 0, cooldownDrops: 0 };
+
+let okxWs = null;
+let okxWsReady = false; // соединение открыто И мы уже отправили подписки на весь текущий watchlist
+let okxWsReconnectTimer = null;
+let okxPingTimer = null;
+
+// "BTC/USDT" -> "BTC-USDT" (instId OKX всегда через дефис, наш внутренний raw/symbol — без него).
+function okxInstIdFromPair(pair) {
+  return pair.replace('/', '-');
+}
+
+function okxWatchlistInCooldown(symbol) {
+  const until = okxWatchlistCooldowns.get(symbol);
+  if (until == null) return false;
+  if (Date.now() >= until) { okxWatchlistCooldowns.delete(symbol); return false; }
+  return true;
+}
+
+function okxWsSend(obj) {
+  if (!okxWs || okxWs.readyState !== WebSocket.OPEN) return;
+  try { okxWs.send(JSON.stringify(obj)); } catch (e) {}
+}
+
+function okxSubscribeArgsFor(instId) {
+  return [{ channel: 'trades', instId: instId }, { channel: 'books5', instId: instId }];
+}
+
+// Вынесена из sock.onmessage именованной функцией (не анонимным замыканием) — так её можно
+// проверить напрямую (см. window.__okxHandleMessage), не поднимая настоящий WS-сокет.
+function handleOkxWsMessage(raw) {
+  if (raw === 'pong') return;
+  let msg;
+  try { msg = JSON.parse(raw); } catch (e) { return; }
+  if (!msg || !msg.arg || !msg.data) return;
+  const instId = msg.arg.instId;
+  const symbol = okxInstIdToSymbol.get(instId);
+  if (!symbol) return;
+  if (msg.arg.channel === 'trades') {
+    msg.data.forEach(function (tr) {
+      pushRing(okxTier2Trades, symbol, {
+        t: Number(tr.ts) || Date.now(), price: num(tr.px), qty: num(tr.sz), side: tr.side === 'sell' ? 'sell' : 'buy'
+      }, OKX_TIER2_TRADES_CAP);
+      okxTier2Health.tradesIngested++;
+    });
+  } else if (msg.arg.channel === 'books5') {
+    const snap = msg.data[0];
+    if (!snap) return;
+    // OKX-уровень — [price, size, устаревшее поле "0", numOrders] — берём только price/size.
+    const bids = (snap.bids || []).map(function (x) { return { p: num(x[0]), q: num(x[1]) }; });
+    const asks = (snap.asks || []).map(function (x) { return { p: num(x[0]), q: num(x[1]) }; });
+    const bidVol = bids.reduce(function (a, x) { return a + x.p * x.q; }, 0);
+    const askVol = asks.reduce(function (a, x) { return a + x.p * x.q; }, 0);
+    pushRing(okxTier2Depth, symbol, {
+      t: Date.now(), bids: bids, asks: asks,
+      bestBid: bids.length ? bids[0].p : null, bestAsk: asks.length ? asks[0].p : null,
+      bidVol: bidVol, askVol: askVol
+    }, OKX_TIER2_DEPTH_CAP);
+    okxTier2Health.depthPushesIngested++;
+  }
+}
+
+function ensureOkxWs() {
+  if (okxWs && (okxWs.readyState === WebSocket.OPEN || okxWs.readyState === WebSocket.CONNECTING)) return;
+  okxTier2Health.connectionAttempts++;
+  let sock;
+  try {
+    sock = new WebSocket(OKX_WS_PUBLIC);
+  } catch (e) {
+    logW('Watchlist', 'OKX: не удалось создать сокет — ' + e.message);
+    scheduleOkxReconnect();
+    return;
+  }
+  okxWs = sock;
+  okxWsReady = false;
+  sock.onopen = function () {
+    if (okxWs !== sock) return;
+    clearTimeout(okxWsReconnectTimer);
+    // Свежее соединение ничего не помнит про предыдущие подписки — переподписываемся на ВЕСЬ
+    // текущий watchlist одним сообщением (OKX принимает несколько args в одном op:"subscribe").
+    const args = [];
+    okxWatchlist.forEach(function (entry) { args.push.apply(args, okxSubscribeArgsFor(entry.instId)); });
+    if (args.length) okxWsSend({ op: 'subscribe', args: args });
+    okxWsReady = true;
+    clearInterval(okxPingTimer);
+    okxPingTimer = setInterval(function () { if (okxWs === sock && sock.readyState === WebSocket.OPEN) sock.send('ping'); }, OKX_WS_PING_INTERVAL_MS);
+  };
+  sock.onmessage = function (ev) { handleOkxWsMessage(ev.data); };
+  sock.onerror = function () {};
+  sock.onclose = function () {
+    if (okxWs !== sock) return;
+    okxWs = null;
+    okxWsReady = false;
+    clearInterval(okxPingTimer);
+    if (!okxWatchlist.size) return; // никого слушать — не переподключаемся впустую
+    scheduleOkxReconnect();
+  };
+}
+function scheduleOkxReconnect() {
+  clearTimeout(okxWsReconnectTimer);
+  okxWsReconnectTimer = setTimeout(function () { if (okxWatchlist.size) ensureOkxWs(); }, OKX_WS_RECONNECT_DELAY_MS);
+}
+
+function subscribeOkxWatchlistSymbol(symbol, raw) {
+  if (okxWatchlist.has(symbol)) return;
+  const base = symbol.replace('OKX:', '');
+  const instId = okxInstIdFromPair(base);
+  const entry = { addedAt: Date.now(), instId: instId };
+  okxWatchlist.set(symbol, entry);
+  okxInstIdToSymbol.set(instId, symbol);
+  logI('Watchlist', 'OKX ' + symbol + ' добавлена в глубокий анализ (' + raw + ')');
+  ensureOkxWs();
+  if (okxWsReady) okxWsSend({ op: 'subscribe', args: okxSubscribeArgsFor(instId) });
+  // иначе — ws ещё не открыт/не готов, onopen сам переподпишет на весь текущий watchlist
+}
+function unsubscribeOkxWatchlistSymbol(symbol) {
+  const entry = okxWatchlist.get(symbol);
+  if (!entry) return;
+  if (okxWsReady) okxWsSend({ op: 'unsubscribe', args: okxSubscribeArgsFor(entry.instId) });
+  okxInstIdToSymbol.delete(entry.instId);
+  okxWatchlist.delete(symbol);
+  okxWatchlistEvictStreaks.delete(symbol);
+  okxDensityAbsorptionBreakoutState.delete(symbol);
+  okxFailedBreakoutState.delete(symbol);
+  okxPossibleHiddenAbsorptionState.delete(symbol);
+  okxCrossExchangeDivergenceState.delete(symbol);
+  okxTwapState.delete(symbol);
+  logI('Watchlist', 'OKX ' + symbol + ' исключена из глубокого анализа');
+  if (!okxWatchlist.size && okxWs) { try { okxWs.close(); } catch (e) {} } // никого не слушаем — держать канал открытым незачем
+}
+
+// Форсированные символы для OKX — та же идея, что и у Binance (currentCoin/избранное, только если
+// это реально OKX-монета).
+function okxTier2ForcedSymbols() {
+  const forced = new Set();
+  if (currentCoin && currentCoin.exchange === 'OKX') forced.add(currentCoin.symbol);
+  allCoins.forEach(function (c) { if (c.fav && c.exchange === 'OKX') forced.add(c.symbol); });
+  return forced;
+}
+
+function evaluateOkxWatchlist() {
+  const ranked = allCoins
+    .filter(function (c) { return c.exchange === 'OKX' && c.__wlScore >= 0 && !okxWatchlistInCooldown(c.symbol); })
+    .slice()
+    .sort(function (a, b) { return b.__wlScore - a.__wlScore; })
+    .map(function (c) { return c.symbol; });
+
+  const forced = okxTier2ForcedSymbols();
+  const currentMembers = new Set(okxWatchlist.keys());
+
+  const transitions = MexcCore.computeWatchlistTransitions({
+    rankedSymbols: ranked,
+    currentMembers: currentMembers,
+    candidateStreaks: okxWatchlistCandidateStreaks,
+    evictStreaks: okxWatchlistEvictStreaks,
+    size: OKX_WATCHLIST_SIZE,
+    evictMargin: OKX_WATCHLIST_EVICT_MARGIN,
+    addStreakNeeded: OKX_WATCHLIST_ADD_STREAK,
+    evictStreakNeeded: OKX_WATCHLIST_EVICT_STREAK,
+    forced: forced,
+    maxSize: OKX_WATCHLIST_HARD_CAP
+  });
+
+  transitions.toEvict.forEach(unsubscribeOkxWatchlistSymbol);
+  transitions.toAdd.forEach(function (symbol) {
+    const coin = coinMap.get(symbol);
+    if (coin) subscribeOkxWatchlistSymbol(symbol, coin.raw);
+  });
+  okxTier2Health.watchlistSize = okxWatchlist.size;
+}
+setInterval(evaluateOkxWatchlist, OKX_WATCHLIST_EVAL_INTERVAL_MS);
+setTimeout(evaluateOkxWatchlist, 5000);
+
 // Единственные два места во всём детекторном движке, которым честно нужно прочитать буфер ПО ЛЮБОЙ
 // поддерживаемой бирже, а не только MEXC (см. sweepCyclicalOutcomes/flushTimeWindowIfDue ниже) —
 // не переписываем сами tier2Trades/tier2Depth (MEXC-only, трогать лишний раз рискованно), просто
-// выбираем нужную Map по префиксу символа ("BINANCE:..." -> Binance-карты, иначе MEXC).
+// выбираем нужную Map по префиксу символа ("OKX:"/"BINANCE:" -> своя биржа, иначе MEXC).
 function tier2TradesForSymbol(symbol) {
+  if (symbol.indexOf('OKX:') === 0) return okxTier2Trades.get(symbol);
   return symbol.indexOf('BINANCE:') === 0 ? binanceTier2Trades.get(symbol) : tier2Trades.get(symbol);
 }
 function tier2DepthForSymbol(symbol) {
+  if (symbol.indexOf('OKX:') === 0) return okxTier2Depth.get(symbol);
   return symbol.indexOf('BINANCE:') === 0 ? binanceTier2Depth.get(symbol) : tier2Depth.get(symbol);
 }
 
@@ -4680,6 +4943,270 @@ function detectPossibleMarketMakerBotBinance(symbol) {
   return ev;
 }
 
+// OKX-версии всех детекторов выше — тот же контракт detect(symbol) -> event|null, только читают
+// okxTier2Trades/okxTier2Depth и свои okx*State карты (см. блок "TIER 2 — OKX" выше). Пороги/opts —
+// намеренно один в один с MEXC/Binance-версией того же алгоритма.
+// ------------------------------------------------------------------------------------------
+function detectRepeatedTradeSizesOkx(symbol) {
+  const ev = MexcCore.detectRepeatedTradeSizes(okxTier2Trades.get(symbol), {
+    tolerance: PATTERN_CLUSTER_TOLERANCE, minRepeats: DETECTOR_DEFS.repeatSize.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectRepeatedIntervalsOkx(symbol) {
+  const ev = MexcCore.detectRepeatedIntervals(okxTier2Trades.get(symbol), {
+    tolerance: PATTERN_CLUSTER_TOLERANCE, minRepeats: DETECTOR_DEFS.repeatInterval.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectBurstNoFollowThroughOkx(symbol) {
+  const ev = MexcCore.detectBurstNoFollowThrough(okxTier2Trades.get(symbol), {
+    bucketMs: PATTERN_BURST_BUCKET_MS, minRepeats: DETECTOR_DEFS.burstNoFollow.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectCyclicityOkx(symbol) {
+  const ev = MexcCore.detectCyclicity(okxTier2Trades.get(symbol), {
+    bucketMs: 2000, minRepeats: DETECTOR_DEFS.cycle.minRepeats, tolerance: PATTERN_CLUSTER_TOLERANCE, lookback: 2000
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectRepeatingSequenceOkx(symbol) {
+  const ev = MexcCore.detectRepeatingSequence(okxTier2Trades.get(symbol), {
+    minLen: 3, maxLen: 6, minRepeats: DETECTOR_DEFS.sequence.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectLadderOkx(symbol) {
+  const ev = MexcCore.detectLadder(okxTier2Trades.get(symbol), {
+    tolerance: 0.3, minRepeats: DETECTOR_DEFS.ladder.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectErshikOkx(symbol) {
+  const ev = MexcCore.detectErshik(okxTier2Trades.get(symbol), {
+    tolerance: 0.2, minRepeats: DETECTOR_DEFS.ershik.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectImbalanceOkx(symbol) {
+  const ev = MexcCore.detectImbalance(okxTier2Depth.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.imbalance.minRepeats, minZ: 2.5, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectAbsorptionOkx(symbol) {
+  const ev = MexcCore.detectAbsorption(okxTier2Depth.get(symbol), okxTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.absorption.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectFakeLiquidityOkx(symbol) {
+  const ev = MexcCore.detectFakeLiquidity(okxTier2Depth.get(symbol), okxTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.fakeLiquidity.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectExhaustionOkx(symbol) {
+  const ev = MexcCore.detectExhaustion(okxTier2Trades.get(symbol), {
+    bucketMs: PATTERN_BURST_BUCKET_MS, minRepeats: DETECTOR_DEFS.exhaustion.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectZoneReturnOkx(symbol) {
+  const ev = MexcCore.detectZoneReturn(okxTier2Trades.get(symbol), {
+    tolerance: 0.005, minRepeats: DETECTOR_DEFS.zoneReturn.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectStandingWallOkx(symbol) {
+  const ev = MexcCore.detectStandingWall(okxTier2Depth.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.standingWall.minRepeats, lookback: 20, minWallRatio: 5, maxDistancePct: 1.5
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDensityBreakOkx(symbol) {
+  const ev = MexcCore.detectDensityBreak(okxTier2Depth.get(symbol), okxTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.densityBreak.minRepeats, lookback: 300, minWallRatio: 5, minShrinkRatio: 0.5
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDensityAbsorptionOkx(symbol) {
+  const ev = MexcCore.detectDensityAbsorption(okxTier2Depth.get(symbol), okxTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.densityAbsorption.minRepeats, lookback: 300, minWallRatio: 5
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectLiquiditySweepOkx(symbol) {
+  const ev = MexcCore.detectLiquiditySweep(okxTier2Trades.get(symbol), okxTier2Depth.get(symbol), { lookback: 200 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectImpulsePullbackContinuationOkx(symbol) {
+  const ev = MexcCore.detectImpulsePullbackContinuation(okxTier2Trades.get(symbol), { lookback: 300 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPriceVolumeInefficiencyOkx(symbol) {
+  const ev = MexcCore.detectPriceVolumeInefficiency(okxTier2Trades.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDensityAbsorptionBreakoutOkx(symbol) {
+  const state = okxDensityAbsorptionBreakoutState.get(symbol) || {};
+  const result = MexcCore.detectDensityAbsorptionBreakout(okxTier2Depth.get(symbol), okxTier2Trades.get(symbol), {
+    minWallRatio: 5, maxDistancePct: 1.0, minTestCount: DETECTOR_DEFS.densityAbsorptionBreakout.minRepeats
+  }, state);
+  okxDensityAbsorptionBreakoutState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPumpReversalOkx(symbol) {
+  const ev = MexcCore.detectPumpReversal(okxTier2Trades.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDumpReversalOkx(symbol) {
+  const ev = MexcCore.detectDumpReversal(okxTier2Trades.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectCompressionBreakOkx(symbol) {
+  const ev = MexcCore.detectCompressionBreak(okxTier2Trades.get(symbol), okxTier2Depth.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectFailedBreakoutOkx(symbol) {
+  const state = okxFailedBreakoutState.get(symbol) || {};
+  const result = MexcCore.detectFailedBreakout(okxTier2Trades.get(symbol), { lookback: 300 }, state);
+  okxFailedBreakoutState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectVolumeAnomalyOkx(symbol) {
+  const ev = MexcCore.detectVolumeAnomaly(okxTier2Trades.get(symbol), okxTier2Depth.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectLiquidityWithdrawalOkx(symbol) {
+  const ev = MexcCore.detectLiquidityWithdrawal(okxTier2Depth.get(symbol), okxTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.liquidityWithdrawal.minRepeats, lookback: 200
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPossibleHiddenAbsorptionOkx(symbol) {
+  const state = okxPossibleHiddenAbsorptionState.get(symbol) || {};
+  const result = MexcCore.detectPossibleHiddenAbsorption(okxTier2Depth.get(symbol), okxTier2Trades.get(symbol), {}, state);
+  okxPossibleHiddenAbsorptionState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+// base монеты из "OKX:BTC/USDT" -> "BTC" — сравниваем цену Okx с MEXC (всегда доступна) и
+// любой ДРУГОЙ подключённой биржей (не с самим Okx).
+function crossExchangeCandidatesForOkx(symbol) {
+  const base = symbol.split(':').pop().split('/')[0];
+  const candidates = [];
+  const mexcCoin = coinMap.get(base + '/USDT');
+  if (mexcCoin && mexcCoin.price > 0) candidates.push({ exchange: 'MEXC', price: mexcCoin.price });
+  Object.keys(EXCHANGE_CONNECTORS).forEach(function (id) {
+    if (id === 'okx') return;
+    if (!exchangeConnections[id] || !exchangeConnections[id].connected) return;
+    EXCHANGE_CONNECTORS[id].exchangeTags.filter(function (tag) { return !/FUT$/.test(tag); }).forEach(function (tag) {
+      const coin = coinMap.get(tag + ':' + base + '/USDT');
+      if (coin && coin.price > 0) candidates.push({ exchange: tag, price: coin.price });
+    });
+  });
+  return candidates;
+}
+function detectCrossExchangeDivergenceOkx(symbol) {
+  const coin = coinMap.get(symbol);
+  if (!coin || !(coin.price > 0)) return null;
+  const candidates = crossExchangeCandidatesForOkx(symbol);
+  if (!candidates.length) return null;
+  const state = okxCrossExchangeDivergenceState.get(symbol) || {};
+  const result = MexcCore.detectCrossExchangeDivergence(coin.price, candidates, { now: Date.now() }, state);
+  okxCrossExchangeDivergenceState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+// #12/#16 честно переиспользуют ОБЩИЕ cyclicalLibrary/timeBucketStats (обычные объекты, не Map,
+// ключ — уже уникальный "OKX:BTC/USDT" строкой, коллизий с MEXC-символами нет) — и уже
+// обобщённые выше flushTimeWindowIfDue/symbolOverallMedianVolume (см. tier2TradesForSymbol).
+function detectCyclicalPatternOkx(symbol) {
+  const trades = okxTier2Trades.get(symbol);
+  const library = cyclicalLibrary[symbol] || [];
+  const result = MexcCore.detectCyclicalPattern(trades, library, {});
+  if (result.library !== library) {
+    const added = result.library[result.library.length - 1];
+    if (added && added.priceAtEpisode == null && trades && trades.length) added.priceAtEpisode = trades[trades.length - 1].price;
+    cyclicalLibrary[symbol] = result.library;
+    saveCyclicalLibrary();
+  }
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectTimeBasedImpulseOkx(symbol) {
+  const coin = coinMap.get(symbol);
+  if (!coin || !(coin.price > 0)) return null;
+  const now = Date.now();
+  flushTimeWindowIfDue(symbol, now, coin.price);
+  const bucketKey = MexcCore.timeBucketKeyFromDate(new Date(now));
+  const stats = (timeBucketStats[symbol] || {})[bucketKey];
+  const ev = MexcCore.detectTimeBasedImpulse(stats, symbolOverallMedianVolume(symbol), coin.price, {});
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectTwapOkx(symbol) {
+  const state = okxTwapState.get(symbol) || {};
+  const result = MexcCore.detectTwap(okxTier2Trades.get(symbol), {}, state);
+  okxTwapState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPossibleMarketMakerBotOkx(symbol) {
+  const ev = MexcCore.detectPossibleMarketMakerBot(okxTier2Trades.get(symbol), okxTier2Depth.get(symbol), {});
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+const OKX_DETECTOR_FNS = {
+  repeatSize: detectRepeatedTradeSizesOkx, repeatInterval: detectRepeatedIntervalsOkx,
+  burstNoFollow: detectBurstNoFollowThroughOkx, cycle: detectCyclicityOkx,
+  sequence: detectRepeatingSequenceOkx, ladder: detectLadderOkx, ershik: detectErshikOkx,
+  imbalance: detectImbalanceOkx, absorption: detectAbsorptionOkx, fakeLiquidity: detectFakeLiquidityOkx,
+  exhaustion: detectExhaustionOkx, zoneReturn: detectZoneReturnOkx, standingWall: detectStandingWallOkx,
+  densityBreak: detectDensityBreakOkx, densityAbsorption: detectDensityAbsorptionOkx,
+  liquiditySweep: detectLiquiditySweepOkx, impulsePullbackContinuation: detectImpulsePullbackContinuationOkx,
+  priceVolumeInefficiency: detectPriceVolumeInefficiencyOkx, densityAbsorptionBreakout: detectDensityAbsorptionBreakoutOkx,
+  pumpReversal: detectPumpReversalOkx, dumpReversal: detectDumpReversalOkx,
+  compressionBreak: detectCompressionBreakOkx, failedBreakout: detectFailedBreakoutOkx,
+  volumeAnomaly: detectVolumeAnomalyOkx, liquidityWithdrawal: detectLiquidityWithdrawalOkx,
+  possibleHiddenAbsorption: detectPossibleHiddenAbsorptionOkx, crossExchangeDivergence: detectCrossExchangeDivergenceOkx,
+  cyclicalPattern: detectCyclicalPatternOkx, timeBasedImpulse: detectTimeBasedImpulseOkx,
+  twap: detectTwapOkx, possibleMarketMakerBot: detectPossibleMarketMakerBotOkx
+};
+
 // Реестр detect-функций по бирже — ключи ТЕ ЖЕ, что в DETECTOR_DEFS (label/badge/category там общие
 // для обеих бирж); runPatternDetectors() выбирает MEXC (DETECTOR_DEFS[key].detect) или это по тому,
 // с какой биржи символ.
@@ -5113,6 +5640,9 @@ function runPatternDetectors() {
   binanceWatchlist.forEach(function (entry, symbol) {
     runDetectorsForSymbolInto(symbol, BINANCE_DETECTOR_FNS, events, cycleNow);
   });
+  okxWatchlist.forEach(function (entry, symbol) {
+    runDetectorsForSymbolInto(symbol, OKX_DETECTOR_FNS, events, cycleNow);
+  });
 
   // Мульти-детекторное подтверждение (ТЗ #8, фактор "confirmation") — если на одной монете в ОДНОМ
   // прогоне сработало ≥2 разных детектора, это взаимное подтверждение: пересчитываем им score с
@@ -5466,6 +5996,7 @@ function computeGraphsVisibleSymbols() {
 function graphsExchangeIdFor(coin) {
   if (!coin || !coin.exchange || coin.exchange === 'MEXC') return 'mexc';
   if (coin.exchange === 'BINANCE') return 'binance';
+  if (coin.exchange === 'OKX') return 'okx';
   return null; // биржа без своего REST-клиента здесь (пока нет ни одной такой в TIER2_EXTERNAL_EXCHANGES)
 }
 
@@ -11715,6 +12246,13 @@ window.__drawGraphsLoadingPlaceholder = drawGraphsLoadingPlaceholder;
 window.__redrawGraphsGrid = redrawGraphsGrid;
 window.__graphsCandlesFor = function (symbol) { return graphsCandles.get(symbol) || null; };
 window.__coinFor = function (symbol) { return coinMap.get(symbol) || null; }; // отладка полей монеты (tpm/oi5m/dvol5m/range5m и т.д.)
+window.__okxWatchlist = function () { return Array.from(okxWatchlist.keys()); };
+window.__okxTier2TradesFor = function (symbol) { return okxTier2Trades.get(symbol) || []; };
+window.__okxTier2DepthFor = function (symbol) { return okxTier2Depth.get(symbol) || []; };
+window.__okxHandleMessage = handleOkxWsMessage; // отладка разбора сообщений OKX WS без реального сокета
+window.__okxTier2Health = okxTier2Health;
+window.__okxInstIdToSymbol = okxInstIdToSymbol; // прямая ссылка на Map — можно .set() вручную для отладки без реального сокета
+window.__fetchKlines = fetchKlines; // отладка REST-свечей на любой бирже (raw, tf, limit, exchangeId)
 window.__patternHistory = function () { return patternHistory; };
 window.__sweepPatternOutcomesNow = sweepPatternOutcomes;
 // Только для ручной проверки UI страницы "Паттерны" без ожидания реальных срабатываний детекторов
