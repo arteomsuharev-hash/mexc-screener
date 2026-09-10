@@ -882,6 +882,7 @@ function exchangeTerminalUrl(symbol) {
   if (exch === 'BINANCEFUT') return 'https://www.binance.com/en/futures/' + encodeURIComponent(base) + 'USDT';
   if (exch === 'OKX') return 'https://www.okx.com/trade-spot/' + encodeURIComponent(base.toLowerCase()) + '-usdt';
   if (exch === 'BITGET') return 'https://www.bitget.com/spot/' + encodeURIComponent(base) + 'USDT';
+  if (exch === 'BINGX') return 'https://bingx.com/en/spot/' + encodeURIComponent(base) + 'USDT';
   return mexcTerminalUrl(symbol);
 }
 
@@ -1375,7 +1376,7 @@ function upsertCoin(row) {
 // тиковых метрик — тем взяться неоткуда до того, как WS уже открыт). Для бирж вне этого набора
 // (BINANCEFUT и т.д.) — по-прежнему 0, такие пары навсегда остаются тикером без глубокого анализа,
 // честно.
-const TIER2_EXTERNAL_EXCHANGES = new Set(['BINANCE', 'OKX', 'BITGET']);
+const TIER2_EXTERNAL_EXCHANGES = new Set(['BINANCE', 'OKX', 'BITGET', 'BINGX']);
 function computeExternalWatchlistCandidateScore(vol24) {
   return (Number.isFinite(vol24) && vol24 >= STRATEGY_MIN_LIQUID_VOL24) ? vol24 : -1;
 }
@@ -1623,12 +1624,14 @@ function activeAlgosPanelHtml(symbol) {
 function isTier2Watchlisted(symbol) {
   if (symbol.indexOf('OKX:') === 0) return okxWatchlist.has(symbol);
   if (symbol.indexOf('BITGET:') === 0) return bitgetWatchlist.has(symbol);
+  if (symbol.indexOf('BINGX:') === 0) return bingxWatchlist.has(symbol);
   if (symbol.indexOf('BINANCE:') === 0) return binanceWatchlist.has(symbol);
   return watchlist.has(symbol);
 }
 function standingWallForSymbol(symbol) {
   if (symbol.indexOf('OKX:') === 0) return detectStandingWallOkx(symbol);
   if (symbol.indexOf('BITGET:') === 0) return detectStandingWallBitget(symbol);
+  if (symbol.indexOf('BINGX:') === 0) return detectStandingWallBingx(symbol);
   if (symbol.indexOf('BINANCE:') === 0) return detectStandingWallBinance(symbol);
   return detectStandingWall(symbol);
 }
@@ -2100,6 +2103,15 @@ function bitgetKlineGranularity(tf) {
   const map = { '1': '1min', '5': '5min', '15': '15min', '30': '30min', '60': '1h', '240': '4h', 'D': '1day' };
   return map[tf] || '5min';
 }
+// BingX — те же обозначения интервала, что и у Binance ("1m"/"1h"/"1d"). Символ — через дефис
+// ("BTC-USDT"), как у OKX.
+function bingxKlineInterval(tf) {
+  const map = { '1': '1m', '5': '5m', '15': '15m', '30': '30m', '60': '1h', '240': '4h', 'D': '1d' };
+  return map[tf] || '5m';
+}
+function bingxInstIdForRaw(raw) {
+  return String(raw || '').replace(/USDT$/, '-USDT');
+}
 
 // exchangeId — необязательный, тот же смысл, что и у fetchMyTrades: не задан (или 'mexc') — поведение
 // как раньше (MEXC_REST); Binance — тот же путь, но на её собственный REST (тот же /api/v3/klines и
@@ -2110,11 +2122,14 @@ function bitgetKlineGranularity(tf) {
 async function fetchKlines(raw, tf, limit, exchangeId) {
   const isOkx = exchangeId === 'okx';
   const isBitget = exchangeId === 'bitget';
+  const isBingx = exchangeId === 'bingx';
   const base = (!exchangeId || exchangeId === 'mexc') ? MEXC_REST : EXCHANGE_CONNECTORS[exchangeId].baseUrl;
   const url = isOkx
     ? base + '/api/v5/market/candles?instId=' + encodeURIComponent(okxInstIdForRaw(raw)) + '&bar=' + okxKlineBar(tf) + '&limit=' + (limit || 200)
     : isBitget
     ? base + '/api/v2/spot/market/candles?symbol=' + encodeURIComponent(raw) + '&granularity=' + bitgetKlineGranularity(tf) + '&limit=' + (limit || 200)
+    : isBingx
+    ? base + '/openApi/spot/v2/market/kline?symbol=' + encodeURIComponent(bingxInstIdForRaw(raw)) + '&interval=' + bingxKlineInterval(tf) + '&limit=' + (limit || 200)
     : base + '/api/v3/klines?symbol=' + encodeURIComponent(raw) + '&interval=' + mexcKlineInterval(tf) + '&limit=' + (limit || 200);
   let bodyText = null;
   try {
@@ -2154,6 +2169,15 @@ async function fetchKlines(raw, tf, limit, exchangeId) {
     // проверено на живых данных (нет реального аккаунта под рукой) — если свечи вдруг окажутся
     // задом наперёд, разворот включается тем же приёмом, что и у OKX (.slice().reverse()) в одну строку.
     if (!data || !Array.isArray(data.data)) throw new Error((data && data.msg) ? data.msg : 'Некорректный ответ Bitget');
+    return data.data.map(function (k) {
+      return { t: Number(k[0]), o: Number(k[1]), h: Number(k[2]), l: Number(k[3]), c: Number(k[4]), v: Number(k[5]) };
+    }).filter(function (k) { return Number.isFinite(k.o) && Number.isFinite(k.c) && Number.isFinite(k.h) && Number.isFinite(k.l); });
+  }
+  if (isBingx) {
+    // BingX тоже оборачивает массив в {code,timestamp,data}, позиционный формат [ts,o,h,l,c,vol,
+    // closeTime,quoteVol] по документации SDK — как и у Bitget, ПОРЯДОК (по возрастанию времени)
+    // предполагается по аналогии с Binance-стилем API BingX, но НЕ проверен на живых данных.
+    if (!data || !Array.isArray(data.data)) throw new Error((data && data.msg) ? data.msg : 'Некорректный ответ BingX');
     return data.data.map(function (k) {
       return { t: Number(k[0]), o: Number(k[1]), h: Number(k[2]), l: Number(k[3]), c: Number(k[4]), v: Number(k[5]) };
     }).filter(function (k) { return Number.isFinite(k.o) && Number.isFinite(k.c) && Number.isFinite(k.h) && Number.isFinite(k.l); });
@@ -4480,18 +4504,238 @@ function evaluateBitgetWatchlist() {
 setInterval(evaluateBitgetWatchlist, BITGET_WATCHLIST_EVAL_INTERVAL_MS);
 setTimeout(evaluateBitgetWatchlist, 5000);
 
+// ============================================================================
+// TIER 2 — BINGX (мультибиржевой Tier 2, продолжение). Тоже один общий публичный WS
+// (wss://open-api-ws.bingx.com/market) на всю биржу, но с двумя настоящими отличиями от
+// OKX/Bitget:
+//
+// 1) СЖАТИЕ. Все сообщения сервера (кроме heartbeat, см. ниже) приходят как gzip-сжатые БИНАРНЫЕ
+//    фреймы, а не обычным текстом — распаковываем через DecompressionStream('gzip') (стандартный
+//    Web API, есть в любом современном Chromium/WebView2) перед JSON.parse. Раз распаковка
+//    асинхронная, сам разбор сообщения (handleBingxWsMessage) — тоже async, в отличие от
+//    синхронных handleOkxWsMessage/handleBitgetWsMessage.
+// 2) НАПРАВЛЕНИЕ heartbeat ОБРАТНОЕ: не клиент шлёт "ping" серверу (как у OKX/Bitget), а СЕРВЕР
+//    шлёт клиенту открытым текстом "Ping" примерно раз в 5с — клиент обязан ответить "Pong" тем же
+//    текстом, иначе соединение рвётся. Никакого клиентского ping-таймера здесь не заводим.
+// 3) Подписка/отписка — ОТДЕЛЬНОЕ сообщение НА КАЖДЫЙ канал ({id,reqType:"sub",dataType}), не
+//    один пакет с массивом args, как у OKX/Bitget — на монету у нас 2 канала (сделки+стакан),
+//    значит 2 отдельных send() на подписку и 2 на отписку.
+//
+// Глубина — depth20 (топ-20 уровней — как у MEXC/Binance, шире чем books15 у Bitget/books5 у OKX).
+// Символ — через дефис ("BTC-USDT"), как у OKX.
+// ============================================================================
+const BINGX_WS_MARKET = 'wss://open-api-ws.bingx.com/market';
+const BINGX_WATCHLIST_SIZE = 15;
+const BINGX_WATCHLIST_HARD_CAP = 20;
+const BINGX_WATCHLIST_EVICT_MARGIN = 8;
+const BINGX_WATCHLIST_ADD_STREAK = 2;
+const BINGX_WATCHLIST_EVICT_STREAK = 3;
+const BINGX_WATCHLIST_EVAL_INTERVAL_MS = 20000;
+const BINGX_WATCHLIST_COOLDOWN_MS = 5 * 60 * 1000;
+const BINGX_TIER2_TRADES_CAP = 2000;
+const BINGX_TIER2_DEPTH_CAP = 600;
+const BINGX_WS_RECONNECT_DELAY_MS = 3000;
+
+const bingxTier2Trades = new Map();  // "BINGX:BTC/USDT" -> ring buffer {t,price,qty,side}
+const bingxTier2Depth = new Map();   // "BINGX:BTC/USDT" -> ring buffer {t,bids,asks,bestBid,bestAsk,bidVol,askVol}
+const bingxWatchlist = new Map();    // symbol -> {addedAt, instId}
+const bingxWatchlistCandidateStreaks = new Map();
+const bingxWatchlistEvictStreaks = new Map();
+const bingxWatchlistCooldowns = new Map();
+const bingxInstIdToSymbol = new Map(); // "BTC-USDT" -> "BINGX:BTC/USDT"
+const bingxDensityAbsorptionBreakoutState = new Map();
+const bingxFailedBreakoutState = new Map();
+const bingxPossibleHiddenAbsorptionState = new Map();
+const bingxCrossExchangeDivergenceState = new Map();
+const bingxTwapState = new Map();
+const bingxTier2Health = { watchlistSize: 0, connectionAttempts: 0, tradesIngested: 0, depthPushesIngested: 0, cooldownDrops: 0 };
+
+let bingxWs = null;
+let bingxWsReady = false;
+let bingxWsReconnectTimer = null;
+
+function bingxWatchlistInCooldown(symbol) {
+  const until = bingxWatchlistCooldowns.get(symbol);
+  if (until == null) return false;
+  if (Date.now() >= until) { bingxWatchlistCooldowns.delete(symbol); return false; }
+  return true;
+}
+
+function bingxWsSend(obj) {
+  if (!bingxWs || bingxWs.readyState !== WebSocket.OPEN) return;
+  try { bingxWs.send(JSON.stringify(obj)); } catch (e) {}
+}
+let bingxReqIdSeq = 0;
+function bingxSubOrUnsub(instId, reqType) {
+  bingxWsSend({ id: 'r' + (++bingxReqIdSeq), reqType: reqType, dataType: instId + '@trade' });
+  bingxWsSend({ id: 'r' + (++bingxReqIdSeq), reqType: reqType, dataType: instId + '@depth20' });
+}
+
+// gzip-бинарь -> текст, через стандартный Web Streams API (без сторонних библиотек).
+async function bingxGunzipToText(arrayBuffer) {
+  const stream = new Response(arrayBuffer).body.pipeThrough(new DecompressionStream('gzip'));
+  return await new Response(stream).text();
+}
+
+// Именованная (не анонимная) и ASYNC — распаковка gzip не бывает синхронной. Проверяема напрямую
+// через window.__bingxHandleMessage (см. её же вызов ниже) без реального сокета.
+async function handleBingxWsMessage(raw, sock) {
+  // Единственное НЕ сжатое сообщение — открытый текст "Ping" (сервер шлёт его текстовым фреймом,
+  // поэтому raw уже строка, а не ArrayBuffer, даже при binaryType='arraybuffer' — см. её же коммент
+  // у ensureBingxWs). Отвечаем тем же текстом "Pong", без этого сервер рвёт соединение.
+  if (typeof raw === 'string') {
+    if (raw === 'Ping' && sock && sock.readyState === WebSocket.OPEN) { try { sock.send('Pong'); } catch (e) {} }
+    return;
+  }
+  let text;
+  try { text = await bingxGunzipToText(raw); } catch (e) { return; }
+  if (text === 'Ping') { if (sock && sock.readyState === WebSocket.OPEN) { try { sock.send('Pong'); } catch (e) {} } return; }
+  let msg;
+  try { msg = JSON.parse(text); } catch (e) { return; }
+  if (!msg || !msg.dataType || !msg.data) return; // {id,code,msg} — подтверждение подписки, не данные
+  const at = msg.dataType.indexOf('@');
+  if (at < 0) return;
+  const instId = msg.dataType.slice(0, at);
+  const channel = msg.dataType.slice(at + 1);
+  const symbol = bingxInstIdToSymbol.get(instId);
+  if (!symbol) return;
+  if (channel === 'trade') {
+    const tr = msg.data;
+    pushRing(bingxTier2Trades, symbol, {
+      t: Number(tr.T) || Date.now(), price: num(tr.p), qty: num(tr.q), side: tr.m ? 'sell' : 'buy'
+    }, BINGX_TIER2_TRADES_CAP);
+    bingxTier2Health.tradesIngested++;
+  } else if (channel.indexOf('depth') === 0) {
+    const d = msg.data;
+    const bids = (d.bids || []).map(function (x) { return { p: num(x[0]), q: num(x[1]) }; });
+    const asks = (d.asks || []).map(function (x) { return { p: num(x[0]), q: num(x[1]) }; });
+    const bidVol = bids.reduce(function (a, x) { return a + x.p * x.q; }, 0);
+    const askVol = asks.reduce(function (a, x) { return a + x.p * x.q; }, 0);
+    pushRing(bingxTier2Depth, symbol, {
+      t: Date.now(), bids: bids, asks: asks,
+      bestBid: bids.length ? bids[0].p : null, bestAsk: asks.length ? asks[0].p : null,
+      bidVol: bidVol, askVol: askVol
+    }, BINGX_TIER2_DEPTH_CAP);
+    bingxTier2Health.depthPushesIngested++;
+  }
+}
+
+function ensureBingxWs() {
+  if (bingxWs && (bingxWs.readyState === WebSocket.OPEN || bingxWs.readyState === WebSocket.CONNECTING)) return;
+  bingxTier2Health.connectionAttempts++;
+  let sock;
+  try {
+    sock = new WebSocket(BINGX_WS_MARKET);
+    sock.binaryType = 'arraybuffer'; // данные приходят gzip-сжатыми бинарными фреймами, см. header выше
+  } catch (e) {
+    logW('Watchlist', 'BingX: не удалось создать сокет — ' + e.message);
+    scheduleBingxReconnect();
+    return;
+  }
+  bingxWs = sock;
+  bingxWsReady = false;
+  sock.onopen = function () {
+    if (bingxWs !== sock) return;
+    clearTimeout(bingxWsReconnectTimer);
+    bingxWatchlist.forEach(function (entry) { bingxSubOrUnsub(entry.instId, 'sub'); });
+    bingxWsReady = true;
+  };
+  sock.onmessage = function (ev) { handleBingxWsMessage(ev.data, sock); };
+  sock.onerror = function () {};
+  sock.onclose = function () {
+    if (bingxWs !== sock) return;
+    bingxWs = null;
+    bingxWsReady = false;
+    if (!bingxWatchlist.size) return;
+    scheduleBingxReconnect();
+  };
+}
+function scheduleBingxReconnect() {
+  clearTimeout(bingxWsReconnectTimer);
+  bingxWsReconnectTimer = setTimeout(function () { if (bingxWatchlist.size) ensureBingxWs(); }, BINGX_WS_RECONNECT_DELAY_MS);
+}
+
+function subscribeBingxWatchlistSymbol(symbol, raw) {
+  if (bingxWatchlist.has(symbol)) return;
+  const instId = bingxInstIdForRaw(raw);
+  const entry = { addedAt: Date.now(), instId: instId };
+  bingxWatchlist.set(symbol, entry);
+  bingxInstIdToSymbol.set(instId, symbol);
+  logI('Watchlist', 'BingX ' + symbol + ' добавлена в глубокий анализ (' + raw + ')');
+  ensureBingxWs();
+  if (bingxWsReady) bingxSubOrUnsub(instId, 'sub');
+}
+function unsubscribeBingxWatchlistSymbol(symbol) {
+  const entry = bingxWatchlist.get(symbol);
+  if (!entry) return;
+  if (bingxWsReady) bingxSubOrUnsub(entry.instId, 'unsub');
+  bingxInstIdToSymbol.delete(entry.instId);
+  bingxWatchlist.delete(symbol);
+  bingxWatchlistEvictStreaks.delete(symbol);
+  bingxDensityAbsorptionBreakoutState.delete(symbol);
+  bingxFailedBreakoutState.delete(symbol);
+  bingxPossibleHiddenAbsorptionState.delete(symbol);
+  bingxCrossExchangeDivergenceState.delete(symbol);
+  bingxTwapState.delete(symbol);
+  logI('Watchlist', 'BingX ' + symbol + ' исключена из глубокого анализа');
+  if (!bingxWatchlist.size && bingxWs) { try { bingxWs.close(); } catch (e) {} }
+}
+
+function bingxTier2ForcedSymbols() {
+  const forced = new Set();
+  if (currentCoin && currentCoin.exchange === 'BINGX') forced.add(currentCoin.symbol);
+  allCoins.forEach(function (c) { if (c.fav && c.exchange === 'BINGX') forced.add(c.symbol); });
+  return forced;
+}
+
+function evaluateBingxWatchlist() {
+  const ranked = allCoins
+    .filter(function (c) { return c.exchange === 'BINGX' && c.__wlScore >= 0 && !bingxWatchlistInCooldown(c.symbol); })
+    .slice()
+    .sort(function (a, b) { return b.__wlScore - a.__wlScore; })
+    .map(function (c) { return c.symbol; });
+
+  const forced = bingxTier2ForcedSymbols();
+  const currentMembers = new Set(bingxWatchlist.keys());
+
+  const transitions = MexcCore.computeWatchlistTransitions({
+    rankedSymbols: ranked,
+    currentMembers: currentMembers,
+    candidateStreaks: bingxWatchlistCandidateStreaks,
+    evictStreaks: bingxWatchlistEvictStreaks,
+    size: BINGX_WATCHLIST_SIZE,
+    evictMargin: BINGX_WATCHLIST_EVICT_MARGIN,
+    addStreakNeeded: BINGX_WATCHLIST_ADD_STREAK,
+    evictStreakNeeded: BINGX_WATCHLIST_EVICT_STREAK,
+    forced: forced,
+    maxSize: BINGX_WATCHLIST_HARD_CAP
+  });
+
+  transitions.toEvict.forEach(unsubscribeBingxWatchlistSymbol);
+  transitions.toAdd.forEach(function (symbol) {
+    const coin = coinMap.get(symbol);
+    if (coin) subscribeBingxWatchlistSymbol(symbol, coin.raw);
+  });
+  bingxTier2Health.watchlistSize = bingxWatchlist.size;
+}
+setInterval(evaluateBingxWatchlist, BINGX_WATCHLIST_EVAL_INTERVAL_MS);
+setTimeout(evaluateBingxWatchlist, 5000);
+
 // Единственные два места во всём детекторном движке, которым честно нужно прочитать буфер ПО ЛЮБОЙ
 // поддерживаемой бирже, а не только MEXC (см. sweepCyclicalOutcomes/flushTimeWindowIfDue ниже) —
 // не переписываем сами tier2Trades/tier2Depth (MEXC-only, трогать лишний раз рискованно), просто
-// выбираем нужную Map по префиксу символа ("OKX:"/"BINANCE:"/"BITGET:" -> своя биржа, иначе MEXC).
+// выбираем нужную Map по префиксу символа ("OKX:"/"BINANCE:"/"BITGET:"/"BINGX:" -> своя биржа,
+// иначе MEXC).
 function tier2TradesForSymbol(symbol) {
   if (symbol.indexOf('OKX:') === 0) return okxTier2Trades.get(symbol);
   if (symbol.indexOf('BITGET:') === 0) return bitgetTier2Trades.get(symbol);
+  if (symbol.indexOf('BINGX:') === 0) return bingxTier2Trades.get(symbol);
   return symbol.indexOf('BINANCE:') === 0 ? binanceTier2Trades.get(symbol) : tier2Trades.get(symbol);
 }
 function tier2DepthForSymbol(symbol) {
   if (symbol.indexOf('OKX:') === 0) return okxTier2Depth.get(symbol);
   if (symbol.indexOf('BITGET:') === 0) return bitgetTier2Depth.get(symbol);
+  if (symbol.indexOf('BINGX:') === 0) return bingxTier2Depth.get(symbol);
   return symbol.indexOf('BINANCE:') === 0 ? binanceTier2Depth.get(symbol) : tier2Depth.get(symbol);
 }
 
@@ -5664,6 +5908,270 @@ function detectPossibleMarketMakerBotBitget(symbol) {
   if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
   return ev;
 }
+
+// BingX-версии всех детекторов выше — тот же контракт detect(symbol) -> event|null, только читают
+// bingxTier2Trades/bingxTier2Depth и свои bingx*State карты (см. блок "TIER 2 — BINGX" выше). Пороги/opts —
+// намеренно один в один с MEXC/Binance/OKX/Bitget-версией того же алгоритма.
+// ------------------------------------------------------------------------------------------
+function detectRepeatedTradeSizesBingx(symbol) {
+  const ev = MexcCore.detectRepeatedTradeSizes(bingxTier2Trades.get(symbol), {
+    tolerance: PATTERN_CLUSTER_TOLERANCE, minRepeats: DETECTOR_DEFS.repeatSize.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectRepeatedIntervalsBingx(symbol) {
+  const ev = MexcCore.detectRepeatedIntervals(bingxTier2Trades.get(symbol), {
+    tolerance: PATTERN_CLUSTER_TOLERANCE, minRepeats: DETECTOR_DEFS.repeatInterval.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectBurstNoFollowThroughBingx(symbol) {
+  const ev = MexcCore.detectBurstNoFollowThrough(bingxTier2Trades.get(symbol), {
+    bucketMs: PATTERN_BURST_BUCKET_MS, minRepeats: DETECTOR_DEFS.burstNoFollow.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectCyclicityBingx(symbol) {
+  const ev = MexcCore.detectCyclicity(bingxTier2Trades.get(symbol), {
+    bucketMs: 2000, minRepeats: DETECTOR_DEFS.cycle.minRepeats, tolerance: PATTERN_CLUSTER_TOLERANCE, lookback: 2000
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectRepeatingSequenceBingx(symbol) {
+  const ev = MexcCore.detectRepeatingSequence(bingxTier2Trades.get(symbol), {
+    minLen: 3, maxLen: 6, minRepeats: DETECTOR_DEFS.sequence.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectLadderBingx(symbol) {
+  const ev = MexcCore.detectLadder(bingxTier2Trades.get(symbol), {
+    tolerance: 0.3, minRepeats: DETECTOR_DEFS.ladder.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectErshikBingx(symbol) {
+  const ev = MexcCore.detectErshik(bingxTier2Trades.get(symbol), {
+    tolerance: 0.2, minRepeats: DETECTOR_DEFS.ershik.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectImbalanceBingx(symbol) {
+  const ev = MexcCore.detectImbalance(bingxTier2Depth.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.imbalance.minRepeats, minZ: 2.5, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectAbsorptionBingx(symbol) {
+  const ev = MexcCore.detectAbsorption(bingxTier2Depth.get(symbol), bingxTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.absorption.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectFakeLiquidityBingx(symbol) {
+  const ev = MexcCore.detectFakeLiquidity(bingxTier2Depth.get(symbol), bingxTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.fakeLiquidity.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectExhaustionBingx(symbol) {
+  const ev = MexcCore.detectExhaustion(bingxTier2Trades.get(symbol), {
+    bucketMs: PATTERN_BURST_BUCKET_MS, minRepeats: DETECTOR_DEFS.exhaustion.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectZoneReturnBingx(symbol) {
+  const ev = MexcCore.detectZoneReturn(bingxTier2Trades.get(symbol), {
+    tolerance: 0.005, minRepeats: DETECTOR_DEFS.zoneReturn.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectStandingWallBingx(symbol) {
+  const ev = MexcCore.detectStandingWall(bingxTier2Depth.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.standingWall.minRepeats, lookback: 20, minWallRatio: 5, maxDistancePct: 1.5
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDensityBreakBingx(symbol) {
+  const ev = MexcCore.detectDensityBreak(bingxTier2Depth.get(symbol), bingxTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.densityBreak.minRepeats, lookback: 300, minWallRatio: 5, minShrinkRatio: 0.5
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDensityAbsorptionBingx(symbol) {
+  const ev = MexcCore.detectDensityAbsorption(bingxTier2Depth.get(symbol), bingxTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.densityAbsorption.minRepeats, lookback: 300, minWallRatio: 5
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectLiquiditySweepBingx(symbol) {
+  const ev = MexcCore.detectLiquiditySweep(bingxTier2Trades.get(symbol), bingxTier2Depth.get(symbol), { lookback: 200 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectImpulsePullbackContinuationBingx(symbol) {
+  const ev = MexcCore.detectImpulsePullbackContinuation(bingxTier2Trades.get(symbol), { lookback: 300 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPriceVolumeInefficiencyBingx(symbol) {
+  const ev = MexcCore.detectPriceVolumeInefficiency(bingxTier2Trades.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDensityAbsorptionBreakoutBingx(symbol) {
+  const state = bingxDensityAbsorptionBreakoutState.get(symbol) || {};
+  const result = MexcCore.detectDensityAbsorptionBreakout(bingxTier2Depth.get(symbol), bingxTier2Trades.get(symbol), {
+    minWallRatio: 5, maxDistancePct: 1.0, minTestCount: DETECTOR_DEFS.densityAbsorptionBreakout.minRepeats
+  }, state);
+  bingxDensityAbsorptionBreakoutState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPumpReversalBingx(symbol) {
+  const ev = MexcCore.detectPumpReversal(bingxTier2Trades.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDumpReversalBingx(symbol) {
+  const ev = MexcCore.detectDumpReversal(bingxTier2Trades.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectCompressionBreakBingx(symbol) {
+  const ev = MexcCore.detectCompressionBreak(bingxTier2Trades.get(symbol), bingxTier2Depth.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectFailedBreakoutBingx(symbol) {
+  const state = bingxFailedBreakoutState.get(symbol) || {};
+  const result = MexcCore.detectFailedBreakout(bingxTier2Trades.get(symbol), { lookback: 300 }, state);
+  bingxFailedBreakoutState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectVolumeAnomalyBingx(symbol) {
+  const ev = MexcCore.detectVolumeAnomaly(bingxTier2Trades.get(symbol), bingxTier2Depth.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectLiquidityWithdrawalBingx(symbol) {
+  const ev = MexcCore.detectLiquidityWithdrawal(bingxTier2Depth.get(symbol), bingxTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.liquidityWithdrawal.minRepeats, lookback: 200
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPossibleHiddenAbsorptionBingx(symbol) {
+  const state = bingxPossibleHiddenAbsorptionState.get(symbol) || {};
+  const result = MexcCore.detectPossibleHiddenAbsorption(bingxTier2Depth.get(symbol), bingxTier2Trades.get(symbol), {}, state);
+  bingxPossibleHiddenAbsorptionState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+// base монеты из "BINGX:BTC/USDT" -> "BTC" — сравниваем цену Bingx с MEXC (всегда доступна) и
+// любой ДРУГОЙ подключённой биржей (не с самим Bingx).
+function crossExchangeCandidatesForBingx(symbol) {
+  const base = symbol.split(':').pop().split('/')[0];
+  const candidates = [];
+  const mexcCoin = coinMap.get(base + '/USDT');
+  if (mexcCoin && mexcCoin.price > 0) candidates.push({ exchange: 'MEXC', price: mexcCoin.price });
+  Object.keys(EXCHANGE_CONNECTORS).forEach(function (id) {
+    if (id === 'bingx') return;
+    if (!exchangeConnections[id] || !exchangeConnections[id].connected) return;
+    EXCHANGE_CONNECTORS[id].exchangeTags.filter(function (tag) { return !/FUT$/.test(tag); }).forEach(function (tag) {
+      const coin = coinMap.get(tag + ':' + base + '/USDT');
+      if (coin && coin.price > 0) candidates.push({ exchange: tag, price: coin.price });
+    });
+  });
+  return candidates;
+}
+function detectCrossExchangeDivergenceBingx(symbol) {
+  const coin = coinMap.get(symbol);
+  if (!coin || !(coin.price > 0)) return null;
+  const candidates = crossExchangeCandidatesForBingx(symbol);
+  if (!candidates.length) return null;
+  const state = bingxCrossExchangeDivergenceState.get(symbol) || {};
+  const result = MexcCore.detectCrossExchangeDivergence(coin.price, candidates, { now: Date.now() }, state);
+  bingxCrossExchangeDivergenceState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+// #12/#16 честно переиспользуют ОБЩИЕ cyclicalLibrary/timeBucketStats (обычные объекты, не Map,
+// ключ — уже уникальный "BINGX:BTC/USDT" строкой, коллизий с MEXC-символами нет) — и уже
+// обобщённые выше flushTimeWindowIfDue/symbolOverallMedianVolume (см. tier2TradesForSymbol).
+function detectCyclicalPatternBingx(symbol) {
+  const trades = bingxTier2Trades.get(symbol);
+  const library = cyclicalLibrary[symbol] || [];
+  const result = MexcCore.detectCyclicalPattern(trades, library, {});
+  if (result.library !== library) {
+    const added = result.library[result.library.length - 1];
+    if (added && added.priceAtEpisode == null && trades && trades.length) added.priceAtEpisode = trades[trades.length - 1].price;
+    cyclicalLibrary[symbol] = result.library;
+    saveCyclicalLibrary();
+  }
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectTimeBasedImpulseBingx(symbol) {
+  const coin = coinMap.get(symbol);
+  if (!coin || !(coin.price > 0)) return null;
+  const now = Date.now();
+  flushTimeWindowIfDue(symbol, now, coin.price);
+  const bucketKey = MexcCore.timeBucketKeyFromDate(new Date(now));
+  const stats = (timeBucketStats[symbol] || {})[bucketKey];
+  const ev = MexcCore.detectTimeBasedImpulse(stats, symbolOverallMedianVolume(symbol), coin.price, {});
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectTwapBingx(symbol) {
+  const state = bingxTwapState.get(symbol) || {};
+  const result = MexcCore.detectTwap(bingxTier2Trades.get(symbol), {}, state);
+  bingxTwapState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPossibleMarketMakerBotBingx(symbol) {
+  const ev = MexcCore.detectPossibleMarketMakerBot(bingxTier2Trades.get(symbol), bingxTier2Depth.get(symbol), {});
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+const BINGX_DETECTOR_FNS = {
+  repeatSize: detectRepeatedTradeSizesBingx, repeatInterval: detectRepeatedIntervalsBingx,
+  burstNoFollow: detectBurstNoFollowThroughBingx, cycle: detectCyclicityBingx,
+  sequence: detectRepeatingSequenceBingx, ladder: detectLadderBingx, ershik: detectErshikBingx,
+  imbalance: detectImbalanceBingx, absorption: detectAbsorptionBingx, fakeLiquidity: detectFakeLiquidityBingx,
+  exhaustion: detectExhaustionBingx, zoneReturn: detectZoneReturnBingx, standingWall: detectStandingWallBingx,
+  densityBreak: detectDensityBreakBingx, densityAbsorption: detectDensityAbsorptionBingx,
+  liquiditySweep: detectLiquiditySweepBingx, impulsePullbackContinuation: detectImpulsePullbackContinuationBingx,
+  priceVolumeInefficiency: detectPriceVolumeInefficiencyBingx, densityAbsorptionBreakout: detectDensityAbsorptionBreakoutBingx,
+  pumpReversal: detectPumpReversalBingx, dumpReversal: detectDumpReversalBingx,
+  compressionBreak: detectCompressionBreakBingx, failedBreakout: detectFailedBreakoutBingx,
+  volumeAnomaly: detectVolumeAnomalyBingx, liquidityWithdrawal: detectLiquidityWithdrawalBingx,
+  possibleHiddenAbsorption: detectPossibleHiddenAbsorptionBingx, crossExchangeDivergence: detectCrossExchangeDivergenceBingx,
+  cyclicalPattern: detectCyclicalPatternBingx, timeBasedImpulse: detectTimeBasedImpulseBingx,
+  twap: detectTwapBingx, possibleMarketMakerBot: detectPossibleMarketMakerBotBingx
+};
 const BITGET_DETECTOR_FNS = {
   repeatSize: detectRepeatedTradeSizesBitget, repeatInterval: detectRepeatedIntervalsBitget,
   burstNoFollow: detectBurstNoFollowThroughBitget, cycle: detectCyclicityBitget,
@@ -6136,6 +6644,9 @@ function runPatternDetectors() {
   bitgetWatchlist.forEach(function (entry, symbol) {
     runDetectorsForSymbolInto(symbol, BITGET_DETECTOR_FNS, events, cycleNow);
   });
+  bingxWatchlist.forEach(function (entry, symbol) {
+    runDetectorsForSymbolInto(symbol, BINGX_DETECTOR_FNS, events, cycleNow);
+  });
 
   // Мульти-детекторное подтверждение (ТЗ #8, фактор "confirmation") — если на одной монете в ОДНОМ
   // прогоне сработало ≥2 разных детектора, это взаимное подтверждение: пересчитываем им score с
@@ -6491,6 +7002,7 @@ function graphsExchangeIdFor(coin) {
   if (coin.exchange === 'BINANCE') return 'binance';
   if (coin.exchange === 'OKX') return 'okx';
   if (coin.exchange === 'BITGET') return 'bitget';
+  if (coin.exchange === 'BINGX') return 'bingx';
   return null; // биржа без своего REST-клиента здесь (пока нет ни одной такой в TIER2_EXTERNAL_EXCHANGES)
 }
 
@@ -10821,6 +11333,41 @@ const EXCHANGE_CONNECTORS = {
         upsertExternalCoin(rawSymbol, num(row.lastPr), num(row.change24h) * 100, num(row.quoteVolume), num(row.high24h), num(row.low24h), exchangeTag);
       });
     }
+  },
+  bingx: {
+    label: 'BingX',
+    baseUrl: 'https://open-api.bingx.com',
+    verifyPath: '/openApi/spot/v1/account/balance',
+    needsPassphrase: false,
+    // Схема подписи 1-в-1 как у Binance (не совпадение — BingX документированно моделирует свой
+    // REST по Binance): параметры сортируются по ключу, HMAC-SHA256 в HEX (не base64, как у OKX/
+    // Bitget), подпись — доп. query-параметр "signature", ключ — в заголовке.
+    sign: async function (conn, path, params) {
+      const p = Object.assign({}, params, { timestamp: Date.now(), recvWindow: 5000 });
+      const qs = Object.keys(p).sort().map(function (k) { return k + '=' + p[k]; }).join('&');
+      const signature = await hmacSha256Hex(conn.apiSecret, qs);
+      return { url: this.baseUrl + path + '?' + qs + '&signature=' + signature, headers: { 'X-BX-APIKEY': conn.apiKey } };
+    },
+    // code 0 (число, не строка) значит успех — как у Binance/MEXC, не строковый "00000"/"0" как у
+    // Bitget/OKX.
+    checkError: function (data) {
+      if (data && typeof data === 'object' && typeof data.code === 'number' && data.code !== 0) {
+        throw new Error(data.msg || ('Ошибка BingX (код ' + data.code + ')'));
+      }
+    },
+    // priceChangePercent у BingX — уже ГОТОВЫЙ процент ("1.23" значит +1.23%), в отличие от Bitget
+    // (там доля) — умножать не нужно. Символ — через дефис ("BTC-USDT"), как у OKX.
+    exchangeTags: ['BINGX'],
+    feeds: [{ exchangeTag: 'BINGX', url: 'https://open-api.bingx.com/openApi/spot/v1/ticker/24hr' }],
+    parseTickers: function (body, exchangeTag) {
+      const parsed = JSON.parse(body);
+      const rows = parsed && parsed.data;
+      if (!Array.isArray(rows)) throw new Error('неожиданный формат ответа BingX');
+      rows.forEach(function (row) {
+        const rawSymbol = String(row.symbol || '').replace('-', '');
+        upsertExternalCoin(rawSymbol, num(row.lastPrice), num(row.priceChangePercent), num(row.quoteVolume), num(row.highPrice), num(row.lowPrice), exchangeTag);
+      });
+    }
   }
 };
 
@@ -11264,8 +11811,8 @@ function setExchangeStatus(id, state, msg) {
 // "BINANCEFUT" — псевдо-биржа для фьючерсов Binance (см. exchangeTags/feeds у EXCHANGE_CONNECTORS.binance
 // выше) — своя буква "F" и своё полное имя для подсказки, но цвет кнопки (см. styles.css) намеренно
 // тот же жёлтый, что и у обычного Binance — это та же биржа, просто другой рынок.
-const EXCHANGE_SWITCH_LABELS = { MEXC: 'M', BINANCE: 'B', BINANCEFUT: 'F', OKX: 'O', BITGET: 'G' };
-const EXCHANGE_SWITCH_TITLES = { MEXC: 'MEXC', BINANCE: 'Binance Spot', BINANCEFUT: 'Binance Futures', OKX: 'OKX', BITGET: 'Bitget' };
+const EXCHANGE_SWITCH_LABELS = { MEXC: 'M', BINANCE: 'B', BINANCEFUT: 'F', OKX: 'O', BITGET: 'G', BINGX: 'X' };
+const EXCHANGE_SWITCH_TITLES = { MEXC: 'MEXC', BINANCE: 'Binance Spot', BINANCEFUT: 'Binance Futures', OKX: 'OKX', BITGET: 'Bitget', BINGX: 'BingX' };
 const EXCHANGE_MARKET_LABEL = { BINANCE: 'Спот', BINANCEFUT: 'Фьючерсы' };
 
 // Какая группа переключателя сейчас раскрыта (см. .exch-switch-submenu в styles.css) — только одна
@@ -12801,6 +13348,12 @@ window.__bitgetTier2DepthFor = function (symbol) { return bitgetTier2Depth.get(s
 window.__bitgetHandleMessage = handleBitgetWsMessage; // отладка разбора сообщений Bitget WS без реального сокета
 window.__bitgetTier2Health = bitgetTier2Health;
 window.__bitgetInstIdToSymbol = bitgetInstIdToSymbol;
+window.__bingxWatchlist = function () { return Array.from(bingxWatchlist.keys()); };
+window.__bingxTier2TradesFor = function (symbol) { return bingxTier2Trades.get(symbol) || []; };
+window.__bingxTier2DepthFor = function (symbol) { return bingxTier2Depth.get(symbol) || []; };
+window.__bingxHandleMessage = handleBingxWsMessage; // async — отладка разбора сообщений BingX WS (gzip) без реального сокета
+window.__bingxTier2Health = bingxTier2Health;
+window.__bingxInstIdToSymbol = bingxInstIdToSymbol;
 window.__patternHistory = function () { return patternHistory; };
 window.__sweepPatternOutcomesNow = sweepPatternOutcomes;
 // Только для ручной проверки UI страницы "Паттерны" без ожидания реальных срабатываний детекторов
