@@ -883,6 +883,7 @@ function exchangeTerminalUrl(symbol) {
   if (exch === 'OKX') return 'https://www.okx.com/trade-spot/' + encodeURIComponent(base.toLowerCase()) + '-usdt';
   if (exch === 'BITGET') return 'https://www.bitget.com/spot/' + encodeURIComponent(base) + 'USDT';
   if (exch === 'BINGX') return 'https://bingx.com/en/spot/' + encodeURIComponent(base) + 'USDT';
+  if (exch === 'KUCOIN') return 'https://www.kucoin.com/trade/' + encodeURIComponent(base) + '-USDT';
   return mexcTerminalUrl(symbol);
 }
 
@@ -1376,7 +1377,7 @@ function upsertCoin(row) {
 // тиковых метрик — тем взяться неоткуда до того, как WS уже открыт). Для бирж вне этого набора
 // (BINANCEFUT и т.д.) — по-прежнему 0, такие пары навсегда остаются тикером без глубокого анализа,
 // честно.
-const TIER2_EXTERNAL_EXCHANGES = new Set(['BINANCE', 'OKX', 'BITGET', 'BINGX']);
+const TIER2_EXTERNAL_EXCHANGES = new Set(['BINANCE', 'OKX', 'BITGET', 'BINGX', 'KUCOIN']);
 function computeExternalWatchlistCandidateScore(vol24) {
   return (Number.isFinite(vol24) && vol24 >= STRATEGY_MIN_LIQUID_VOL24) ? vol24 : -1;
 }
@@ -1625,6 +1626,7 @@ function isTier2Watchlisted(symbol) {
   if (symbol.indexOf('OKX:') === 0) return okxWatchlist.has(symbol);
   if (symbol.indexOf('BITGET:') === 0) return bitgetWatchlist.has(symbol);
   if (symbol.indexOf('BINGX:') === 0) return bingxWatchlist.has(symbol);
+  if (symbol.indexOf('KUCOIN:') === 0) return kucoinWatchlist.has(symbol);
   if (symbol.indexOf('BINANCE:') === 0) return binanceWatchlist.has(symbol);
   return watchlist.has(symbol);
 }
@@ -1632,6 +1634,7 @@ function standingWallForSymbol(symbol) {
   if (symbol.indexOf('OKX:') === 0) return detectStandingWallOkx(symbol);
   if (symbol.indexOf('BITGET:') === 0) return detectStandingWallBitget(symbol);
   if (symbol.indexOf('BINGX:') === 0) return detectStandingWallBingx(symbol);
+  if (symbol.indexOf('KUCOIN:') === 0) return detectStandingWallKucoin(symbol);
   if (symbol.indexOf('BINANCE:') === 0) return detectStandingWallBinance(symbol);
   return detectStandingWall(symbol);
 }
@@ -2112,6 +2115,20 @@ function bingxKlineInterval(tf) {
 function bingxInstIdForRaw(raw) {
   return String(raw || '').replace(/USDT$/, '-USDT');
 }
+// KuCoin — свои обозначения интервала ("1min"/"1hour"/"1day"), символ через дефис (как у OKX/BingX),
+// и REST требует явный startAt/endAt в СЕКУНДАХ (не миллисекундах) вместо готового "limit" — считаем
+// нужный диапазон сами по длительности одной свечи × запрошенное число свечей.
+function kucoinKlineType(tf) {
+  const map = { '1': '1min', '5': '5min', '15': '15min', '30': '30min', '60': '1hour', '240': '4hour', 'D': '1day' };
+  return map[tf] || '5min';
+}
+function kucoinKlineSeconds(tf) {
+  const map = { '1': 60, '5': 300, '15': 900, '30': 1800, '60': 3600, '240': 14400, 'D': 86400 };
+  return map[tf] || 300;
+}
+function kucoinInstIdForRaw(raw) {
+  return String(raw || '').replace(/USDT$/, '-USDT');
+}
 
 // exchangeId — необязательный, тот же смысл, что и у fetchMyTrades: не задан (или 'mexc') — поведение
 // как раньше (MEXC_REST); Binance — тот же путь, но на её собственный REST (тот же /api/v3/klines и
@@ -2123,13 +2140,18 @@ async function fetchKlines(raw, tf, limit, exchangeId) {
   const isOkx = exchangeId === 'okx';
   const isBitget = exchangeId === 'bitget';
   const isBingx = exchangeId === 'bingx';
+  const isKucoin = exchangeId === 'kucoin';
   const base = (!exchangeId || exchangeId === 'mexc') ? MEXC_REST : EXCHANGE_CONNECTORS[exchangeId].baseUrl;
+  const nowSec = Math.floor(Date.now() / 1000);
   const url = isOkx
     ? base + '/api/v5/market/candles?instId=' + encodeURIComponent(okxInstIdForRaw(raw)) + '&bar=' + okxKlineBar(tf) + '&limit=' + (limit || 200)
     : isBitget
     ? base + '/api/v2/spot/market/candles?symbol=' + encodeURIComponent(raw) + '&granularity=' + bitgetKlineGranularity(tf) + '&limit=' + (limit || 200)
     : isBingx
     ? base + '/openApi/spot/v2/market/kline?symbol=' + encodeURIComponent(bingxInstIdForRaw(raw)) + '&interval=' + bingxKlineInterval(tf) + '&limit=' + (limit || 200)
+    : isKucoin
+    ? base + '/api/v1/market/candles?symbol=' + encodeURIComponent(kucoinInstIdForRaw(raw)) + '&type=' + kucoinKlineType(tf)
+      + '&startAt=' + (nowSec - (limit || 200) * kucoinKlineSeconds(tf)) + '&endAt=' + nowSec
     : base + '/api/v3/klines?symbol=' + encodeURIComponent(raw) + '&interval=' + mexcKlineInterval(tf) + '&limit=' + (limit || 200);
   let bodyText = null;
   try {
@@ -2180,6 +2202,17 @@ async function fetchKlines(raw, tf, limit, exchangeId) {
     if (!data || !Array.isArray(data.data)) throw new Error((data && data.msg) ? data.msg : 'Некорректный ответ BingX');
     return data.data.map(function (k) {
       return { t: Number(k[0]), o: Number(k[1]), h: Number(k[2]), l: Number(k[3]), c: Number(k[4]), v: Number(k[5]) };
+    }).filter(function (k) { return Number.isFinite(k.o) && Number.isFinite(k.c) && Number.isFinite(k.h) && Number.isFinite(k.l); });
+  }
+  if (isKucoin) {
+    // KuCoin — {code,data:[...]}, время в СЕКУНДАХ (не мс — умножаем на 1000), и, важно, ПОЗИЦИОННЫЙ
+    // ПОРЯДОК ПОЛЕЙ ДРУГОЙ: [time,open,CLOSE,HIGH,LOW,volume,amount] — close идёт перед high/low, не
+    // после них, как у всех остальных бирж здесь. Порядок массива по времени — по документации и
+    // распространённой практике описан НЕ явно; реализовано в предположении "новые сначала" (как
+    // OKX) — разворачиваем; если оказалось не так, разворот просто убирается одной строкой.
+    if (!data || !Array.isArray(data.data)) throw new Error((data && data.msg) ? data.msg : 'Некорректный ответ KuCoin');
+    return data.data.slice().reverse().map(function (k) {
+      return { t: Number(k[0]) * 1000, o: Number(k[1]), c: Number(k[2]), h: Number(k[3]), l: Number(k[4]), v: Number(k[5]) };
     }).filter(function (k) { return Number.isFinite(k.o) && Number.isFinite(k.c) && Number.isFinite(k.h) && Number.isFinite(k.l); });
   }
   if (!Array.isArray(data)) throw new Error((data && data.msg) ? data.msg : 'Некорректный ответ MEXC');
@@ -4721,21 +4754,260 @@ function evaluateBingxWatchlist() {
 setInterval(evaluateBingxWatchlist, BINGX_WATCHLIST_EVAL_INTERVAL_MS);
 setTimeout(evaluateBingxWatchlist, 5000);
 
+// ============================================================================
+// TIER 2 — KUCOIN (мультибиржевой Tier 2, продолжение). Самая архитектурно другая биржа из пяти —
+// у KuCoin НЕТ фиксированного публичного WS URL: сначала нужно REST POST на /api/v1/bullet-public
+// (без ключа/подписи), получить одноразовый token + адрес сервера (instanceServers[0].endpoint,
+// pingInterval), и только потом открывать `<endpoint>?token=...&connectId=...`. Дальше — свой
+// протокол: сервер первым делом шлёт {"type":"welcome"} (только после него можно подписываться —
+// раньше сервер просто не готов), клиент сам шлёт {"id","type":"ping"} каждые pingInterval мс
+// (обычно 18с), сервер отвечает {"type":"pong"}. Подписка/отписка — {"id","type":"subscribe"/
+// "unsubscribe","topic":"/market/match:BTC-USDT",...}, ОТДЕЛЬНОЕ сообщение на канал, как у BingX.
+//
+// Глубина — /spotMarket/level2Depth50 (топ-50 снимком на каждый пуш — шире всех остальных бирж
+// здесь, включая саму MEXC/Binance). Время сделки (data.time) — НАНОСЕКУНДЫ строкой, делим на 1e6.
+// Символ — через дефис, как у OKX/BingX.
+// ============================================================================
+const KUCOIN_BULLET_URL = 'https://api.kucoin.com/api/v1/bullet-public';
+const KUCOIN_DEFAULT_PING_INTERVAL_MS = 18000;
+const KUCOIN_WATCHLIST_SIZE = 15;
+const KUCOIN_WATCHLIST_HARD_CAP = 20;
+const KUCOIN_WATCHLIST_EVICT_MARGIN = 8;
+const KUCOIN_WATCHLIST_ADD_STREAK = 2;
+const KUCOIN_WATCHLIST_EVICT_STREAK = 3;
+const KUCOIN_WATCHLIST_EVAL_INTERVAL_MS = 20000;
+const KUCOIN_WATCHLIST_COOLDOWN_MS = 5 * 60 * 1000;
+const KUCOIN_TIER2_TRADES_CAP = 2000;
+const KUCOIN_TIER2_DEPTH_CAP = 600;
+const KUCOIN_WS_RECONNECT_DELAY_MS = 3000;
+
+const kucoinTier2Trades = new Map();  // "KUCOIN:BTC/USDT" -> ring buffer {t,price,qty,side}
+const kucoinTier2Depth = new Map();   // "KUCOIN:BTC/USDT" -> ring buffer {t,bids,asks,bestBid,bestAsk,bidVol,askVol}
+const kucoinWatchlist = new Map();    // symbol -> {addedAt, instId}
+const kucoinWatchlistCandidateStreaks = new Map();
+const kucoinWatchlistEvictStreaks = new Map();
+const kucoinWatchlistCooldowns = new Map();
+const kucoinInstIdToSymbol = new Map(); // "BTC-USDT" -> "KUCOIN:BTC/USDT"
+const kucoinDensityAbsorptionBreakoutState = new Map();
+const kucoinFailedBreakoutState = new Map();
+const kucoinPossibleHiddenAbsorptionState = new Map();
+const kucoinCrossExchangeDivergenceState = new Map();
+const kucoinTwapState = new Map();
+const kucoinTier2Health = { watchlistSize: 0, connectionAttempts: 0, tradesIngested: 0, depthPushesIngested: 0, cooldownDrops: 0 };
+
+let kucoinWs = null;
+let kucoinWsReady = false;
+let kucoinWsReconnectTimer = null;
+let kucoinPingTimer = null;
+let kucoinConnectInFlight = false; // не даём двум одновременным subscribe запустить второй bullet-запрос/сокет, пока первый ещё в процессе
+let kucoinReqIdSeq = 0;
+
+function kucoinWatchlistInCooldown(symbol) {
+  const until = kucoinWatchlistCooldowns.get(symbol);
+  if (until == null) return false;
+  if (Date.now() >= until) { kucoinWatchlistCooldowns.delete(symbol); return false; }
+  return true;
+}
+
+// Публичный bullet-токен — обычный незащищённый POST, тот же fetch->curl.exe запасной путь, что и
+// у остальных публичных REST-вызовов в этом файле (см. fetchPublicText/fetchKlines).
+async function kucoinFetchBullet() {
+  let bodyText;
+  try {
+    const res = await fetchWithTimeout(KUCOIN_BULLET_URL, { method: 'POST' }, 10000);
+    if (!res.ok) throw new Error('KuCoin ответил ' + res.status);
+    bodyText = await res.text();
+  } catch (browserErr) {
+    const native = await nativeCurlGet(KUCOIN_BULLET_URL, null, 'POST');
+    if (!native) throw browserErr;
+    bodyText = native.body;
+  }
+  const data = JSON.parse(bodyText);
+  if (!data || !data.data || !data.data.token) throw new Error((data && data.msg) || 'Не удалось получить bullet-токен KuCoin');
+  return data.data;
+}
+
+function kucoinWsSend(sock, obj) {
+  if (!sock || sock.readyState !== WebSocket.OPEN) return;
+  try { sock.send(JSON.stringify(obj)); } catch (e) {}
+}
+function kucoinSubOrUnsub(sock, instId, type) {
+  kucoinWsSend(sock, { id: String(++kucoinReqIdSeq), type: type, topic: '/market/match:' + instId, privateChannel: false, response: true });
+  kucoinWsSend(sock, { id: String(++kucoinReqIdSeq), type: type, topic: '/spotMarket/level2Depth50:' + instId, privateChannel: false, response: true });
+}
+
+// Именованная функция — проверяема напрямую (window.__kucoinHandleMessage) без реального сокета;
+// sock/pingIntervalMs передаются отдельно, потому что реакция на "welcome" (завести пинг-таймер,
+// переподписаться на watchlist) должна слать в ТОТ ЖЕ сокет, где пришло сообщение.
+function handleKucoinWsMessage(raw, sock, pingIntervalMs) {
+  let msg;
+  try { msg = JSON.parse(raw); } catch (e) { return; }
+  if (!msg) return;
+  if (msg.type === 'welcome') {
+    clearInterval(kucoinPingTimer);
+    kucoinPingTimer = setInterval(function () {
+      kucoinWsSend(sock, { id: String(Date.now()), type: 'ping' });
+    }, pingIntervalMs || KUCOIN_DEFAULT_PING_INTERVAL_MS);
+    kucoinWatchlist.forEach(function (entry) { kucoinSubOrUnsub(sock, entry.instId, 'subscribe'); });
+    kucoinWsReady = true;
+    return;
+  }
+  if (msg.type !== 'message' || !msg.topic || !msg.data) return;
+  const colonIdx = msg.topic.indexOf(':');
+  if (colonIdx < 0) return;
+  const channel = msg.topic.slice(0, colonIdx);
+  const instId = msg.topic.slice(colonIdx + 1);
+  const symbol = kucoinInstIdToSymbol.get(instId);
+  if (!symbol) return;
+  if (channel === '/market/match') {
+    const tr = msg.data;
+    pushRing(kucoinTier2Trades, symbol, {
+      t: Math.round(Number(tr.time) / 1e6) || Date.now(), price: num(tr.price), qty: num(tr.size), side: tr.side === 'sell' ? 'sell' : 'buy'
+    }, KUCOIN_TIER2_TRADES_CAP);
+    kucoinTier2Health.tradesIngested++;
+  } else if (channel === '/spotMarket/level2Depth50') {
+    const d = msg.data;
+    const bids = (d.bids || []).map(function (x) { return { p: num(x[0]), q: num(x[1]) }; });
+    const asks = (d.asks || []).map(function (x) { return { p: num(x[0]), q: num(x[1]) }; });
+    const bidVol = bids.reduce(function (a, x) { return a + x.p * x.q; }, 0);
+    const askVol = asks.reduce(function (a, x) { return a + x.p * x.q; }, 0);
+    pushRing(kucoinTier2Depth, symbol, {
+      t: Date.now(), bids: bids, asks: asks,
+      bestBid: bids.length ? bids[0].p : null, bestAsk: asks.length ? asks[0].p : null,
+      bidVol: bidVol, askVol: askVol
+    }, KUCOIN_TIER2_DEPTH_CAP);
+    kucoinTier2Health.depthPushesIngested++;
+  }
+}
+
+async function ensureKucoinWs() {
+  if (kucoinWs && (kucoinWs.readyState === WebSocket.OPEN || kucoinWs.readyState === WebSocket.CONNECTING)) return;
+  if (kucoinConnectInFlight) return;
+  kucoinConnectInFlight = true;
+  kucoinTier2Health.connectionAttempts++;
+  let bullet;
+  try {
+    bullet = await kucoinFetchBullet();
+  } catch (e) {
+    logW('Watchlist', 'KuCoin: не удалось получить bullet-токен — ' + e.message);
+    kucoinConnectInFlight = false;
+    scheduleKucoinReconnect();
+    return;
+  }
+  const server = bullet.instanceServers && bullet.instanceServers[0];
+  if (!server) { kucoinConnectInFlight = false; scheduleKucoinReconnect(); return; }
+  const wsUrl = server.endpoint + '?token=' + encodeURIComponent(bullet.token) + '&connectId=' + Date.now();
+  let sock;
+  try {
+    sock = new WebSocket(wsUrl);
+  } catch (e) {
+    logW('Watchlist', 'KuCoin: не удалось создать сокет — ' + e.message);
+    kucoinConnectInFlight = false;
+    scheduleKucoinReconnect();
+    return;
+  }
+  kucoinWs = sock;
+  kucoinWsReady = false;
+  sock.onmessage = function (ev) { handleKucoinWsMessage(ev.data, sock, server.pingInterval); };
+  sock.onerror = function () {};
+  sock.onclose = function () {
+    if (kucoinWs !== sock) return;
+    kucoinWs = null;
+    kucoinWsReady = false;
+    clearInterval(kucoinPingTimer);
+    if (!kucoinWatchlist.size) return;
+    scheduleKucoinReconnect();
+  };
+  kucoinConnectInFlight = false;
+}
+function scheduleKucoinReconnect() {
+  clearTimeout(kucoinWsReconnectTimer);
+  kucoinWsReconnectTimer = setTimeout(function () { if (kucoinWatchlist.size) ensureKucoinWs(); }, KUCOIN_WS_RECONNECT_DELAY_MS);
+}
+
+function subscribeKucoinWatchlistSymbol(symbol, raw) {
+  if (kucoinWatchlist.has(symbol)) return;
+  const instId = kucoinInstIdForRaw(raw);
+  const entry = { addedAt: Date.now(), instId: instId };
+  kucoinWatchlist.set(symbol, entry);
+  kucoinInstIdToSymbol.set(instId, symbol);
+  logI('Watchlist', 'KuCoin ' + symbol + ' добавлена в глубокий анализ (' + raw + ')');
+  ensureKucoinWs();
+  if (kucoinWsReady && kucoinWs) kucoinSubOrUnsub(kucoinWs, instId, 'subscribe');
+}
+function unsubscribeKucoinWatchlistSymbol(symbol) {
+  const entry = kucoinWatchlist.get(symbol);
+  if (!entry) return;
+  if (kucoinWsReady && kucoinWs) kucoinSubOrUnsub(kucoinWs, entry.instId, 'unsubscribe');
+  kucoinInstIdToSymbol.delete(entry.instId);
+  kucoinWatchlist.delete(symbol);
+  kucoinWatchlistEvictStreaks.delete(symbol);
+  kucoinDensityAbsorptionBreakoutState.delete(symbol);
+  kucoinFailedBreakoutState.delete(symbol);
+  kucoinPossibleHiddenAbsorptionState.delete(symbol);
+  kucoinCrossExchangeDivergenceState.delete(symbol);
+  kucoinTwapState.delete(symbol);
+  logI('Watchlist', 'KuCoin ' + symbol + ' исключена из глубокого анализа');
+  if (!kucoinWatchlist.size && kucoinWs) { try { kucoinWs.close(); } catch (e) {} }
+}
+
+function kucoinTier2ForcedSymbols() {
+  const forced = new Set();
+  if (currentCoin && currentCoin.exchange === 'KUCOIN') forced.add(currentCoin.symbol);
+  allCoins.forEach(function (c) { if (c.fav && c.exchange === 'KUCOIN') forced.add(c.symbol); });
+  return forced;
+}
+
+function evaluateKucoinWatchlist() {
+  const ranked = allCoins
+    .filter(function (c) { return c.exchange === 'KUCOIN' && c.__wlScore >= 0 && !kucoinWatchlistInCooldown(c.symbol); })
+    .slice()
+    .sort(function (a, b) { return b.__wlScore - a.__wlScore; })
+    .map(function (c) { return c.symbol; });
+
+  const forced = kucoinTier2ForcedSymbols();
+  const currentMembers = new Set(kucoinWatchlist.keys());
+
+  const transitions = MexcCore.computeWatchlistTransitions({
+    rankedSymbols: ranked,
+    currentMembers: currentMembers,
+    candidateStreaks: kucoinWatchlistCandidateStreaks,
+    evictStreaks: kucoinWatchlistEvictStreaks,
+    size: KUCOIN_WATCHLIST_SIZE,
+    evictMargin: KUCOIN_WATCHLIST_EVICT_MARGIN,
+    addStreakNeeded: KUCOIN_WATCHLIST_ADD_STREAK,
+    evictStreakNeeded: KUCOIN_WATCHLIST_EVICT_STREAK,
+    forced: forced,
+    maxSize: KUCOIN_WATCHLIST_HARD_CAP
+  });
+
+  transitions.toEvict.forEach(unsubscribeKucoinWatchlistSymbol);
+  transitions.toAdd.forEach(function (symbol) {
+    const coin = coinMap.get(symbol);
+    if (coin) subscribeKucoinWatchlistSymbol(symbol, coin.raw);
+  });
+  kucoinTier2Health.watchlistSize = kucoinWatchlist.size;
+}
+setInterval(evaluateKucoinWatchlist, KUCOIN_WATCHLIST_EVAL_INTERVAL_MS);
+setTimeout(evaluateKucoinWatchlist, 5000);
+
 // Единственные два места во всём детекторном движке, которым честно нужно прочитать буфер ПО ЛЮБОЙ
 // поддерживаемой бирже, а не только MEXC (см. sweepCyclicalOutcomes/flushTimeWindowIfDue ниже) —
 // не переписываем сами tier2Trades/tier2Depth (MEXC-only, трогать лишний раз рискованно), просто
-// выбираем нужную Map по префиксу символа ("OKX:"/"BINANCE:"/"BITGET:"/"BINGX:" -> своя биржа,
-// иначе MEXC).
+// выбираем нужную Map по префиксу символа ("OKX:"/"BINANCE:"/"BITGET:"/"BINGX:"/"KUCOIN:" -> своя
+// биржа, иначе MEXC).
 function tier2TradesForSymbol(symbol) {
   if (symbol.indexOf('OKX:') === 0) return okxTier2Trades.get(symbol);
   if (symbol.indexOf('BITGET:') === 0) return bitgetTier2Trades.get(symbol);
   if (symbol.indexOf('BINGX:') === 0) return bingxTier2Trades.get(symbol);
+  if (symbol.indexOf('KUCOIN:') === 0) return kucoinTier2Trades.get(symbol);
   return symbol.indexOf('BINANCE:') === 0 ? binanceTier2Trades.get(symbol) : tier2Trades.get(symbol);
 }
 function tier2DepthForSymbol(symbol) {
   if (symbol.indexOf('OKX:') === 0) return okxTier2Depth.get(symbol);
   if (symbol.indexOf('BITGET:') === 0) return bitgetTier2Depth.get(symbol);
   if (symbol.indexOf('BINGX:') === 0) return bingxTier2Depth.get(symbol);
+  if (symbol.indexOf('KUCOIN:') === 0) return kucoinTier2Depth.get(symbol);
   return symbol.indexOf('BINANCE:') === 0 ? binanceTier2Depth.get(symbol) : tier2Depth.get(symbol);
 }
 
@@ -6156,6 +6428,270 @@ function detectPossibleMarketMakerBotBingx(symbol) {
   if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
   return ev;
 }
+
+// KuCoin-версии всех детекторов выше — тот же контракт detect(symbol) -> event|null, только читают
+// kucoinTier2Trades/kucoinTier2Depth и свои kucoin*State карты (см. блок "TIER 2 — KUCOIN" выше). Пороги/opts —
+// намеренно один в один с MEXC/Binance/OKX/Bitget/BingX-версией того же алгоритма.
+// ------------------------------------------------------------------------------------------
+function detectRepeatedTradeSizesKucoin(symbol) {
+  const ev = MexcCore.detectRepeatedTradeSizes(kucoinTier2Trades.get(symbol), {
+    tolerance: PATTERN_CLUSTER_TOLERANCE, minRepeats: DETECTOR_DEFS.repeatSize.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectRepeatedIntervalsKucoin(symbol) {
+  const ev = MexcCore.detectRepeatedIntervals(kucoinTier2Trades.get(symbol), {
+    tolerance: PATTERN_CLUSTER_TOLERANCE, minRepeats: DETECTOR_DEFS.repeatInterval.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectBurstNoFollowThroughKucoin(symbol) {
+  const ev = MexcCore.detectBurstNoFollowThrough(kucoinTier2Trades.get(symbol), {
+    bucketMs: PATTERN_BURST_BUCKET_MS, minRepeats: DETECTOR_DEFS.burstNoFollow.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectCyclicityKucoin(symbol) {
+  const ev = MexcCore.detectCyclicity(kucoinTier2Trades.get(symbol), {
+    bucketMs: 2000, minRepeats: DETECTOR_DEFS.cycle.minRepeats, tolerance: PATTERN_CLUSTER_TOLERANCE, lookback: 2000
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectRepeatingSequenceKucoin(symbol) {
+  const ev = MexcCore.detectRepeatingSequence(kucoinTier2Trades.get(symbol), {
+    minLen: 3, maxLen: 6, minRepeats: DETECTOR_DEFS.sequence.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectLadderKucoin(symbol) {
+  const ev = MexcCore.detectLadder(kucoinTier2Trades.get(symbol), {
+    tolerance: 0.3, minRepeats: DETECTOR_DEFS.ladder.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectErshikKucoin(symbol) {
+  const ev = MexcCore.detectErshik(kucoinTier2Trades.get(symbol), {
+    tolerance: 0.2, minRepeats: DETECTOR_DEFS.ershik.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectImbalanceKucoin(symbol) {
+  const ev = MexcCore.detectImbalance(kucoinTier2Depth.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.imbalance.minRepeats, minZ: 2.5, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectAbsorptionKucoin(symbol) {
+  const ev = MexcCore.detectAbsorption(kucoinTier2Depth.get(symbol), kucoinTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.absorption.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectFakeLiquidityKucoin(symbol) {
+  const ev = MexcCore.detectFakeLiquidity(kucoinTier2Depth.get(symbol), kucoinTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.fakeLiquidity.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectExhaustionKucoin(symbol) {
+  const ev = MexcCore.detectExhaustion(kucoinTier2Trades.get(symbol), {
+    bucketMs: PATTERN_BURST_BUCKET_MS, minRepeats: DETECTOR_DEFS.exhaustion.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectZoneReturnKucoin(symbol) {
+  const ev = MexcCore.detectZoneReturn(kucoinTier2Trades.get(symbol), {
+    tolerance: 0.005, minRepeats: DETECTOR_DEFS.zoneReturn.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectStandingWallKucoin(symbol) {
+  const ev = MexcCore.detectStandingWall(kucoinTier2Depth.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.standingWall.minRepeats, lookback: 20, minWallRatio: 5, maxDistancePct: 1.5
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDensityBreakKucoin(symbol) {
+  const ev = MexcCore.detectDensityBreak(kucoinTier2Depth.get(symbol), kucoinTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.densityBreak.minRepeats, lookback: 300, minWallRatio: 5, minShrinkRatio: 0.5
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDensityAbsorptionKucoin(symbol) {
+  const ev = MexcCore.detectDensityAbsorption(kucoinTier2Depth.get(symbol), kucoinTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.densityAbsorption.minRepeats, lookback: 300, minWallRatio: 5
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectLiquiditySweepKucoin(symbol) {
+  const ev = MexcCore.detectLiquiditySweep(kucoinTier2Trades.get(symbol), kucoinTier2Depth.get(symbol), { lookback: 200 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectImpulsePullbackContinuationKucoin(symbol) {
+  const ev = MexcCore.detectImpulsePullbackContinuation(kucoinTier2Trades.get(symbol), { lookback: 300 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPriceVolumeInefficiencyKucoin(symbol) {
+  const ev = MexcCore.detectPriceVolumeInefficiency(kucoinTier2Trades.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDensityAbsorptionBreakoutKucoin(symbol) {
+  const state = kucoinDensityAbsorptionBreakoutState.get(symbol) || {};
+  const result = MexcCore.detectDensityAbsorptionBreakout(kucoinTier2Depth.get(symbol), kucoinTier2Trades.get(symbol), {
+    minWallRatio: 5, maxDistancePct: 1.0, minTestCount: DETECTOR_DEFS.densityAbsorptionBreakout.minRepeats
+  }, state);
+  kucoinDensityAbsorptionBreakoutState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPumpReversalKucoin(symbol) {
+  const ev = MexcCore.detectPumpReversal(kucoinTier2Trades.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDumpReversalKucoin(symbol) {
+  const ev = MexcCore.detectDumpReversal(kucoinTier2Trades.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectCompressionBreakKucoin(symbol) {
+  const ev = MexcCore.detectCompressionBreak(kucoinTier2Trades.get(symbol), kucoinTier2Depth.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectFailedBreakoutKucoin(symbol) {
+  const state = kucoinFailedBreakoutState.get(symbol) || {};
+  const result = MexcCore.detectFailedBreakout(kucoinTier2Trades.get(symbol), { lookback: 300 }, state);
+  kucoinFailedBreakoutState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectVolumeAnomalyKucoin(symbol) {
+  const ev = MexcCore.detectVolumeAnomaly(kucoinTier2Trades.get(symbol), kucoinTier2Depth.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectLiquidityWithdrawalKucoin(symbol) {
+  const ev = MexcCore.detectLiquidityWithdrawal(kucoinTier2Depth.get(symbol), kucoinTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.liquidityWithdrawal.minRepeats, lookback: 200
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPossibleHiddenAbsorptionKucoin(symbol) {
+  const state = kucoinPossibleHiddenAbsorptionState.get(symbol) || {};
+  const result = MexcCore.detectPossibleHiddenAbsorption(kucoinTier2Depth.get(symbol), kucoinTier2Trades.get(symbol), {}, state);
+  kucoinPossibleHiddenAbsorptionState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+// base монеты из "KUCOIN:BTC/USDT" -> "BTC" — сравниваем цену Kucoin с MEXC (всегда доступна) и
+// любой ДРУГОЙ подключённой биржей (не с самим Kucoin).
+function crossExchangeCandidatesForKucoin(symbol) {
+  const base = symbol.split(':').pop().split('/')[0];
+  const candidates = [];
+  const mexcCoin = coinMap.get(base + '/USDT');
+  if (mexcCoin && mexcCoin.price > 0) candidates.push({ exchange: 'MEXC', price: mexcCoin.price });
+  Object.keys(EXCHANGE_CONNECTORS).forEach(function (id) {
+    if (id === 'kucoin') return;
+    if (!exchangeConnections[id] || !exchangeConnections[id].connected) return;
+    EXCHANGE_CONNECTORS[id].exchangeTags.filter(function (tag) { return !/FUT$/.test(tag); }).forEach(function (tag) {
+      const coin = coinMap.get(tag + ':' + base + '/USDT');
+      if (coin && coin.price > 0) candidates.push({ exchange: tag, price: coin.price });
+    });
+  });
+  return candidates;
+}
+function detectCrossExchangeDivergenceKucoin(symbol) {
+  const coin = coinMap.get(symbol);
+  if (!coin || !(coin.price > 0)) return null;
+  const candidates = crossExchangeCandidatesForKucoin(symbol);
+  if (!candidates.length) return null;
+  const state = kucoinCrossExchangeDivergenceState.get(symbol) || {};
+  const result = MexcCore.detectCrossExchangeDivergence(coin.price, candidates, { now: Date.now() }, state);
+  kucoinCrossExchangeDivergenceState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+// #12/#16 честно переиспользуют ОБЩИЕ cyclicalLibrary/timeBucketStats (обычные объекты, не Map,
+// ключ — уже уникальный "KUCOIN:BTC/USDT" строкой, коллизий с MEXC-символами нет) — и уже
+// обобщённые выше flushTimeWindowIfDue/symbolOverallMedianVolume (см. tier2TradesForSymbol).
+function detectCyclicalPatternKucoin(symbol) {
+  const trades = kucoinTier2Trades.get(symbol);
+  const library = cyclicalLibrary[symbol] || [];
+  const result = MexcCore.detectCyclicalPattern(trades, library, {});
+  if (result.library !== library) {
+    const added = result.library[result.library.length - 1];
+    if (added && added.priceAtEpisode == null && trades && trades.length) added.priceAtEpisode = trades[trades.length - 1].price;
+    cyclicalLibrary[symbol] = result.library;
+    saveCyclicalLibrary();
+  }
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectTimeBasedImpulseKucoin(symbol) {
+  const coin = coinMap.get(symbol);
+  if (!coin || !(coin.price > 0)) return null;
+  const now = Date.now();
+  flushTimeWindowIfDue(symbol, now, coin.price);
+  const bucketKey = MexcCore.timeBucketKeyFromDate(new Date(now));
+  const stats = (timeBucketStats[symbol] || {})[bucketKey];
+  const ev = MexcCore.detectTimeBasedImpulse(stats, symbolOverallMedianVolume(symbol), coin.price, {});
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectTwapKucoin(symbol) {
+  const state = kucoinTwapState.get(symbol) || {};
+  const result = MexcCore.detectTwap(kucoinTier2Trades.get(symbol), {}, state);
+  kucoinTwapState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPossibleMarketMakerBotKucoin(symbol) {
+  const ev = MexcCore.detectPossibleMarketMakerBot(kucoinTier2Trades.get(symbol), kucoinTier2Depth.get(symbol), {});
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+const KUCOIN_DETECTOR_FNS = {
+  repeatSize: detectRepeatedTradeSizesKucoin, repeatInterval: detectRepeatedIntervalsKucoin,
+  burstNoFollow: detectBurstNoFollowThroughKucoin, cycle: detectCyclicityKucoin,
+  sequence: detectRepeatingSequenceKucoin, ladder: detectLadderKucoin, ershik: detectErshikKucoin,
+  imbalance: detectImbalanceKucoin, absorption: detectAbsorptionKucoin, fakeLiquidity: detectFakeLiquidityKucoin,
+  exhaustion: detectExhaustionKucoin, zoneReturn: detectZoneReturnKucoin, standingWall: detectStandingWallKucoin,
+  densityBreak: detectDensityBreakKucoin, densityAbsorption: detectDensityAbsorptionKucoin,
+  liquiditySweep: detectLiquiditySweepKucoin, impulsePullbackContinuation: detectImpulsePullbackContinuationKucoin,
+  priceVolumeInefficiency: detectPriceVolumeInefficiencyKucoin, densityAbsorptionBreakout: detectDensityAbsorptionBreakoutKucoin,
+  pumpReversal: detectPumpReversalKucoin, dumpReversal: detectDumpReversalKucoin,
+  compressionBreak: detectCompressionBreakKucoin, failedBreakout: detectFailedBreakoutKucoin,
+  volumeAnomaly: detectVolumeAnomalyKucoin, liquidityWithdrawal: detectLiquidityWithdrawalKucoin,
+  possibleHiddenAbsorption: detectPossibleHiddenAbsorptionKucoin, crossExchangeDivergence: detectCrossExchangeDivergenceKucoin,
+  cyclicalPattern: detectCyclicalPatternKucoin, timeBasedImpulse: detectTimeBasedImpulseKucoin,
+  twap: detectTwapKucoin, possibleMarketMakerBot: detectPossibleMarketMakerBotKucoin
+};
 const BINGX_DETECTOR_FNS = {
   repeatSize: detectRepeatedTradeSizesBingx, repeatInterval: detectRepeatedIntervalsBingx,
   burstNoFollow: detectBurstNoFollowThroughBingx, cycle: detectCyclicityBingx,
@@ -6647,6 +7183,9 @@ function runPatternDetectors() {
   bingxWatchlist.forEach(function (entry, symbol) {
     runDetectorsForSymbolInto(symbol, BINGX_DETECTOR_FNS, events, cycleNow);
   });
+  kucoinWatchlist.forEach(function (entry, symbol) {
+    runDetectorsForSymbolInto(symbol, KUCOIN_DETECTOR_FNS, events, cycleNow);
+  });
 
   // Мульти-детекторное подтверждение (ТЗ #8, фактор "confirmation") — если на одной монете в ОДНОМ
   // прогоне сработало ≥2 разных детектора, это взаимное подтверждение: пересчитываем им score с
@@ -7003,6 +7542,7 @@ function graphsExchangeIdFor(coin) {
   if (coin.exchange === 'OKX') return 'okx';
   if (coin.exchange === 'BITGET') return 'bitget';
   if (coin.exchange === 'BINGX') return 'bingx';
+  if (coin.exchange === 'KUCOIN') return 'kucoin';
   return null; // биржа без своего REST-клиента здесь (пока нет ни одной такой в TIER2_EXTERNAL_EXCHANGES)
 }
 
@@ -11368,6 +11908,55 @@ const EXCHANGE_CONNECTORS = {
         upsertExternalCoin(rawSymbol, num(row.lastPrice), num(row.priceChangePercent), num(row.quoteVolume), num(row.highPrice), num(row.lowPrice), exchangeTag);
       });
     }
+  },
+  kucoin: {
+    label: 'KuCoin',
+    baseUrl: 'https://api.kucoin.com',
+    verifyPath: '/api/v1/accounts',
+    needsPassphrase: true,
+    // Схема подписи структурно как у OKX/Bitget (timestamp+METHOD+endpoint(+query)+body -> HMAC-
+    // SHA256 -> base64), но у KuCoin (API-ключ v2/v3, стандарт для всех новых ключей) САМ ПАРОЛЬ
+    // (passphrase) тоже обязан идти зашифрованным тем же HMAC-SHA256+base64 через secret — plain-
+    // text passphrase новые ключи просто не принимают. Плюс отдельный заголовок версии ключа.
+    sign: async function (conn, path, params, method) {
+      const qs = params && Object.keys(params).length
+        ? '?' + Object.keys(params).map(function (k) { return k + '=' + encodeURIComponent(params[k]); }).join('&')
+        : '';
+      const endpoint = path + qs;
+      const timestamp = String(Date.now());
+      const prehash = timestamp + (method || 'GET').toUpperCase() + endpoint;
+      const signature = await hmacSha256Base64(conn.apiSecret, prehash);
+      const encryptedPassphrase = await hmacSha256Base64(conn.apiSecret, conn.passphrase);
+      return {
+        url: this.baseUrl + endpoint,
+        headers: {
+          'KC-API-KEY': conn.apiKey,
+          'KC-API-SIGN': signature,
+          'KC-API-TIMESTAMP': timestamp,
+          'KC-API-PASSPHRASE': encryptedPassphrase,
+          'KC-API-KEY-VERSION': '3'
+        }
+      };
+    },
+    // code "200000" (строка) значит успех — любой другой код ошибка с текстом в msg.
+    checkError: function (data) {
+      if (data && typeof data === 'object' && data.code !== undefined && String(data.code) !== '200000') {
+        throw new Error(data.msg || ('Ошибка KuCoin (код ' + data.code + ')'));
+      }
+    },
+    // changeRate у KuCoin — доля (0.0128 значит +1.28%), умножаем на 100, как и у Bitget. Символ —
+    // через дефис ("BTC-USDT"), как у OKX/BingX.
+    exchangeTags: ['KUCOIN'],
+    feeds: [{ exchangeTag: 'KUCOIN', url: 'https://api.kucoin.com/api/v1/market/allTickers' }],
+    parseTickers: function (body, exchangeTag) {
+      const parsed = JSON.parse(body);
+      const rows = parsed && parsed.data && parsed.data.ticker;
+      if (!Array.isArray(rows)) throw new Error('неожиданный формат ответа KuCoin');
+      rows.forEach(function (row) {
+        const rawSymbol = String(row.symbol || '').replace('-', '');
+        upsertExternalCoin(rawSymbol, num(row.last), num(row.changeRate) * 100, num(row.volValue), num(row.high), num(row.low), exchangeTag);
+      });
+    }
   }
 };
 
@@ -11811,8 +12400,8 @@ function setExchangeStatus(id, state, msg) {
 // "BINANCEFUT" — псевдо-биржа для фьючерсов Binance (см. exchangeTags/feeds у EXCHANGE_CONNECTORS.binance
 // выше) — своя буква "F" и своё полное имя для подсказки, но цвет кнопки (см. styles.css) намеренно
 // тот же жёлтый, что и у обычного Binance — это та же биржа, просто другой рынок.
-const EXCHANGE_SWITCH_LABELS = { MEXC: 'M', BINANCE: 'B', BINANCEFUT: 'F', OKX: 'O', BITGET: 'G', BINGX: 'X' };
-const EXCHANGE_SWITCH_TITLES = { MEXC: 'MEXC', BINANCE: 'Binance Spot', BINANCEFUT: 'Binance Futures', OKX: 'OKX', BITGET: 'Bitget', BINGX: 'BingX' };
+const EXCHANGE_SWITCH_LABELS = { MEXC: 'M', BINANCE: 'B', BINANCEFUT: 'F', OKX: 'O', BITGET: 'G', BINGX: 'X', KUCOIN: 'K' };
+const EXCHANGE_SWITCH_TITLES = { MEXC: 'MEXC', BINANCE: 'Binance Spot', BINANCEFUT: 'Binance Futures', OKX: 'OKX', BITGET: 'Bitget', BINGX: 'BingX', KUCOIN: 'KuCoin' };
 const EXCHANGE_MARKET_LABEL = { BINANCE: 'Спот', BINANCEFUT: 'Фьючерсы' };
 
 // Какая группа переключателя сейчас раскрыта (см. .exch-switch-submenu в styles.css) — только одна
@@ -13354,6 +13943,13 @@ window.__bingxTier2DepthFor = function (symbol) { return bingxTier2Depth.get(sym
 window.__bingxHandleMessage = handleBingxWsMessage; // async — отладка разбора сообщений BingX WS (gzip) без реального сокета
 window.__bingxTier2Health = bingxTier2Health;
 window.__bingxInstIdToSymbol = bingxInstIdToSymbol;
+window.__kucoinWatchlist = function () { return Array.from(kucoinWatchlist.keys()); };
+window.__kucoinTier2TradesFor = function (symbol) { return kucoinTier2Trades.get(symbol) || []; };
+window.__kucoinTier2DepthFor = function (symbol) { return kucoinTier2Depth.get(symbol) || []; };
+window.__kucoinHandleMessage = handleKucoinWsMessage; // отладка разбора сообщений KuCoin WS (welcome/ping/trade/depth) без реального сокета
+window.__kucoinTier2Health = kucoinTier2Health;
+window.__kucoinInstIdToSymbol = kucoinInstIdToSymbol;
+window.__kucoinFetchBullet = kucoinFetchBullet; // отладка REST bullet-токена (без WS)
 window.__patternHistory = function () { return patternHistory; };
 window.__sweepPatternOutcomesNow = sweepPatternOutcomes;
 // Только для ручной проверки UI страницы "Паттерны" без ожидания реальных срабатываний детекторов

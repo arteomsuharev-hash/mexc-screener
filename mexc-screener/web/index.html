@@ -363,6 +363,7 @@
           <option value="OKX">OKX</option>
           <option value="BITGET">Bitget</option>
           <option value="BINGX">BingX</option>
+          <option value="KUCOIN">KuCoin</option>
         </select>
         <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-secondary);cursor:pointer;">
           <input type="checkbox" id="graphsFavoritesOnly"><span data-i18n>Только избранное</span>
@@ -646,6 +647,10 @@
             <div class="exch-tab-icon exch-tab-icon-bingx">X</div>
             <div class="exch-tab-mid"><div class="exch-tab-name">BingX</div><div class="exch-tab-dot" id="acctTabDotBingx">Не подключено</div></div>
           </div>
+          <div class="exch-tab" data-exch-tab="kucoin">
+            <div class="exch-tab-icon exch-tab-icon-kucoin">K</div>
+            <div class="exch-tab-mid"><div class="exch-tab-name">KuCoin</div><div class="exch-tab-dot" id="acctTabDotKucoin">Не подключено</div></div>
+          </div>
         </div>
 
         <div class="settings-group exch-tab-panel active" id="acctPanelMexc">
@@ -853,6 +858,51 @@
             <div class="setting-control">
               <button class="settings-btn" id="bingxConnectBtn" data-i18n>Подключить</button>
               <button class="settings-btn secondary" id="bingxDisconnectBtn" data-i18n>Отключить</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-group exch-tab-panel" id="acctPanelKucoin">
+          <div class="settings-group-title">KuCoin</div>
+          <div class="acct-security-note" data-i18n-block data-i18n-key="acct-other-exchanges-note">
+            <i class="ri-information-line"></i> Подключите биржу — её монеты появятся в таблице скринера
+            (переключатель «Все/M/B/O» сверху). Ключи хранятся только в этом браузере/приложении, как и у MEXC.
+          </div>
+          <div class="setting-row">
+            <span class="setting-label" data-i18n>Статус</span>
+            <div class="setting-control">
+              <span class="status-badge off" id="kucoinStatusBadge" style="position:static;"><span class="status-dot"></span><span id="kucoinStatusText" data-i18n>Не подключено</span></span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">API Key</span>
+            <div class="setting-control">
+              <input type="text" id="kucoinApiKey" class="acct-wide-input" placeholder="..." autocomplete="off" spellcheck="false">
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">Secret Key</span>
+            <div class="setting-control">
+              <div class="acct-input-wrap">
+                <input type="password" id="kucoinApiSecret" class="acct-wide-input" placeholder="••••••••••••••••" autocomplete="off" spellcheck="false">
+                <i class="ri-eye-line acct-toggle-eye" id="kucoinToggleEye"></i>
+              </div>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">Passphrase</span>
+            <div class="setting-control">
+              <div class="acct-input-wrap">
+                <input type="password" id="kucoinApiPassphrase" class="acct-wide-input" placeholder="••••••••••••••••" autocomplete="off" spellcheck="false">
+                <i class="ri-eye-line acct-toggle-eye" id="kucoinPassphraseToggleEye"></i>
+              </div>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label" data-i18n>Управление</span>
+            <div class="setting-control">
+              <button class="settings-btn" id="kucoinConnectBtn" data-i18n>Подключить</button>
+              <button class="settings-btn secondary" id="kucoinDisconnectBtn" data-i18n>Отключить</button>
             </div>
           </div>
         </div>
