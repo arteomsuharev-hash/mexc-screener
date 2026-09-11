@@ -1663,6 +1663,15 @@ function applySortOnly() {
     if (activeStrategy && STRATEGY_DEFS[activeStrategy] && sortField === 'signal') { va = a.__score; vb = b.__score; }
     if (typeof va === 'string') va = va.toLowerCase();
     if (typeof vb === 'string') vb = vb.toLowerCase();
+    // tpm/dvol5m/oi5m (и в будущем любое другое sparse-поле) есть только у watchlist-монет — у
+    // остальных undefined. Обычное va < vb / va > vb с undefined всегда даёт false с обеих сторон
+    // (сравнение с undefined в JS — всегда false), значит компаратор считал бы "нет данных" равным
+    // чему угодно и Array.sort молча раскидывал бы такие строки как попало вместо честного "в конец
+    // списка". Для остальных полей (symbol/price/change24/vol24/signal) null/undefined физически не
+    // бывает, поэтому проверка ниже для них безвредна.
+    if (va == null && vb == null) return 0;
+    if (va == null) return 1;
+    if (vb == null) return -1;
     if (va < vb) return sortAsc ? -1 : 1;
     if (va > vb) return sortAsc ? 1 : -1;
     return 0;
@@ -1991,13 +2000,13 @@ function renderTable() {
   document.getElementById('navFavBadge').textContent = allCoins.filter(function (c) { return c.fav; }).length;
 
   if (!allCoins.length) {
-    tbody.innerHTML = '<tr><td colspan="9" class="empty-state"><i class="ri-database-2-line"></i>Нет данных MEXC. Ожидание WebSocket...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12" class="empty-state"><i class="ri-database-2-line"></i>Нет данных MEXC. Ожидание WebSocket...</td></tr>';
     grid.innerHTML = '';
     renderTablePagination(0, 0);
     return;
   }
   if (!visible.length) {
-    tbody.innerHTML = '<tr><td colspan="9" class="empty-state"><i class="ri-filter-off-line"></i>Нет пар по текущим фильтрам. Сбросьте фильтры или подождите накопления 5с-метрик.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12" class="empty-state"><i class="ri-filter-off-line"></i>Нет пар по текущим фильтрам. Сбросьте фильтры или подождите накопления 5с-метрик.</td></tr>';
     grid.innerHTML = '';
     renderTablePagination(0, 0);
     return;
@@ -2032,6 +2041,9 @@ function renderTable() {
       '<td class="cell-price">' + fmtPrice(c.price) + '</td>' +
       '<td class="' + (chg >= 0 ? 'price-up' : 'price-down') + '">' + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%</td>' +
       '<td>' + fmtNum(c.vol24) + '</td>' +
+      '<td>' + (c.tpm != null ? c.tpm.toFixed(1) : '<span class="algo-badges-empty">—</span>') + '</td>' +
+      '<td' + (c.dvol5m != null ? ' class="' + (c.dvol5m >= 0 ? 'price-up' : 'price-down') + '"' : '') + '>' + (c.dvol5m != null ? (c.dvol5m >= 0 ? '+' : '') + c.dvol5m.toFixed(1) + '%' : '<span class="algo-badges-empty">—</span>') + '</td>' +
+      '<td' + (c.oi5m != null ? ' class="' + (c.oi5m >= 0 ? 'price-up' : 'price-down') + '"' : '') + '>' + (c.oi5m != null ? (c.oi5m >= 0 ? '+' : '') + c.oi5m.toFixed(1) + '%' : '<span class="algo-badges-empty">—</span>') + '</td>' +
       '<td>' + algoBadgesCellHtml(c.symbol) + '</td>' +
       '<td>' + signalCell + '</td>' +
       '<td>' + ratingCellHtml(c) + '</td></tr>';
