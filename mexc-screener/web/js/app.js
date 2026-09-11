@@ -721,6 +721,75 @@ function computeStrategyStats() {
   };
 }
 
+// Сканер спайков по ВСЕМУ рынку (2026-09, по мотивам разбора GodsEye — у него "Tick mode": лента
+// монет, которые только что дёрнулись, по всему рынку каждой биржи, не только watchlist ~20-26
+// монет, которым ограничен движок 31 детектора "Паттернов" — реальный стакан/сделки физически
+// нельзя подписать на тысячи пар разом). ВАЖНО: это НЕ то же самое, что computeStrategyStats() выше
+// — та считает перцентили по allCoins ЦЕЛИКОМ (все подключённые биржи разом), и если подключена
+// внешняя биржа, её монеты вне watchlist (vol5s=0 и т.д., честно) подмешиваются в перцентили и
+// портят пороги. Здесь — строго по одной бирже за раз.
+// Живой тест этой же сессии прошёл через 2 неудачные попытки, прежде чем нашёлся рабочий порог —
+// честно оставляю оба вывода в комментарии, раз к ним есть смысл возвращаться:
+// 1) Одиночный перцентильный признак ("vol5s в верхних 15% рынка ПРЯМО СЕЙЧАС") — НЕ редкое
+//    событие, а математически ВСЕГДА ~15% рынка разом (это и есть определение 85-го перцентиля).
+//    На ~1600 парах MEXC, среди которых много шумных микрокапов, это давало сотни "спайков" за
+//    30 секунд.
+// 2) Переиспользование STRATEGY_DEFS.ineff/density.match() "как есть" (с MEXC-only статистикой)
+//    тоже не помогло — у них тот же 85-й перцентиль внутри, они спроектированы как ФИЛЬТР "покажи
+//    сейчас похожие на интересные монеты" (Tier-1, для просмотра в таблице), а не как признак
+//    редкого события для лога — на живом рынке матчило 600+ РАЗНЫХ монет за 30с (не один и тот же
+//    набор — конкретные монеты постоянно "мигают" через порог из-за естественного джиттера тика на
+//    тонких парах, поэтому даже дедуп по символу не спасает).
+// Рабочее решение — заметно более строгий, ЭМПИРИЧЕСКИ проверенный вживую порог (98-й перцентиль,
+// не 85-й) плюс абсолютный пол в 0.3% (спайк должен быть спайком не только ОТНОСИТЕЛЬНО остального
+// рынка, но и в абсолютном выражении) — вместе даёт единицы-десятки совпадений за проход, а не сотни.
+function computeMexcSpikeStats() {
+  const vol24Arr = [], vol30sArr = [], vol5sArr = [];
+  for (let i = 0; i < allCoins.length; i++) {
+    const c = allCoins[i];
+    if (c.exchange && c.exchange !== 'MEXC') continue; // только MEXC — см. комментарий у функции
+    if (c.vol24 > 0) vol24Arr.push(c.vol24);
+    if (c.vol24 < STRATEGY_MIN_LIQUID_VOL24) continue;
+    vol30sArr.push(c.vol30s);
+    if (c.vol5s > 0) vol5sArr.push(c.vol5s);
+  }
+  return {
+    vol24Liquid: percentile(vol24Arr, 0.35) || 100000,
+    vol30sCalm: Math.max(percentile(vol30sArr, 0.55), 0.03),
+    vol5sSpike: Math.max(percentile(vol5sArr, 0.98), 0.3)
+  };
+}
+function mexcSpikeMatches(c, stats) {
+  const wasCalm = c.preMove == null || c.preMove <= stats.vol30sCalm * 1.4;
+  return c.vol24 >= stats.vol24Liquid && c.vol5s >= stats.vol5sSpike && wasCalm;
+}
+
+// Для 6 внешних бирж короткой (секунды/минуты) истории нет вообще — upsertExternalCoin честно
+// хардкодит vol5s=0 вне watchlist (см. её же комментарий), per-symbol ring-buffer на потенциально
+// тысячи пар × 6 бирж — отдельная, более тяжёлая задача. Но change24/vol24 реальны и обновляются
+// каждые EXTERNAL_TICKER_POLL_MS для ЛЮБОЙ монеты ЛЮБОЙ подключённой биржи без нового состояния —
+// поэтому здесь честно более грубый признак ("аномалия за 24ч", не "спайк за 5с"), помеченный в UI
+// другим бейджем, чтобы не выдавать одно за другое. Пересчитывается в pollExternalTickers на каждом
+// цикле опроса для конкретной exchangeTag.
+const externalSpikeStatsByExchange = new Map(); // exchangeTag -> {change24P90}
+function computeExternalSpikeStats(exchangeTag) {
+  const arr = [];
+  for (let i = 0; i < allCoins.length; i++) {
+    const c = allCoins[i];
+    if (c.exchange !== exchangeTag) continue;
+    if (c.vol24 < STRATEGY_MIN_LIQUID_VOL24) continue;
+    if (Number.isFinite(c.change24)) arr.push(Math.abs(c.change24));
+  }
+  const stats = { change24P90: Math.max(percentile(arr, 0.9), 3) }; // минимум 3% — не считаем спайком микродвижение на тонком рынке
+  externalSpikeStatsByExchange.set(exchangeTag, stats);
+  return stats;
+}
+function externalSpikeMatches(c) {
+  const stats = externalSpikeStatsByExchange.get(c.exchange);
+  if (!stats || c.vol24 < STRATEGY_MIN_LIQUID_VOL24) return false;
+  return Number.isFinite(c.change24) && Math.abs(c.change24) >= stats.change24P90;
+}
+
 let strategyStats = null;
 
 // Формулы ниже опираются на общие, известные по литературе о микроструктуре рынка признаки
@@ -1307,6 +1376,24 @@ function metricsFromSnaps(symbol, price, quoteVol) {
   const range5m = rangePctFromSnaps(symbol, SNAP_WINDOW_MS);
   const natr5 = natrPctFromSnaps(symbol, price, 60000, 5);
   return { vol5: vol5, vol30: vol30, vol60: vol60, vol5s: vol5s, vol30s: vol30s, vol60s: vol60s, range5m: range5m, natr5: natr5, preMove: preMove, rateCV: rateCV, zoneLow: zoneLow, zoneHigh: zoneHigh, reverting: reverting };
+}
+
+// Знак спайка (2026-09, сканер спайков) — metricsFromSnaps выше уже находит ту же 5с-назад точку
+// для vol5s, но берёт от неё Math.abs(), знак теряется. Не трогаем сам metricsFromSnaps (используется
+// очень широко) — отдельный маленький хелпер с тем же поиском по snapshots.
+function spikeDirectionFromSnaps(symbol, price) {
+  const arr = snapshots.get(symbol) || [];
+  const now = Date.now();
+  const target = now - 5000;
+  let s5 = null;
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (arr[i].t <= target) { s5 = arr[i]; break; }
+  }
+  if (!s5) s5 = arr[0] || null;
+  if (!s5 || !s5.p) return 'NEUTRAL';
+  if (price > s5.p) return 'LONG';
+  if (price < s5.p) return 'SHORT';
+  return 'NEUTRAL';
 }
 
 // Тот же набор метрик, что и metricsFromSnaps выше, но честно посчитанный по РЕАЛЬНЫМ СДЕЛКАМ
@@ -7901,6 +7988,202 @@ function renderAlertHistoryTable() {
   if (loadMoreBtn) loadMoreBtn.addEventListener('click', function () { alertHistoryLimit += 30; renderAlertHistoryTable(); });
 }
 
+// ============================================================================
+// "Спайки" (2026-09, по мотивам разбора GodsEye — "Tick mode": лента монет, которые только что
+// дёрнулись, по ВСЕМУ рынку каждой биржи, не только watchlist) — отдельный, более простой механизм,
+// чем 31-детекторный движок "Паттернов" (тот жёстко привязан к watchlist Map'ам, см.
+// runPatternDetectors ниже — coinMap/allCoins никогда не трогает). Дедуп/сессии — тот же приём, что
+// у patternActiveSessions/registerPatternEvent выше (MexcCore.shouldOpenNewPatternSession), не
+// изобретаем заново. Персистентный лог короче и грубее, чем patternHistory (сутки, не 30 дней —
+// лента "что только что произошло", не база для винрейта).
+// ============================================================================
+const SPIKE_SESSION_GRACE_MS = 30000;
+const SPIKE_HISTORY_KEY = 'mexc_spike_history';
+const spikeActiveSessions = new Map(); // symbol -> lastSeenAt (ms)
+let spikeHistorySeq = 0;
+let spikeHistory = (function loadSpikeHistory() {
+  try {
+    const raw = localStorage.getItem(SPIKE_HISTORY_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(arr)) return [];
+    spikeHistorySeq = arr.reduce(function (m, e) { return Math.max(m, e.id || 0); }, 0);
+    return arr;
+  } catch (e) { return []; }
+})();
+function saveSpikeHistory() {
+  try { persistSet(SPIKE_HISTORY_KEY, JSON.stringify(spikeHistory)); } catch (e) { /* переживём без сохранения между сессиями */ }
+}
+function registerSpikeEvent(symbol, kind, direction, magnitude, vol24, now) {
+  const lastSeenAt = spikeActiveSessions.get(symbol);
+  const isNewSession = MexcCore.shouldOpenNewPatternSession(lastSeenAt, now, SPIKE_SESSION_GRACE_MS);
+  spikeActiveSessions.set(symbol, now);
+  if (!isNewSession) return; // тот же спайк ещё держится — не плодим новую строку каждые 5с
+  spikeHistory.push({ id: ++spikeHistorySeq, symbol: symbol, detectedAt: now, kind: kind, direction: direction, magnitude: magnitude, vol24: vol24 });
+  spikeHistory = MexcCore.prunePatternHistory(spikeHistory, { maxPerSymbol: 20, maxTotal: 2000, maxAgeMs: 24 * 3600 * 1000, now: now });
+  saveSpikeHistory();
+}
+// Раз в 5с (отдельно от PATTERN_DETECT_INTERVAL_MS — не тащим это в уже нагруженный цикл 31
+// детектора) — проход по ВСЕМУ рынку (allCoins), не только watchlist.
+function scanForSpikes() {
+  const now = Date.now();
+  const mexcStats = computeMexcSpikeStats();
+  for (let i = 0; i < allCoins.length; i++) {
+    const c = allCoins[i];
+    if (!c.exchange || c.exchange === 'MEXC') {
+      if (mexcSpikeMatches(c, mexcStats)) {
+        registerSpikeEvent(c.symbol, 'TICK', spikeDirectionFromSnaps(c.symbol, c.price), c.vol5s, c.vol24, now);
+      }
+    } else if (TIER2_EXTERNAL_EXCHANGES.has(c.exchange) && externalSpikeMatches(c)) {
+      registerSpikeEvent(c.symbol, '24H', c.change24 >= 0 ? 'LONG' : 'SHORT', Math.abs(c.change24), c.vol24, now);
+    }
+  }
+  renderSpikeHistoryTable();
+}
+setInterval(scanForSpikes, 5000);
+
+// Таблица — прямое переиспользование структуры renderAlertHistoryTable() выше (тот же
+// .finres-table/поиск/сортировка/"Показать ещё"/.ms-dropdown фильтр бирж), под новые колонки и
+// источник данных (spikeHistory вместо patternHistory).
+let spikeHistorySearch = '';
+let spikeHistorySort = { key: 'time', dir: 'desc' };
+let spikeHistoryLimit = 30;
+const SPIKE_EXCHANGE_FILTER_KEY = 'mexc_spike_exchange_filter';
+let spikeExchangeFilterSet = (function loadSpikeExchangeFilter() {
+  try {
+    const raw = localStorage.getItem(SPIKE_EXCHANGE_FILTER_KEY);
+    const arr = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(arr)) return new Set(arr.filter(function (x) { return GRAPHS_EXCHANGE_ALL.indexOf(x) !== -1; }));
+  } catch (e) { /* переживём без сохранения между сессиями */ }
+  return new Set(GRAPHS_EXCHANGE_ALL);
+})();
+function saveSpikeExchangeFilter() {
+  try { persistSet(SPIKE_EXCHANGE_FILTER_KEY, JSON.stringify(Array.from(spikeExchangeFilterSet))); } catch (e) {}
+}
+function spikeExchangeFilterLabelText() {
+  if (spikeExchangeFilterSet.size >= GRAPHS_EXCHANGE_ALL.length) return t('Все биржи');
+  if (!spikeExchangeFilterSet.size) return t('Ни одной биржи');
+  if (spikeExchangeFilterSet.size === 1) return Array.from(spikeExchangeFilterSet)[0];
+  return spikeExchangeFilterSet.size + ' ' + t('биржи');
+}
+(function wireSpikeExchangeFilterDropdown() {
+  const wrap = document.getElementById('spikeExchangeFilterWrap');
+  const btn = document.getElementById('spikeExchangeFilterBtn');
+  const panel = document.getElementById('spikeExchangeFilterPanel');
+  const label = document.getElementById('spikeExchangeFilterLabel');
+  if (!wrap || !btn || !panel) return;
+  function refreshLabel() { if (label) label.textContent = spikeExchangeFilterLabelText(); }
+  panel.querySelectorAll('input[type="checkbox"]').forEach(function (cb) {
+    cb.checked = spikeExchangeFilterSet.has(cb.value);
+    cb.addEventListener('change', function () {
+      if (cb.checked) spikeExchangeFilterSet.add(cb.value); else spikeExchangeFilterSet.delete(cb.value);
+      saveSpikeExchangeFilter();
+      refreshLabel();
+      renderSpikeHistoryTable();
+    });
+  });
+  refreshLabel();
+  btn.addEventListener('click', function (e) { e.stopPropagation(); panel.hidden = !panel.hidden; });
+  document.addEventListener('click', function (e) {
+    if (!panel.hidden && !wrap.contains(e.target)) panel.hidden = true;
+  });
+})();
+function spikeRepeatsLastHour(symbol, now) {
+  const cutoff = now - 3600000;
+  let n = 0;
+  for (let i = 0; i < spikeHistory.length; i++) {
+    if (spikeHistory[i].symbol === symbol && spikeHistory[i].detectedAt >= cutoff) n++;
+  }
+  return n;
+}
+function renderSpikeHistoryTable() {
+  const page = document.getElementById('page-spikes');
+  const container = document.getElementById('spikeHistoryTableContainer');
+  if (!page || !page.classList.contains('active') || !container) return;
+  const now = Date.now();
+  const search = spikeHistorySearch.trim().toUpperCase();
+  let rows = spikeHistory.filter(function (r) {
+    if (!spikeExchangeFilterSet.has(exchangeOfSymbol(r.symbol))) return false;
+    if (search && r.symbol.toUpperCase().indexOf(search) === -1) return false;
+    return true;
+  });
+  const dir = spikeHistorySort.dir === 'asc' ? 1 : -1;
+  rows.sort(function (a, b) {
+    let av, bv;
+    switch (spikeHistorySort.key) {
+      case 'exchange': av = exchangeOfSymbol(a.symbol); bv = exchangeOfSymbol(b.symbol); break;
+      case 'symbol': av = a.symbol; bv = b.symbol; break;
+      case 'magnitude': av = a.magnitude || 0; bv = b.magnitude || 0; break;
+      case 'vol24': av = a.vol24 || 0; bv = b.vol24 || 0; break;
+      default: av = a.detectedAt; bv = b.detectedAt;
+    }
+    if (av < bv) return -1 * dir;
+    if (av > bv) return 1 * dir;
+    return 0;
+  });
+  const total = rows.length;
+  const shown = rows.slice(0, spikeHistoryLimit);
+  const sortIc = function (key) {
+    if (spikeHistorySort.key !== key) return '';
+    return '<i class="sort-ic ri-arrow-' + (spikeHistorySort.dir === 'asc' ? 'up' : 'down') + '-s-line"></i>';
+  };
+  const rowsHtml = !shown.length
+    ? '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:18px;">' + t('Пока нет ни одного спайка — появятся сами, как только рынок дёрнется.') + '</td></tr>'
+    : shown.map(function (r) {
+      const exch = exchangeOfSymbol(r.symbol);
+      const pair = r.symbol.replace(/^[A-Z]+:/, '');
+      const dirCls = r.direction === 'LONG' ? 'up' : r.direction === 'SHORT' ? 'down' : 'neutral';
+      const kindCls = r.kind === 'TICK' ? 'spike-badge-tick' : 'spike-badge-24h';
+      const kindLabel = r.kind === 'TICK' ? t('5с') : t('24ч');
+      const kindTitle = r.kind === 'TICK' ? t('Тиковый спайк — реальное движение цены за последние 5с') : t('24ч-аномалия — крупное движение за сутки (грубее, чем тиковый спайк: этой бирже недоступен тиковый поток по всему рынку)');
+      return '<tr>' +
+        '<td style="white-space:nowrap;color:var(--text-muted);">' + alertAgeLabel(r.detectedAt) + '</td>' +
+        '<td><span class="exch-tag exch-tag-' + exch.toLowerCase() + '">' + exch + '</span></td>' +
+        '<td>' + pair + '</td>' +
+        '<td><span class="spike-badge ' + kindCls + '" title="' + kindTitle + '">' + kindLabel + '</span></td>' +
+        '<td class="' + dirCls + '">' + (r.direction || '—') + '</td>' +
+        '<td>' + (r.magnitude != null ? (r.magnitude >= 0 ? '+' : '') + r.magnitude.toFixed(2) + '%' : '—') + '</td>' +
+        '<td>' + fmtNum(r.vol24, 0) + '</td>' +
+        '<td>' + spikeRepeatsLastHour(r.symbol, now) + '</td>' +
+        '</tr>';
+    }).join('');
+  container.innerHTML =
+    '<div class="finres-toolbar">' +
+      '<div class="finres-search"><i class="ri-search-line"></i><input type="text" id="spikeHistorySearchInput" placeholder="' + t('Поиск по монете...') + '" value="' + spikeHistorySearch.replace(/"/g, '&quot;') + '"></div>' +
+      '<span class="finres-trades-count">' + total + ' ' + t('всего записей') + '</span>' +
+    '</div>' +
+    '<div style="overflow-x:auto"><table class="finres-table"><thead><tr>' +
+      '<th class="sortable" data-sort="time">' + t('Время') + sortIc('time') + '</th>' +
+      '<th class="sortable" data-sort="exchange">' + t('Биржа') + sortIc('exchange') + '</th>' +
+      '<th class="sortable" data-sort="symbol">' + t('Монета') + sortIc('symbol') + '</th>' +
+      '<th>' + t('Тип') + '</th>' +
+      '<th>' + t('Направление') + '</th>' +
+      '<th class="sortable" data-sort="magnitude">' + t('Величина') + sortIc('magnitude') + '</th>' +
+      '<th class="sortable" data-sort="vol24">' + t('Объём 24ч') + sortIc('vol24') + '</th>' +
+      '<th>' + t('Повторов/час') + '</th>' +
+    '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div>' +
+    (total > shown.length ? '<button type="button" class="finres-load-more" id="spikeHistoryLoadMore">' + t('Показать ещё') + ' (' + (total - shown.length) + ')</button>' : '');
+  const searchInput = document.getElementById('spikeHistorySearchInput');
+  if (searchInput) {
+    searchInput.addEventListener('input', function () {
+      spikeHistorySearch = this.value;
+      spikeHistoryLimit = 30;
+      renderSpikeHistoryTable();
+      const el2 = document.getElementById('spikeHistorySearchInput');
+      if (el2) { el2.focus(); const p = spikeHistorySearch.length; el2.setSelectionRange(p, p); }
+    });
+  }
+  container.querySelectorAll('.finres-table th.sortable').forEach(function (th) {
+    th.addEventListener('click', function () {
+      const key = this.dataset.sort;
+      if (spikeHistorySort.key === key) spikeHistorySort = { key: key, dir: spikeHistorySort.dir === 'asc' ? 'desc' : 'asc' };
+      else spikeHistorySort = { key: key, dir: key === 'symbol' || key === 'exchange' ? 'asc' : 'desc' };
+      renderSpikeHistoryTable();
+    });
+  });
+  const loadMoreBtn = document.getElementById('spikeHistoryLoadMore');
+  if (loadMoreBtn) loadMoreBtn.addEventListener('click', function () { spikeHistoryLimit += 30; renderSpikeHistoryTable(); });
+}
+
 // Текущий срез активных паттернов (последний прогон) — используется мостом Tier2->Tier1
 // (bestActiveAlgoEventFor) и диагностической панелью здоровья; постоянная история — отдельно, в
 // patternHistory выше.
@@ -9152,6 +9435,7 @@ function switchPage(pageId) {
   if (pageId === 'listings') updateListingsPage();
   if (pageId === 'profiles') updateProfilesPage();
   if (pageId === 'patterns') { renderDetectorFilterRow(); renderDetectorThresholdsPanel(); updatePatternsPage(); renderAlertHistoryTable(); }
+  if (pageId === 'spikes') renderSpikeHistoryTable();
   if (pageId === 'account') refreshAccountBalancesIfConnected();
   if (pageId === 'finres') {
     // Сразу красим хиро/вкладку из уже закешированного lastBalanceState (если он есть — например,
@@ -13360,7 +13644,8 @@ async function pollExternalTickers(id) {
       logW('Exchange', id + '/' + feed.exchangeTag + ': не удалось обновить тикеры — ' + e.message);
     }
   }
-  rebuildList();
+  rebuildList(); // ПОСЛЕ этого allCoins свежий — computeExternalSpikeStats ниже должен видеть новые цены/объёмы
+  for (let i = 0; i < connector.feeds.length; i++) computeExternalSpikeStats(connector.feeds[i].exchangeTag);
   renderTable();
 }
 
@@ -14939,6 +15224,20 @@ window.__drawGraphsLoadingPlaceholder = drawGraphsLoadingPlaceholder;
 window.__redrawGraphsGrid = redrawGraphsGrid;
 window.__graphsCandlesFor = function (symbol) { return graphsCandles.get(symbol) || null; };
 window.__coinFor = function (symbol) { return coinMap.get(symbol) || null; }; // отладка полей монеты (tpm/oi5m/dvol5m/range5m и т.д.)
+window.__spikeDebug = function () {
+  const stats = computeMexcSpikeStats();
+  let matchN = 0, total = 0;
+  allCoins.forEach(function (c) {
+    if (c.exchange && c.exchange !== 'MEXC') return;
+    total++;
+    if (mexcSpikeMatches(c, stats)) matchN++;
+  });
+  return { stats: stats, matches: matchN, mexcCoinsTotal: total };
+};
+window.__computeExternalSpikeStats = computeExternalSpikeStats; // отладка 24ч-аномалии для внешних бирж без реального подключения
+window.__externalSpikeMatches = externalSpikeMatches;
+window.__scanForSpikes = scanForSpikes;
+window.__spikeHistory = function () { return spikeHistory; };
 window.__upsertExternalCoin = upsertExternalCoin; // отладка REST-тикера + tier2MetricsForSymbol любой внешней биржи без реального сокета
 window.__tier2MetricsForSymbol = tier2MetricsForSymbol;
 window.__okxWatchlistSet = okxWatchlist; // прямая ссылка на Map watchlist OKX — можно .set() вручную для отладки без реального сокета
