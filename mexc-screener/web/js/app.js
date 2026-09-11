@@ -5361,10 +5361,15 @@ function tier2DepthForSymbol(symbol) {
 // tier2Trades/tier2Depth/coinMap, никаких побочных эффектов (не трогает DOM/WS/локальные хранилища)
 // — раннер (runPatternDetectors) сам решает, что делать с результатом.
 // ============================================================================
-const PATTERN_CLUSTER_TOLERANCE = 0.15; // ±15% — тот же допуск, что и для циклов в ТЗ (не "секунда в секунду")
-const PATTERN_MIN_SCORE = 55;           // ТЗ #8 — показываем только по-настоящему интересное, не всё подряд
+// Раньше все три были const — теперь let: это единственные 3 глобальных рычага "чувствительности"
+// движка детекторов, читаемые ЗАНОВО на каждый цикл детекции всеми 7 биржами (см. detectXxxYyy ниже
+// и одноимённые Okx/Bitget/Bingx/Kucoin/Gateio/Binance-обёртки) — панель "Чувствительность детекторов"
+// на стр. «Паттерны» (applyDetectorThresholds) переприсваивает их поверх значений по умолчанию,
+// поэтому const тут больше не подходит. Заводские значения — в DETECTOR_THRESHOLD_DEFAULTS ниже.
+let PATTERN_CLUSTER_TOLERANCE = 0.15; // ±15% — тот же допуск, что и для циклов в ТЗ (не "секунда в секунду")
+let PATTERN_MIN_SCORE = 55;           // ТЗ #8 — показываем только по-настоящему интересное, не всё подряд
 const PATTERN_DETECT_INTERVAL_MS = 2000;
-const PATTERN_LOOKBACK_TRADES = 200;    // сколько последних сделок буфера рассматривает detect() за раз
+let PATTERN_LOOKBACK_TRADES = 200;    // сколько последних сделок буфера рассматривает detect() за раз
 
 // Сами детекторы — чистые функции (trades[], opts) -> event|null в core-utils.js (переиспользуются
 // tests/ на синтетических данных, см. verify_repeat_size_detector.js и соседние). Обёртки ниже
@@ -5770,6 +5775,57 @@ const DETECTOR_DEFS = {
   twap: { label: 'TWAP-исполнение', badge: 'TWAP', category: 'sequence', minRepeats: 6, detect: detectTwap },
   possibleMarketMakerBot: { label: 'Возможный маркет-мейкер/спредер-бот', badge: 'MMBOT?', category: 'heuristic-lowconf', minRepeats: 30, detect: detectPossibleMarketMakerBot }
 };
+
+// Настраиваемые пороги детекторов (2026-09, по мотивам разбора GodsEye — там это отдельная секция
+// настроек: "Пороги алертов"/"Настройки ботов"/"Настройки плотностей"). Заводские значения — снимок
+// того, что было захардкожено раньше (для кнопки "Сбросить по умолчанию"), НЕ читается на горячем
+// пути — сравните с detectorThresholds ниже, которым и оперирует панель на стр. «Паттерны».
+const DETECTOR_THRESHOLD_DEFAULTS = {
+  minScore: PATTERN_MIN_SCORE,
+  clusterTolerance: PATTERN_CLUSTER_TOLERANCE,
+  lookbackTrades: PATTERN_LOOKBACK_TRADES,
+  minRepeats: Object.keys(DETECTOR_DEFS).reduce(function (acc, key) {
+    acc[key] = DETECTOR_DEFS[key].minRepeats;
+    return acc;
+  }, {})
+};
+const DETECTOR_THRESHOLDS_KEY = 'mexc_detector_thresholds';
+// Глубокая копия дефолтов — рабочее состояние, которое реально читают PATTERN_*/DETECTOR_DEFS (см.
+// applyDetectorThresholds), поверх которого сохранённые в localStorage значения накладываются при
+// загрузке. Форма объекта всегда одна и та же (minScore/clusterTolerance/lookbackTrades/minRepeats
+// с ровно теми же 29 ключами, что DETECTOR_DEFS) — loadDetectorThresholds ниже это валидирует.
+let detectorThresholds = JSON.parse(JSON.stringify(DETECTOR_THRESHOLD_DEFAULTS));
+(function loadDetectorThresholds() {
+  try {
+    const raw = localStorage.getItem(DETECTOR_THRESHOLDS_KEY);
+    const saved = raw ? JSON.parse(raw) : null;
+    if (!saved || typeof saved !== 'object') return;
+    if (Number.isFinite(saved.minScore)) detectorThresholds.minScore = saved.minScore;
+    if (Number.isFinite(saved.clusterTolerance)) detectorThresholds.clusterTolerance = saved.clusterTolerance;
+    if (Number.isFinite(saved.lookbackTrades)) detectorThresholds.lookbackTrades = saved.lookbackTrades;
+    if (saved.minRepeats && typeof saved.minRepeats === 'object') {
+      Object.keys(DETECTOR_THRESHOLD_DEFAULTS.minRepeats).forEach(function (key) {
+        if (Number.isFinite(saved.minRepeats[key])) detectorThresholds.minRepeats[key] = saved.minRepeats[key];
+      });
+    }
+  } catch (e) { /* повреждённый JSON в localStorage — остаёмся на дефолтах */ }
+})();
+function saveDetectorThresholds() {
+  try { persistSet(DETECTOR_THRESHOLDS_KEY, JSON.stringify(detectorThresholds)); } catch (e) {}
+}
+// Переносит detectorThresholds в реально читаемые детекторами места — PATTERN_* (let, см. выше) и
+// DETECTOR_DEFS[key].minRepeats (мутация объекта, сам DETECTOR_DEFS остаётся const). Обе стороны
+// читаются заново на каждый цикл детекции (раз в PATTERN_DETECT_INTERVAL_MS) всеми 7 биржами разом
+// — значит следующий цикл подхватит новое значение без перезагрузки страницы.
+function applyDetectorThresholds() {
+  PATTERN_MIN_SCORE = detectorThresholds.minScore;
+  PATTERN_CLUSTER_TOLERANCE = detectorThresholds.clusterTolerance;
+  PATTERN_LOOKBACK_TRADES = detectorThresholds.lookbackTrades;
+  Object.keys(detectorThresholds.minRepeats).forEach(function (key) {
+    if (DETECTOR_DEFS[key]) DETECTOR_DEFS[key].minRepeats = detectorThresholds.minRepeats[key];
+  });
+}
+applyDetectorThresholds();
 
 // ============================================================================
 // BINANCE-версии всех детекторов выше — тот же контракт detect(symbol) -> event|null, только читают
@@ -7739,6 +7795,74 @@ function renderDetectorFilterRow() {
   });
 }
 
+// Панель "Чувствительность детекторов" (2026-09, по мотивам разбора GodsEye) — 3 глобальных поля
+// (thrMinScore/thrClusterTolerance/thrLookbackTrades, разметка в index.html #page-patterns) плюс
+// список per-детекторных minRepeats (detectorThresholds/applyDetectorThresholds выше). Debounce на
+// ввод — не пересчитываем/не пишем в localStorage на каждый keystroke, только когда пользователь
+// на секунду остановился (тот же принцип, что у поисковых полей в приложении).
+let detectorThresholdsSaveTimer = null;
+function scheduleDetectorThresholdsSave() {
+  clearTimeout(detectorThresholdsSaveTimer);
+  detectorThresholdsSaveTimer = setTimeout(function () {
+    applyDetectorThresholds();
+    saveDetectorThresholds();
+  }, 400);
+}
+function renderDetectorThresholdsPanel() {
+  const minScoreEl = document.getElementById('thrMinScore');
+  const toleranceEl = document.getElementById('thrClusterTolerance');
+  const lookbackEl = document.getElementById('thrLookbackTrades');
+  const grid = document.getElementById('detectorThresholdGrid');
+  if (!minScoreEl || !toleranceEl || !lookbackEl || !grid) return;
+  minScoreEl.value = detectorThresholds.minScore;
+  toleranceEl.value = Math.round(detectorThresholds.clusterTolerance * 100);
+  lookbackEl.value = detectorThresholds.lookbackTrades;
+  minScoreEl.oninput = function () {
+    const v = Number(minScoreEl.value);
+    if (Number.isFinite(v)) { detectorThresholds.minScore = Math.min(100, Math.max(0, v)); scheduleDetectorThresholdsSave(); }
+  };
+  toleranceEl.oninput = function () {
+    const v = Number(toleranceEl.value);
+    if (Number.isFinite(v)) { detectorThresholds.clusterTolerance = Math.min(0.9, Math.max(0.01, v / 100)); scheduleDetectorThresholdsSave(); }
+  };
+  lookbackEl.oninput = function () {
+    const v = Number(lookbackEl.value);
+    if (Number.isFinite(v)) { detectorThresholds.lookbackTrades = Math.min(2000, Math.max(20, v)); scheduleDetectorThresholdsSave(); }
+  };
+  grid.innerHTML = Object.keys(DETECTOR_DEFS).map(function (key) {
+    const def = DETECTOR_DEFS[key];
+    return '<span class="detector-threshold-row" data-detector="' + key + '">' + t(def.label) +
+      '<input type="number" min="1" max="500" step="1" value="' + detectorThresholds.minRepeats[key] + '" data-thr-key="' + key + '">' +
+      '<span class="thr-reset" data-thr-reset="' + key + '" title="' + t('Сбросить эту строку') + '">↺</span></span>';
+  }).join('');
+  grid.querySelectorAll('input[data-thr-key]').forEach(function (input) {
+    input.addEventListener('input', function () {
+      const key = input.dataset.thrKey;
+      const v = Number(input.value);
+      if (Number.isFinite(v) && v > 0) { detectorThresholds.minRepeats[key] = v; scheduleDetectorThresholdsSave(); }
+    });
+  });
+  grid.querySelectorAll('[data-thr-reset]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      const key = btn.dataset.thrReset;
+      detectorThresholds.minRepeats[key] = DETECTOR_THRESHOLD_DEFAULTS.minRepeats[key];
+      applyDetectorThresholds();
+      saveDetectorThresholds();
+      renderDetectorThresholdsPanel();
+    });
+  });
+}
+(function wireResetDetectorThresholds() {
+  const btn = document.getElementById('resetDetectorThresholds');
+  if (!btn) return;
+  btn.addEventListener('click', function () {
+    detectorThresholds = JSON.parse(JSON.stringify(DETECTOR_THRESHOLD_DEFAULTS));
+    applyDetectorThresholds();
+    saveDetectorThresholds();
+    renderDetectorThresholdsPanel();
+  });
+})();
+
 // Общее тело детекции на одну монету — переиспользуется и для MEXC (watchlist), и для Binance
 // (binanceWatchlist) ниже; detectFnsByKey — DETECTOR_DEFS (там же и .detect) для MEXC или
 // BINANCE_DETECTOR_FNS для Binance. Тот же DATA QUALITY gate и market regime tag для обеих бирж.
@@ -8850,7 +8974,7 @@ function switchPage(pageId) {
   if (pageId === 'alerts') updateAlerts();
   if (pageId === 'listings') updateListingsPage();
   if (pageId === 'profiles') updateProfilesPage();
-  if (pageId === 'patterns') { renderDetectorFilterRow(); updatePatternsPage(); }
+  if (pageId === 'patterns') { renderDetectorFilterRow(); renderDetectorThresholdsPanel(); updatePatternsPage(); }
   if (pageId === 'account') refreshAccountBalancesIfConnected();
   if (pageId === 'finres') {
     // Сразу красим хиро/вкладку из уже закешированного lastBalanceState (если он есть — например,
@@ -14626,6 +14750,7 @@ setInterval(updateClock, 1000);
 // Диагностика Tier 2 (watchlist) из консоли разработчика, пока для этого нет отдельной панели в UI
 // (этап 7 плана) — window.__tier2Health.watchlistSize / .tradesIngested и т.д., а также
 // window.__tier2Watchlist() для списка монет прямо сейчас в глубоком анализе.
+window.__detectorThresholds = function () { return { detectorThresholds: detectorThresholds, PATTERN_MIN_SCORE: PATTERN_MIN_SCORE, PATTERN_CLUSTER_TOLERANCE: PATTERN_CLUSTER_TOLERANCE, PATTERN_LOOKBACK_TRADES: PATTERN_LOOKBACK_TRADES }; }; // отладка панели "Чувствительность детекторов"
 window.__tier2Health = tier2Health;
 window.__tier2Watchlist = function () { return Array.from(watchlist.keys()); };
 window.__tier2TradesFor = function (symbol) { return tier2Trades.get(symbol) || []; };
