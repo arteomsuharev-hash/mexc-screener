@@ -9931,54 +9931,41 @@ async function execCommandSelfTest() {
 // headers — план объект {имя: значение} (например {'X-MEXC-APIKEY': ключ} у MEXC, четыре
 // OK-ACCESS-* заголовка у OKX — см. EXCHANGE_CONNECTORS) или null/falsy для публичных эндпоинтов
 // без авторизации (klines и т.п., заголовок тогда просто не добавляется).
+// 2026-09: раньше этот путь спавнил ОТДЕЛЬНЫЙ процесс curl.exe на КАЖДЫЙ запрос (в обход браузерных
+// CORS-ограничений на приватные/подписанные эндпоинты бирж) — на Windows это ещё и cmd.exe /c поверх
+// curl.exe, то есть по факту два новых процесса на запрос, и антивирус иногда добавлял к каждому по
+// несколько секунд (см. историю этой функции в git — комментарии там прямо документировали "секунды-
+// десятки секунд на запрос"). Neutralino 6.9.0 добавил нативный net.request — HTTP-запрос на уровне
+// C++-ядра фреймворка, без CORS и БЕЗ спавна процесса вообще. Имя функции и её контракт (null если не
+// десктоп; {ok:true, body:<строка>} при успехе, статус ответа НЕ проверяем — см. ниже; throw только
+// при настоящем сетевом сбое) сознательно оставлены прежними — семь вызывающих мест ждут ровно это,
+// трогать их не нужно.
 async function nativeCurlGet(url, headers, method) {
   if (!window.Neutralino) {
     return null; // нативный путь недоступен (не десктоп-приложение)
   }
-  await execCommandSelfTest(); // бросит понятную ошибку, если процессы вообще не запускаются
-
-  const header = headers
-    ? Object.keys(headers).map(function (k) { return ' -H "' + stripQuotes(k) + ': ' + stripQuotes(headers[k]) + '"'; }).join('')
-    : '';
-  // -X нужен только для не-GET (например POST/PUT/DELETE /api/v3/userDataStream — см. listenKeyRequest
-  // ниже); MEXC у этих эндпоинтов, как и у GET, ожидает подписанные параметры в query string, тело
-  // запроса не нужно, поэтому просто меняем метод, а не добавляем -d.
-  const methodFlag = (method && method !== 'GET') ? ' -X ' + method : '';
-  const cmd = 'curl.exe -s -S --max-time 10' + methodFlag + header + ' "' + stripQuotes(url) + '"';
-  // Таймаут МОСТА здесь должен быть заметно больше --max-time самого curl (10с) — тот же запас на
-  // поведенческую проверку антивирусом ПЕРЕД стартом дочернего процесса, что и в execCommandSelfTest
-  // выше (там на неё явно выделено 10с даже для мгновенного "echo"). Раньше здесь стояло 14000 —
-  // при 10с у curl это давало всего ~4с запаса на саму проверку антивируса, WS-туда-обратно и разбор
-  // ответа. На "прогретой" машине этого хватало почти всегда, но именно поэтому ошибка была
-  // РЕДКОЙ, а не системной: иногда антивирус на конкретный запуск curl.exe (не на сам факт запуска
-  // процессов вообще — тот execCommandSelfTest уже проверил и закэшировал успешным) тратит на пару
-  // секунд больше обычного, и мост не успевает уложиться в 14с, хотя curl.exe в итоге отработал бы
-  // нормально. 22с — тот же принцип, что и у self-test (до ~10с на антивирус) плюс полные 10с у
-  // curl.exe плюс запас на сам WS-обмен.
-  const bridgeTimeoutMs = 22000;
+  // Вызываем "net.request" напрямую через уже существующий самодельный WS-мост (nlCall), а не через
+  // официальную обёртку Neutralino.net.request() клиентской библиотеки — та же причина, по которой
+  // этот файл уже вызывает "os.execCommand" напрямую в обход Neutralino.os.execCommand(): официальные
+  // обёртки идут через Neutralino.init()'овский WebSocket, который открывается РОВНО ОДИН раз при
+  // старте страницы и не переподключается, если именно этот первый коннект не успел открыться вовремя
+  // (см. комментарий у nlBridgeConnect() выше) — nlCall() это уже обходит настоящим переподключением.
+  // Форма data-пейлоада ({url, method, headers, timeout}) подтверждена чтением исходника официальной
+  // обёртки в клиентской библиотеке 6.9.0 — она сама собирает точно такой же плоский объект.
+  const requestTimeoutMs = 10000; // тот же таймаут, что раньше был у --max-time curl.exe
+  const bridgeTimeoutMs = 15000;  // net.request не спавнит процесс — не нужен запас на антивирус, только на сам WS-обмен
   let result;
   try {
-    result = await nlCall('os.execCommand', { command: cmd, background: false }, bridgeTimeoutMs);
-  } catch (bridgeErr) {
-    // Мост не ответил вовремя — почти всегда одноразовая задержка старта ИМЕННО ЭТОГО запуска
-    // curl.exe (см. выше), а не системная поломка моста (ту execCommandSelfTest() уже отсеял бы
-    // ошибкой до этого места, ЕСЛИ бы она была видна с самого начала сессии). Один быстрый повтор
-    // почти всегда решает проблему без участия пользователя.
-    if (!/не ответил/.test(bridgeErr.message)) throw bridgeErr;
-    try {
-      result = await nlCall('os.execCommand', { command: cmd, background: false }, bridgeTimeoutMs);
-    } catch (secondErr) {
-      // Мост правда недоступен и на повторе — это тот же диагноз, что даёт execCommandSelfTest(),
-      // просто он мог проявиться ПОЗЖЕ (антивирус разрешил самый первый пробный процесс, потом начал
-      // блокировать) и потому не был пойман в начале сессии. Помечаем кэш сломанным на будущее и
-      // отдаём то же понятное сообщение с инструкцией, а не голый таймаут моста.
-      throw new Error(markNativeExecBroken(secondErr.message));
-    }
+    result = await nlCall('net.request', { url: url, method: method || 'GET', headers: headers || {}, timeout: requestTimeoutMs }, bridgeTimeoutMs);
+  } catch (err) {
+    throw new Error('net.request: ' + err.message);
   }
-  if (result && result.exitCode === 0) {
-    return { ok: true, body: result.stdOut };
-  }
-  throw new Error('curl.exe: ' + ((result && (result.stdErr || result.stdOut)) || ('exit code ' + (result && result.exitCode))));
+  // Статус ответа, как и раньше с curl.exe, НЕ проверяем: MEXC иногда шлёт свои ошибки с HTTP 200
+  // (см. комментарий у mexcSignedRequest ниже) — вызывающий код сам разбирает data.code/data.msg из
+  // тела. net.request резолвится с объектом ответа при ЛЮБОМ полученном HTTP-статусе (как fetch()) и
+  // реджектится только при настоящем сетевом сбое — то же поведение, что было у "curl вернул exitCode
+  // 0 с телом ошибки внутри".
+  return { ok: true, body: (result && result.body) || '' };
 }
 
 // Подписанный GET-запрос к приватному REST API MEXC (timestamp + HMAC-SHA256 подпись параметров).

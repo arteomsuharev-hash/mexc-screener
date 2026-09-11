@@ -8,8 +8,19 @@
   "enableServer": true,
   "enableNativeAPI": true,
   "tokenSecurity": "none",
-  "logging": { "enabled": true, "writeToLogFile": false },
-  "nativeAllowList": ["app.*", "os.*", "window.*", "events.*", "filesystem.*", "storage.*"],
+  "logging": {
+    "enabled": true,
+    "writeToLogFile": false
+  },
+  "nativeAllowList": [
+    "app.*",
+    "os.*",
+    "window.*",
+    "events.*",
+    "filesystem.*",
+    "storage.*",
+    "net.*"
+  ],
   "modes": {
     "window": {
       "title": "Vision Screener",
@@ -27,7 +38,7 @@
     "resourcesPath": "/resources/",
     "extensionsPath": "/extensions/",
     "clientLibrary": "/resources/js/neutralino.js",
-    "binaryVersion": "6.8.0",
-    "clientVersion": "6.8.0"
+    "binaryVersion": "6.9.0",
+    "clientVersion": "6.9.0"
   }
 }
