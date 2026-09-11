@@ -9458,6 +9458,12 @@ function switchPage(pageId) {
   document.querySelectorAll('.nav-item').forEach(function (n) {
     n.classList.toggle('active', n.dataset.page === pageId);
   });
+  // 2026-09: renderTable() у периодических таймеров (pollExternalTickers) теперь честно гейтится
+  // активностью именно этой страницы (см. её же комментарий) — значит при ВОЗВРАТЕ на «Скринер»
+  // нужен один явный рендер здесь же, иначе до следующего MEXC-тика/опроса биржи таблица могла бы на
+  // мгновение показать состояние на момент, когда её видели в последний раз. Тот же принцип, что уже
+  // применён ниже для каждой ДРУГОЙ страницы.
+  if (pageId === 'screener') renderTable();
   if (pageId === 'graphs') updateGraphsPage();
   if (pageId === 'favorites') updateFavoritesPage();
   if (pageId === 'analytics') updateAnalytics();
@@ -13663,7 +13669,15 @@ async function pollExternalTickers(id) {
   }
   rebuildList(); // ПОСЛЕ этого allCoins свежий — computeExternalSpikeStats ниже должен видеть новые цены/объёмы
   for (let i = 0; i < connector.feeds.length; i++) computeExternalSpikeStats(connector.feeds[i].exchangeTag);
-  renderTable();
+  // renderTable() — чистая перерисовка DOM таблицы «Скринер», больше НИЧЕГО не читает allCoins
+  // синхронно сразу после этого места (rebuildList/computeExternalSpikeStats выше уже обновили
+  // общее состояние независимо от того, что видно на экране) — значит честно можно не перерисовывать
+  // DOM чужой сейчас страницы (2026-09, оптимизация): раньше это дёргало полный innerHTML-ребилд
+  // таблицы каждые EXTERNAL_TICKER_POLL_MS=4с на КАЖДУЮ подключённую биржу, даже когда пользователь
+  // сидит на «Графиках»/«Паттернах»/где угодно ещё. Тот же идиом, что уже у redrawGraphsGrid/
+  // updateGraphsPage/balanceRefreshTimer.
+  const screenerPage = document.getElementById('page-screener');
+  if (screenerPage && screenerPage.classList.contains('active')) renderTable();
 }
 
 // Запускается при успешном connectExchange(id) — публичные рыночные данные качаются периодическим
