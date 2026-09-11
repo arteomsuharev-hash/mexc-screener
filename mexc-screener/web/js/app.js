@@ -1780,14 +1780,32 @@ function algoBadgesCellHtml(symbol) {
 // "Рейтинг" в таблице (редизайн 2026-09, по образцу макета) — переиспользует УЖЕ существующий
 // activityScore() (тот же 0-100 "насколько активна монета прямо сейчас" по объёму/движению/
 // коротким волатильностям, что и у круглого индикатора в карточке выбранной монеты) и УЖЕ
-// собираемый snapshots (тикеровый ринг-буфер за последние ~70с, который и так ведётся для
-// vol5/vol30/vol60 у ВСЕГО рынка, см. pushSnap/metricsFromSnaps) — не заводит отдельного тяжёлого
-// состояния и не рисует canvas на каждую строку (~400 одновременно видимых), только лёгкий inline
-// SVG polyline из уже готовых точек.
+// собираемый snapshots (тикеровый ринг-буфер, который и так ведётся для vol5/vol30/vol60 у ВСЕГО
+// рынка MEXC, см. pushSnap/metricsFromSnaps) — не заводит отдельного тяжёлого состояния и не рисует
+// canvas на каждую строку (~400 одновременно видимых), только лёгкий inline SVG polyline из уже
+// готовых точек.
+//
+// 2026-09: раньше работало только для MEXC (snapshots — MEXC-only буфер, для "OKX:BTC/USDT" и
+// т.п. всегда пусто, пользователь заметил пустую колонку у остальных бирж). У внешних бирж своего
+// полнорыночного тикового потока нет физически (REST-опрос раз в 4с без памяти между циклами, см.
+// upsertExternalCoin) — но для watchlist-монет (~15-26 на биржу) есть настоящий буфер сделок
+// (tier2TradesForSymbol — тот же, что уже кормит TPM/Δобъёма/Дисбаланс в этой же таблице), из него
+// и строим спарклайн для них. Для остальных монет любой внешней биржи данных как не было, так и
+// нет — честно пусто, не рисуем выдуманную линию.
 function sparklineSvg(symbol, chg) {
-  const snaps = snapshots.get(symbol);
-  if (!snaps || snaps.length < 2) return '';
-  const prices = snaps.map(function (s) { return s.p; });
+  let prices;
+  if (exchangeOfSymbol(symbol) === 'MEXC') {
+    const snaps = snapshots.get(symbol);
+    if (!snaps || snaps.length < 2) return '';
+    prices = snaps.map(function (s) { return s.p; });
+  } else {
+    const trades = tier2TradesForSymbol(symbol);
+    if (!trades || !trades.length) return '';
+    const cutoff = Date.now() - SNAP_WINDOW_MS; // тот же горизонт, что у MEXC snapshots — визуально сопоставимо
+    const recent = trades.filter(function (t) { return t.t >= cutoff; }).map(function (t) { return t.price; });
+    if (recent.length < 2) return '';
+    prices = recent;
+  }
   const min = Math.min.apply(null, prices), max = Math.max.apply(null, prices);
   const w = 56, h = 20, range = (max - min) || 1;
   const step = w / Math.max(1, prices.length - 1);
@@ -15237,6 +15255,7 @@ window.__computeExternalSpikeStats = computeExternalSpikeStats; // отладк�
 window.__externalSpikeMatches = externalSpikeMatches;
 window.__scanForSpikes = scanForSpikes;
 window.__spikeHistory = function () { return spikeHistory; };
+window.__sparklineSvg = sparklineSvg; // отладка спарклайна колонки "Рейтинг" на любой бирже без реального подключения
 window.__upsertExternalCoin = upsertExternalCoin; // отладка REST-тикера + tier2MetricsForSymbol любой внешней биржи без реального сокета
 window.__tier2MetricsForSymbol = tier2MetricsForSymbol;
 window.__okxWatchlistSet = okxWatchlist; // прямая ссылка на Map watchlist OKX — можно .set() вручную для отладки без реального сокета
