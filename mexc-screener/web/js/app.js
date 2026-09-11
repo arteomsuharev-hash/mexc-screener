@@ -1471,6 +1471,10 @@ function upsertCoin(row) {
 // (BINANCEFUT и т.д.) — по-прежнему 0, такие пары навсегда остаются тикером без глубокого анализа,
 // честно.
 const TIER2_EXTERNAL_EXCHANGES = new Set(['BINANCE', 'OKX', 'BITGET', 'BINGX', 'KUCOIN', 'GATEIO']);
+// Все 7 бирж, включая MEXC — переиспользуется мульти-select фильтрами (Графики/История алертов),
+// объявлено здесь (рано в файле), потому что "История алертов" читает его из IIFE, выполняющегося
+// сразу при загрузке скрипта (до того, как выполнился бы код дальше по файлу).
+const GRAPHS_EXCHANGE_ALL = ['MEXC', 'BINANCE', 'OKX', 'BITGET', 'BINGX', 'KUCOIN', 'GATEIO'];
 function computeExternalWatchlistCandidateScore(vol24) {
   return (Number.isFinite(vol24) && vol24 >= STRATEGY_MIN_LIQUID_VOL24) ? vol24 : -1;
 }
@@ -7690,6 +7694,12 @@ function registerPatternEvent(ev, now) {
     id: id, symbol: ev.symbol, detectorKey: ev.detectorKey, detectedAt: now,
     direction: ev.direction, confidencePct: ev.confidencePct, scoreAtSignal: ev.scoreAtSignal,
     priceAtSignal: ev.priceAtSignal, repeatCount: ev.repeatCount, marketRegime: ev.marketRegime || null,
+    // Снимок метрик на МОМЕНТ сигнала (2026-09, для таблицы "История алертов") — те же честные
+    // watchlist-only функции, что уже используются в coinMap/Графиках (см. их же комментарии про
+    // "watchlist coins have real trades, others don't"); для монеты, которая как раз в этот момент
+    // watchlisted (а событие вообще не могло бы сработать иначе), значения реальные.
+    tpmAtSignal: tpmForSymbol(ev.symbol), dvol5mAtSignal: dvol5mForSymbol(ev.symbol),
+    obImbalanceAtSignal: oi5mForSymbol(ev.symbol), // честно "дисбаланс стакана", НЕ открытый интерес — спот
     outcome: { at30s: null, at2m: null, at10m: null, at30m: null }
   });
   patternHistory = MexcCore.prunePatternHistory(patternHistory, {
@@ -7711,7 +7721,11 @@ function sweepPatternOutcomes() {
       const outcomeKey = PATTERN_OUTCOME_KEYS[idx];
       if (record.outcome[outcomeKey] != null) return; // уже закрыт
       if (now - record.detectedAt < s * 1000) return; // ещё не время
-      const trades = tier2Trades.get(record.symbol);
+      // Раньше здесь было tier2Trades.get(record.symbol) — Map ТОЛЬКО MEXC, для любой записи с
+      // другой биржи (record.symbol = "OKX:BTC/USDT" и т.п.) всегда undefined, и outcome тихо
+      // деградировал до единственной текущей точки вместо честного MFE/MAE по всему наблюдавшемуся
+      // пути цены. tier2TradesForSymbol сам знает по префиксу символа, в какую Map лезть.
+      const trades = tier2TradesForSymbol(record.symbol);
       let pricesSince = trades ? trades.filter(function (t) { return t.t >= record.detectedAt; }).map(function (t) { return t.price; }) : [];
       if (!pricesSince.length) {
         const coin = coinMap.get(record.symbol);
@@ -7722,8 +7736,170 @@ function sweepPatternOutcomes() {
     });
   });
   if (changed) savePatternHistory();
+  renderAlertHistoryTable(); // "Исход" оживает сам, без переоткрытия страницы (дёшево — patternHistory уже в памяти)
 }
 setInterval(sweepPatternOutcomes, 10000);
+
+// ============================================================================
+// "История алертов (все биржи)" (2026-09, по мотивам разбора GodsEye — у него это отдельная
+// постоянная таблица, а не только карточки текущих активных сигналов) — рендерит patternHistory
+// (УЖЕ единый для всех 7 бирж массив, см. её же комментарий выше) как таблицу вместо карточек.
+// Структура/состояние — 1-в-1 по образцу renderFinresTradesTable (finresTradesSearch/Sort/Limit).
+// ============================================================================
+let alertHistorySearch = '';
+let alertHistorySort = { key: 'time', dir: 'desc' };
+let alertHistoryLimit = 30;
+const ALERT_HISTORY_EXCHANGE_FILTER_KEY = 'mexc_alert_history_exchange_filter';
+let alertHistoryExchangeFilterSet = (function loadAlertHistoryExchangeFilter() {
+  try {
+    const raw = localStorage.getItem(ALERT_HISTORY_EXCHANGE_FILTER_KEY);
+    const arr = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(arr)) return new Set(arr.filter(function (x) { return GRAPHS_EXCHANGE_ALL.indexOf(x) !== -1; }));
+  } catch (e) { /* переживём без сохранения между сессиями */ }
+  return new Set(GRAPHS_EXCHANGE_ALL);
+})();
+function saveAlertHistoryExchangeFilter() {
+  try { persistSet(ALERT_HISTORY_EXCHANGE_FILTER_KEY, JSON.stringify(Array.from(alertHistoryExchangeFilterSet))); } catch (e) {}
+}
+function alertHistoryExchangeFilterLabelText() {
+  if (alertHistoryExchangeFilterSet.size >= GRAPHS_EXCHANGE_ALL.length) return t('Все биржи');
+  if (!alertHistoryExchangeFilterSet.size) return t('Ни одной биржи');
+  if (alertHistoryExchangeFilterSet.size === 1) return Array.from(alertHistoryExchangeFilterSet)[0];
+  return alertHistoryExchangeFilterSet.size + ' ' + t('биржи');
+}
+(function wireAlertHistoryExchangeFilterDropdown() {
+  const wrap = document.getElementById('alertHistoryExchangeFilterWrap');
+  const btn = document.getElementById('alertHistoryExchangeFilterBtn');
+  const panel = document.getElementById('alertHistoryExchangeFilterPanel');
+  const label = document.getElementById('alertHistoryExchangeFilterLabel');
+  if (!wrap || !btn || !panel) return;
+  function refreshLabel() { if (label) label.textContent = alertHistoryExchangeFilterLabelText(); }
+  panel.querySelectorAll('input[type="checkbox"]').forEach(function (cb) {
+    cb.checked = alertHistoryExchangeFilterSet.has(cb.value);
+    cb.addEventListener('change', function () {
+      if (cb.checked) alertHistoryExchangeFilterSet.add(cb.value); else alertHistoryExchangeFilterSet.delete(cb.value);
+      saveAlertHistoryExchangeFilter();
+      refreshLabel();
+      renderAlertHistoryTable();
+    });
+  });
+  refreshLabel();
+  btn.addEventListener('click', function (e) { e.stopPropagation(); panel.hidden = !panel.hidden; });
+  document.addEventListener('click', function (e) {
+    if (!panel.hidden && !wrap.contains(e.target)) panel.hidden = true;
+  });
+})();
+
+// "5с назад"/"12м назад"/"3ч назад"/"2д назад" — нет готового форматтера с часами/днями нигде в
+// приложении (у карточек паттернов есть только секунды, patterHistory живёт до 30 дней).
+function alertAgeLabel(ms) {
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (s < 60) return s + t('с назад');
+  if (s < 3600) return Math.floor(s / 60) + t('м назад');
+  if (s < 86400) return Math.floor(s / 3600) + t('ч назад');
+  return Math.floor(s / 86400) + t('д назад');
+}
+// Первый ЗАКРЫТЫЙ чекпоинт (see PATTERN_OUTCOME_KEYS) — не ждём именно 30м, показываем что реально
+// уже наблюдалось; если ни один ещё не закрылся (сигнал моложе 30с) — честно "ждём…", не 0%/пусто.
+function alertHistoryOutcomeCellHtml(record) {
+  for (let i = 0; i < PATTERN_OUTCOME_KEYS.length; i++) {
+    const o = record.outcome[PATTERN_OUTCOME_KEYS[i]];
+    if (o && Number.isFinite(o.movePct)) {
+      const cls = o.movePct >= 0 ? 'up' : 'down';
+      const label = ['30с', '2м', '10м', '30м'][i];
+      return '<span class="' + cls + '">' + (o.movePct >= 0 ? '+' : '') + o.movePct.toFixed(2) + '% (' + label + ')</span>';
+    }
+  }
+  return '<span style="color:var(--text-muted);">' + t('ждём…') + '</span>';
+}
+function renderAlertHistoryTable() {
+  const page = document.getElementById('page-patterns');
+  const container = document.getElementById('alertHistoryTableContainer');
+  if (!page || !page.classList.contains('active') || !container) return;
+  const search = alertHistorySearch.trim().toUpperCase();
+  let rows = patternHistory.filter(function (r) {
+    if (!alertHistoryExchangeFilterSet.has(exchangeOfSymbol(r.symbol))) return false;
+    if (search && r.symbol.toUpperCase().indexOf(search) === -1) return false;
+    return true;
+  });
+  const dir = alertHistorySort.dir === 'asc' ? 1 : -1;
+  rows.sort(function (a, b) {
+    let av, bv;
+    switch (alertHistorySort.key) {
+      case 'exchange': av = exchangeOfSymbol(a.symbol); bv = exchangeOfSymbol(b.symbol); break;
+      case 'symbol': av = a.symbol; bv = b.symbol; break;
+      case 'confidence': av = a.confidencePct || 0; bv = b.confidencePct || 0; break;
+      case 'tpm': av = a.tpmAtSignal || 0; bv = b.tpmAtSignal || 0; break;
+      default: av = a.detectedAt; bv = b.detectedAt;
+    }
+    if (av < bv) return -1 * dir;
+    if (av > bv) return 1 * dir;
+    return 0;
+  });
+  const total = rows.length;
+  const shown = rows.slice(0, alertHistoryLimit);
+  const sortIc = function (key) {
+    if (alertHistorySort.key !== key) return '';
+    return '<i class="sort-ic ri-arrow-' + (alertHistorySort.dir === 'asc' ? 'up' : 'down') + '-s-line"></i>';
+  };
+  const rowsHtml = !shown.length
+    ? '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:18px;">' + t('Пока нет ни одной записи — появятся, как только сработает первый алгоритм.') + '</td></tr>'
+    : shown.map(function (r) {
+      const exch = exchangeOfSymbol(r.symbol);
+      const def = DETECTOR_DEFS[r.detectorKey];
+      const catCls = 'cat-' + ((def && def.category) || 'inefficiency').replace(/[^a-z-]/g, '');
+      const dirCls = r.direction === 'LONG' ? 'up' : r.direction === 'SHORT' ? 'down' : 'neutral';
+      const pair = r.symbol.replace(/^[A-Z]+:/, '');
+      return '<tr>' +
+        '<td style="white-space:nowrap;color:var(--text-muted);">' + alertAgeLabel(r.detectedAt) + '</td>' +
+        '<td><span class="exch-tag exch-tag-' + exch.toLowerCase() + '">' + exch + '</span></td>' +
+        '<td>' + pair + '</td>' +
+        '<td><span class="algo-badge ' + catCls + '" title="' + t(def ? def.label : r.detectorKey) + '">' + (def ? def.badge : r.detectorKey) + '</span></td>' +
+        '<td class="' + dirCls + '">' + (r.direction || '—') + '</td>' +
+        '<td>' + (r.confidencePct != null ? r.confidencePct + '%' : '—') + '</td>' +
+        '<td>' + (r.tpmAtSignal != null ? r.tpmAtSignal.toFixed(1) : '—') + '</td>' +
+        '<td>' + (r.dvol5mAtSignal != null ? r.dvol5mAtSignal.toFixed(1) + '%' : '—') + '</td>' +
+        '<td>' + alertHistoryOutcomeCellHtml(r) + '</td>' +
+        '</tr>';
+    }).join('');
+  container.innerHTML =
+    '<div class="finres-toolbar">' +
+      '<div class="finres-search"><i class="ri-search-line"></i><input type="text" id="alertHistorySearchInput" placeholder="' + t('Поиск по монете...') + '" value="' + alertHistorySearch.replace(/"/g, '&quot;') + '"></div>' +
+      '<span class="finres-trades-count">' + total + ' ' + t('всего записей') + '</span>' +
+    '</div>' +
+    '<div style="overflow-x:auto"><table class="finres-table"><thead><tr>' +
+      '<th class="sortable" data-sort="time">' + t('Время') + sortIc('time') + '</th>' +
+      '<th class="sortable" data-sort="exchange">' + t('Биржа') + sortIc('exchange') + '</th>' +
+      '<th class="sortable" data-sort="symbol">' + t('Монета') + sortIc('symbol') + '</th>' +
+      '<th>' + t('Алгоритм') + '</th>' +
+      '<th>' + t('Направление') + '</th>' +
+      '<th class="sortable" data-sort="confidence">Confidence' + sortIc('confidence') + '</th>' +
+      '<th class="sortable" data-sort="tpm">TPM' + sortIc('tpm') + '</th>' +
+      '<th>' + t('Δ объёма 5м') + '</th>' +
+      '<th>' + t('Исход') + '</th>' +
+    '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div>' +
+    (total > shown.length ? '<button type="button" class="finres-load-more" id="alertHistoryLoadMore">' + t('Показать ещё') + ' (' + (total - shown.length) + ')</button>' : '');
+  const searchInput = document.getElementById('alertHistorySearchInput');
+  if (searchInput) {
+    searchInput.addEventListener('input', function () {
+      alertHistorySearch = this.value;
+      alertHistoryLimit = 30;
+      renderAlertHistoryTable();
+      const el2 = document.getElementById('alertHistorySearchInput');
+      if (el2) { el2.focus(); const p = alertHistorySearch.length; el2.setSelectionRange(p, p); }
+    });
+  }
+  container.querySelectorAll('.finres-table th.sortable').forEach(function (th) {
+    th.addEventListener('click', function () {
+      const key = this.dataset.sort;
+      if (alertHistorySort.key === key) alertHistorySort = { key: key, dir: alertHistorySort.dir === 'asc' ? 'desc' : 'asc' };
+      else alertHistorySort = { key: key, dir: key === 'symbol' || key === 'exchange' ? 'asc' : 'desc' };
+      renderAlertHistoryTable();
+    });
+  });
+  const loadMoreBtn = document.getElementById('alertHistoryLoadMore');
+  if (loadMoreBtn) loadMoreBtn.addEventListener('click', function () { alertHistoryLimit += 30; renderAlertHistoryTable(); });
+}
 
 // Текущий срез активных паттернов (последний прогон) — используется мостом Tier2->Tier1
 // (bestActiveAlgoEventFor) и диагностической панелью здоровья; постоянная история — отдельно, в
@@ -8240,7 +8416,8 @@ function graphsFavoritesOnlyEl() { return document.getElementById('graphsFavorit
 // можно смотреть сразу несколько бирж одновременно (например MEXC+OKX, без остальных). Persist —
 // тот же localStorage-идиом, что у graphsPinned/disabledDetectorKeys. Пустое/повреждённое
 // сохранённое значение — все биржи отмечены (то же поведение, что раньше было у "Все биржи").
-const GRAPHS_EXCHANGE_ALL = ['MEXC', 'BINANCE', 'OKX', 'BITGET', 'BINGX', 'KUCOIN', 'GATEIO'];
+// GRAPHS_EXCHANGE_ALL объявлен рано в файле (см. TIER2_EXTERNAL_EXCHANGES) — нужен и "Истории
+// алертов", которая инициализируется до этого места.
 const GRAPHS_EXCHANGE_FILTER_KEY = 'mexc_graphs_exchange_filter';
 let graphsExchangeFilterSet = (function loadGraphsExchangeFilter() {
   try {
@@ -8974,7 +9151,7 @@ function switchPage(pageId) {
   if (pageId === 'alerts') updateAlerts();
   if (pageId === 'listings') updateListingsPage();
   if (pageId === 'profiles') updateProfilesPage();
-  if (pageId === 'patterns') { renderDetectorFilterRow(); renderDetectorThresholdsPanel(); updatePatternsPage(); }
+  if (pageId === 'patterns') { renderDetectorFilterRow(); renderDetectorThresholdsPanel(); updatePatternsPage(); renderAlertHistoryTable(); }
   if (pageId === 'account') refreshAccountBalancesIfConnected();
   if (pageId === 'finres') {
     // Сразу красим хиро/вкладку из уже закешированного lastBalanceState (если он есть — например,
