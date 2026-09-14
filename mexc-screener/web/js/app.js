@@ -633,12 +633,12 @@ function getCoinColor(symbol) {
 // одинаковым серым. Теперь у каждой биржи — своя ГАРАНТИРОВАННО уникальная буква и свой цвет, те же,
 // что уже приняты в переключателе бирж скринера (см. EXCHANGE_SWITCH_LABELS/.exch-switch-btn.exch-switch-*).
 const EXCHANGE_BADGE_TEXT = {
-  BINANCE: 'B', BINANCEFUT: 'F', OKX: 'O', BITGET: 'G', BINGX: 'X', KUCOIN: 'K', GATEIO: 'T'
+  BINANCE: 'B', BINANCEFUT: 'F', OKX: 'O', BITGET: 'G', BINGX: 'X', KUCOIN: 'K', GATEIO: 'T', ASTER: 'A', ASTERFUT: 'AF'
 };
 
 // Подпись под названием монеты в инфо-панели справа ("MEXC Spot"/"Binance Futures"/...) — раньше
 // была жёстко "MEXC Spot" всегда, даже для монет с других бирж/рынков (см. updateInfoPanel).
-const EXCHANGE_SUB_LABEL = { MEXC: 'MEXC Spot', BINANCE: 'Binance Spot', BINANCEFUT: 'Binance Futures', OKX: 'OKX Spot' };
+const EXCHANGE_SUB_LABEL = { MEXC: 'MEXC Spot', BINANCE: 'Binance Spot', BINANCEFUT: 'Binance Futures', OKX: 'OKX Spot', ASTER: 'Aster Spot', ASTERFUT: 'Aster Futures' };
 function exchangeSubLabel(c) {
   return EXCHANGE_SUB_LABEL[c.exchange || 'MEXC'] || (c.exchange + ' Spot');
 }
@@ -961,6 +961,11 @@ function exchangeTerminalUrl(symbol) {
   if (exch === 'BINGX') return 'https://bingx.com/en/spot/' + encodeURIComponent(base) + 'USDT';
   if (exch === 'KUCOIN') return 'https://www.kucoin.com/trade/' + encodeURIComponent(base) + '-USDT';
   if (exch === 'GATEIO') return 'https://www.gate.io/trade/' + encodeURIComponent(base) + '_USDT';
+  // Точный URL-паттерн торговой страницы asterdex.com не подтверждён вживую (сайт отдаёт 403 ботам,
+  // не смогли проверить) — лучшее приближение по конвенции остальных Binance-клонов, при желании
+  // легко поправить одной строкой, если окажется неверным.
+  if (exch === 'ASTER') return 'https://www.asterdex.com/en/spot-trading/' + encodeURIComponent(base) + 'USDT';
+  if (exch === 'ASTERFUT') return 'https://www.asterdex.com/en/futures/' + encodeURIComponent(base) + 'USDT';
   return mexcTerminalUrl(symbol);
 }
 
@@ -1557,11 +1562,15 @@ function upsertCoin(row) {
 // тиковых метрик — тем взяться неоткуда до того, как WS уже открыт). Для бирж вне этого набора
 // (BINANCEFUT и т.д.) — по-прежнему 0, такие пары навсегда остаются тикером без глубокого анализа,
 // честно.
-const TIER2_EXTERNAL_EXCHANGES = new Set(['BINANCE', 'OKX', 'BITGET', 'BINGX', 'KUCOIN', 'GATEIO']);
-// Все 7 бирж, включая MEXC — переиспользуется мульти-select фильтрами (Графики/История алертов),
-// объявлено здесь (рано в файле), потому что "История алертов" читает его из IIFE, выполняющегося
-// сразу при загрузке скрипта (до того, как выполнился бы код дальше по файлу).
-const GRAPHS_EXCHANGE_ALL = ['MEXC', 'BINANCE', 'OKX', 'BITGET', 'BINGX', 'KUCOIN', 'GATEIO'];
+// ASTERFUT — единственный псевдо-биржевой FUT-тег с полноценным Tier-2 (не только Tier-1 тикер, как
+// у BINANCEFUT) — см. комментарий у EXCHANGE_CONNECTORS.aster: на споте Aster живых сделок практически
+// нет, реальная ликвидность (и, соответственно, весь смысл 29 детекторов) — во фьючерсах.
+const TIER2_EXTERNAL_EXCHANGES = new Set(['BINANCE', 'OKX', 'BITGET', 'BINGX', 'KUCOIN', 'GATEIO', 'ASTER', 'ASTERFUT']);
+// Все биржи/рынки с полноценным Tier-2 (MEXC + всё из TIER2_EXTERNAL_EXCHANGES выше) — переиспользуется
+// мульти-select фильтрами (Графики/История алертов/Спайки), объявлено здесь (рано в файле), потому
+// что "История алертов" читает его из IIFE, выполняющегося сразу при загрузке скрипта (до того, как
+// выполнился бы код дальше по файлу).
+const GRAPHS_EXCHANGE_ALL = ['MEXC', 'BINANCE', 'OKX', 'BITGET', 'BINGX', 'KUCOIN', 'GATEIO', 'ASTER', 'ASTERFUT'];
 function computeExternalWatchlistCandidateScore(vol24) {
   return (Number.isFinite(vol24) && vol24 >= STRATEGY_MIN_LIQUID_VOL24) ? vol24 : -1;
 }
@@ -1848,6 +1857,8 @@ function isTier2Watchlisted(symbol) {
   if (symbol.indexOf('BINGX:') === 0) return bingxWatchlist.has(symbol);
   if (symbol.indexOf('KUCOIN:') === 0) return kucoinWatchlist.has(symbol);
   if (symbol.indexOf('GATEIO:') === 0) return gateioWatchlist.has(symbol);
+  if (symbol.indexOf('ASTERFUT:') === 0) return asterFutWatchlist.has(symbol);
+  if (symbol.indexOf('ASTER:') === 0) return asterWatchlist.has(symbol);
   if (symbol.indexOf('BINANCE:') === 0) return binanceWatchlist.has(symbol);
   return watchlist.has(symbol);
 }
@@ -1857,6 +1868,8 @@ function standingWallForSymbol(symbol) {
   if (symbol.indexOf('BINGX:') === 0) return detectStandingWallBingx(symbol);
   if (symbol.indexOf('KUCOIN:') === 0) return detectStandingWallKucoin(symbol);
   if (symbol.indexOf('GATEIO:') === 0) return detectStandingWallGateio(symbol);
+  if (symbol.indexOf('ASTERFUT:') === 0) return detectStandingWallAsterFut(symbol);
+  if (symbol.indexOf('ASTER:') === 0) return detectStandingWallAster(symbol);
   if (symbol.indexOf('BINANCE:') === 0) return detectStandingWallBinance(symbol);
   return detectStandingWall(symbol);
 }
@@ -2363,6 +2376,13 @@ function gateioKlineInterval(tf) {
 function gateioInstIdForRaw(raw) {
   return String(raw || '').replace(/USDT$/, '_USDT');
 }
+// Aster (V1 Legacy REST, sapi.asterdex.com) — Binance-идентичный формат интервалов ("1h", не "60m",
+// как у самого MEXC — поэтому своя мини-мапа, не переиспользуем mexcKlineInterval), символ — как у
+// MEXC/Binance, слитно верхним регистром, без своего instId-хелпера.
+function asterKlineInterval(tf) {
+  const map = { '1': '1m', '5': '5m', '15': '15m', '30': '30m', '60': '1h', '240': '4h', 'D': '1d' };
+  return map[tf] || '5m';
+}
 
 // exchangeId — необязательный, тот же смысл, что и у fetchMyTrades: не задан (или 'mexc') — поведение
 // как раньше (MEXC_REST); Binance — тот же путь, но на её собственный REST (тот же /api/v3/klines и
@@ -2376,6 +2396,7 @@ async function fetchKlines(raw, tf, limit, exchangeId) {
   const isBingx = exchangeId === 'bingx';
   const isKucoin = exchangeId === 'kucoin';
   const isGateio = exchangeId === 'gateio';
+  const isAster = exchangeId === 'aster';
   const base = (!exchangeId || exchangeId === 'mexc') ? MEXC_REST : EXCHANGE_CONNECTORS[exchangeId].baseUrl;
   const nowSec = Math.floor(Date.now() / 1000);
   const url = isOkx
@@ -2389,6 +2410,11 @@ async function fetchKlines(raw, tf, limit, exchangeId) {
       + '&startAt=' + (nowSec - (limit || 200) * kucoinKlineSeconds(tf)) + '&endAt=' + nowSec
     : isGateio
     ? base + '/api/v4/spot/candlesticks?currency_pair=' + encodeURIComponent(gateioInstIdForRaw(raw)) + '&interval=' + gateioKlineInterval(tf) + '&limit=' + (limit || 200)
+    // Aster V1(Legacy) — /api/v1/klines, не /api/v3/ (подтверждено официальной документацией
+    // github.com/asterdex/api-docs), но формат ответа и порядок полей Binance-идентичны, поэтому
+    // отдельной ветки разбора ниже не заводим — падает в общий (MEXC/Binance) case в конце функции.
+    : isAster
+    ? base + '/api/v1/klines?symbol=' + encodeURIComponent(raw) + '&interval=' + asterKlineInterval(tf) + '&limit=' + (limit || 200)
     : base + '/api/v3/klines?symbol=' + encodeURIComponent(raw) + '&interval=' + mexcKlineInterval(tf) + '&limit=' + (limit || 200);
   let bodyText = null;
   try {
@@ -5449,17 +5475,414 @@ function evaluateGateioWatchlist() {
 setInterval(evaluateGateioWatchlist, GATEIO_WATCHLIST_EVAL_INTERVAL_MS);
 setTimeout(evaluateGateioWatchlist, 5000);
 
+// ============================================================================
+// TIER 2 — ASTER (asterdex.com, спот; подтверждено официальными доками github.com/asterdex/api-docs,
+// не предположено). Один ОБЩИЙ WS (как у OKX/Gate.io выше) — wss://sstream.asterdex.com/ws, подписка/
+// отписка через {"method":"SUBSCRIBE"/"UNSUBSCRIBE","params":[...],"id":N} поверх уже открытого
+// соединения — сервер не помнит про разорванное соединение, при переподключении переподписываемся на
+// весь текущий watchlist заново, тот же приём, что у OKX/Gate.io.
+//
+// ОТЛИЧИЕ формата от Gate.io/OKX: это "сырой" /ws-эндпоинт (не /stream с {stream,data}-обёрткой) —
+// событие приходит НАПРЯМУЮ, тип различаем по полю "e" ("trade"/"depthUpdate"), символ — по полю "s"
+// (ВЕРХНИЙ регистр в самом payload, хотя имя стрима в SUBSCRIBE — нижний регистр, "btcusdt@trade");
+// та же байт-в-байт форма трейда/глубины, что у Binance здесь же в файле — не совпадение, Aster
+// документированно клонирует Binance API.
+//
+// Сделки — настоящий поток по каждой сделке (symbol@trade, не агрегированный @aggTrade) — m===true
+// значит покупатель был мейкером (агрессор продавал) -> 'sell', та же конвенция, что у Binance/BingX.
+// Глубина — partial book depth symbol@depth20 (снимок топ-20 целиком на каждое сообщение, не диф) —
+// тот же принцип "снимок, не diff", что у MEXC/Binance/Gate.io.
+//
+// Ping/pong — на уровне WS-протокола (сервер шлёт ping-фрейм раз в 3 мин, ждёт pong в течение 10 мин,
+// максимум жизни соединения 24ч) — браузерный/нодовский WebSocket отвечает на ping-фреймы
+// автоматически, никакого своего JSON-пинга (как у Gate.io/OKX) здесь не нужно. Лимит сообщений —
+// 5/с на соединение (подписки одним батчем при открытии — укладываемся с большим запасом при
+// watchlist ≤25 монет).
+// ============================================================================
+const ASTER_WS_URL = 'wss://sstream.asterdex.com/ws';
+const ASTER_DEPTH_LEVEL = '20';
+const ASTER_WATCHLIST_SIZE = 20;
+const ASTER_WATCHLIST_HARD_CAP = 25;
+const ASTER_WATCHLIST_EVICT_MARGIN = 8;
+const ASTER_WATCHLIST_ADD_STREAK = 2;
+const ASTER_WATCHLIST_EVICT_STREAK = 3;
+const ASTER_WATCHLIST_EVAL_INTERVAL_MS = 20000;
+const ASTER_WATCHLIST_COOLDOWN_MS = 5 * 60 * 1000;
+const ASTER_TIER2_TRADES_CAP = 2000;
+const ASTER_TIER2_DEPTH_CAP = 600;
+const ASTER_WS_RECONNECT_DELAY_MS = 3000;
+
+const asterTier2Trades = new Map();  // "ASTER:BTC/USDT" -> ring buffer {t,price,qty,side}
+const asterTier2Depth = new Map();   // "ASTER:BTC/USDT" -> ring buffer {t,bids,asks,bestBid,bestAsk,bidVol,askVol}
+const asterWatchlist = new Map();    // symbol -> {addedAt, instId}
+const asterWatchlistCandidateStreaks = new Map();
+const asterWatchlistEvictStreaks = new Map();
+const asterWatchlistCooldowns = new Map();
+const asterInstIdToSymbol = new Map(); // "btcusdt" -> "ASTER:BTC/USDT"
+const asterDensityAbsorptionBreakoutState = new Map();
+const asterFailedBreakoutState = new Map();
+const asterPossibleHiddenAbsorptionState = new Map();
+const asterCrossExchangeDivergenceState = new Map();
+const asterTwapState = new Map();
+const asterTier2Health = { watchlistSize: 0, connectionAttempts: 0, tradesIngested: 0, depthPushesIngested: 0, cooldownDrops: 0 };
+
+let asterWs = null;
+let asterWsReady = false;
+let asterWsReconnectTimer = null;
+let asterSubMsgId = 1;
+
+function asterWatchlistInCooldown(symbol) {
+  const until = asterWatchlistCooldowns.get(symbol);
+  if (until == null) return false;
+  if (Date.now() >= until) { asterWatchlistCooldowns.delete(symbol); return false; }
+  return true;
+}
+
+function asterWsSend(obj) {
+  if (!asterWs || asterWs.readyState !== WebSocket.OPEN) return;
+  try { asterWs.send(JSON.stringify(obj)); } catch (e) {}
+}
+function asterSubOrUnsub(instId, method) {
+  asterWsSend({ method: method, params: [instId + '@trade', instId + '@depth' + ASTER_DEPTH_LEVEL], id: asterSubMsgId++ });
+}
+
+// Именованная функция — проверяема напрямую (window.__asterHandleMessage) без реального сокета.
+function handleAsterWsMessage(raw) {
+  let msg;
+  try { msg = JSON.parse(raw); } catch (e) { return; }
+  if (!msg || !msg.e) return; // подтверждение подписки ({result:null,id}) — не данные
+  const symbol = asterInstIdToSymbol.get(String(msg.s || '').toLowerCase());
+  if (!symbol) return;
+  if (msg.e === 'trade') {
+    pushRing(asterTier2Trades, symbol, {
+      t: Number(msg.T) || Date.now(), price: num(msg.p), qty: num(msg.q), side: msg.m ? 'sell' : 'buy'
+    }, ASTER_TIER2_TRADES_CAP);
+    asterTier2Health.tradesIngested++;
+  } else if (msg.e === 'depthUpdate') {
+    // ЖИВОЙ трафик подтвердил: реальный payload несёт короткие ключи "b"/"a" (как у Binance
+    // futures-стиля), а НЕ "bids"/"asks", как показывал пример в официальной документации — расхождение
+    // между доками и реальным сервером, найдено проверкой на живом сокете, не предположено.
+    const bids = (msg.b || []).map(function (x) { return { p: num(x[0]), q: num(x[1]) }; });
+    const asks = (msg.a || []).map(function (x) { return { p: num(x[0]), q: num(x[1]) }; });
+    const bidVol = bids.reduce(function (a, x) { return a + x.p * x.q; }, 0);
+    const askVol = asks.reduce(function (a, x) { return a + x.p * x.q; }, 0);
+    pushRing(asterTier2Depth, symbol, {
+      t: Date.now(), bids: bids, asks: asks,
+      bestBid: bids.length ? bids[0].p : null, bestAsk: asks.length ? asks[0].p : null,
+      bidVol: bidVol, askVol: askVol
+    }, ASTER_TIER2_DEPTH_CAP);
+    asterTier2Health.depthPushesIngested++;
+  }
+}
+
+function ensureAsterWs() {
+  if (asterWs && (asterWs.readyState === WebSocket.OPEN || asterWs.readyState === WebSocket.CONNECTING)) return;
+  asterTier2Health.connectionAttempts++;
+  let sock;
+  try {
+    sock = new WebSocket(ASTER_WS_URL);
+  } catch (e) {
+    logW('Watchlist', 'Aster: не удалось создать сокет — ' + e.message);
+    scheduleAsterReconnect();
+    return;
+  }
+  asterWs = sock;
+  asterWsReady = false;
+  sock.onopen = function () {
+    if (asterWs !== sock) return;
+    clearTimeout(asterWsReconnectTimer);
+    asterWatchlist.forEach(function (entry) { asterSubOrUnsub(entry.instId, 'SUBSCRIBE'); });
+    asterWsReady = true;
+  };
+  sock.onmessage = function (ev) { handleAsterWsMessage(ev.data); };
+  sock.onerror = function () {};
+  sock.onclose = function () {
+    if (asterWs !== sock) return;
+    asterWs = null;
+    asterWsReady = false;
+    if (!asterWatchlist.size) return;
+    scheduleAsterReconnect();
+  };
+}
+function scheduleAsterReconnect() {
+  clearTimeout(asterWsReconnectTimer);
+  asterWsReconnectTimer = setTimeout(function () { if (asterWatchlist.size) ensureAsterWs(); }, ASTER_WS_RECONNECT_DELAY_MS);
+}
+
+function subscribeAsterWatchlistSymbol(symbol, raw) {
+  if (asterWatchlist.has(symbol)) return;
+  const instId = String(raw || '').toLowerCase();
+  const entry = { addedAt: Date.now(), instId: instId };
+  asterWatchlist.set(symbol, entry);
+  asterInstIdToSymbol.set(instId, symbol);
+  logI('Watchlist', 'Aster ' + symbol + ' добавлена в глубокий анализ (' + raw + ')');
+  ensureAsterWs();
+  if (asterWsReady) asterSubOrUnsub(instId, 'SUBSCRIBE');
+}
+function unsubscribeAsterWatchlistSymbol(symbol) {
+  const entry = asterWatchlist.get(symbol);
+  if (!entry) return;
+  if (asterWsReady) asterSubOrUnsub(entry.instId, 'UNSUBSCRIBE');
+  asterInstIdToSymbol.delete(entry.instId);
+  asterWatchlist.delete(symbol);
+  asterWatchlistEvictStreaks.delete(symbol);
+  asterDensityAbsorptionBreakoutState.delete(symbol);
+  asterFailedBreakoutState.delete(symbol);
+  asterPossibleHiddenAbsorptionState.delete(symbol);
+  asterCrossExchangeDivergenceState.delete(symbol);
+  asterTwapState.delete(symbol);
+  logI('Watchlist', 'Aster ' + symbol + ' исключена из глубокого анализа');
+  if (!asterWatchlist.size && asterWs) { try { asterWs.close(); } catch (e) {} }
+}
+
+function asterTier2ForcedSymbols() {
+  const forced = new Set();
+  if (currentCoin && currentCoin.exchange === 'ASTER') forced.add(currentCoin.symbol);
+  allCoins.forEach(function (c) { if (c.fav && c.exchange === 'ASTER') forced.add(c.symbol); });
+  return forced;
+}
+
+function evaluateAsterWatchlist() {
+  const ranked = allCoins
+    .filter(function (c) { return c.exchange === 'ASTER' && c.__wlScore >= 0 && !asterWatchlistInCooldown(c.symbol); })
+    .slice()
+    .sort(function (a, b) { return b.__wlScore - a.__wlScore; })
+    .map(function (c) { return c.symbol; });
+
+  const forced = asterTier2ForcedSymbols();
+  const currentMembers = new Set(asterWatchlist.keys());
+
+  const transitions = MexcCore.computeWatchlistTransitions({
+    rankedSymbols: ranked,
+    currentMembers: currentMembers,
+    candidateStreaks: asterWatchlistCandidateStreaks,
+    evictStreaks: asterWatchlistEvictStreaks,
+    size: ASTER_WATCHLIST_SIZE,
+    evictMargin: ASTER_WATCHLIST_EVICT_MARGIN,
+    addStreakNeeded: ASTER_WATCHLIST_ADD_STREAK,
+    evictStreakNeeded: ASTER_WATCHLIST_EVICT_STREAK,
+    forced: forced,
+    maxSize: ASTER_WATCHLIST_HARD_CAP
+  });
+
+  transitions.toEvict.forEach(unsubscribeAsterWatchlistSymbol);
+  transitions.toAdd.forEach(function (symbol) {
+    const coin = coinMap.get(symbol);
+    if (coin) subscribeAsterWatchlistSymbol(symbol, coin.raw);
+  });
+  asterTier2Health.watchlistSize = asterWatchlist.size;
+}
+setInterval(evaluateAsterWatchlist, ASTER_WATCHLIST_EVAL_INTERVAL_MS);
+setTimeout(evaluateAsterWatchlist, 5000);
+
+// ============================================================================
+// TIER 2 — ASTER FUTURES (perpetual, fapi.asterdex.com/fstream.asterdex.com) — тот же протокол, что
+// у спота выше (TIER 2 — ASTER), ОТДЕЛЬНЫЙ хост и отдельный полноценный Tier-2 watchlist, не просто
+// Tier-1 тикер, как BINANCEFUT у Binance. Причина: живая проверка (см. комментарий у
+// EXCHANGE_CONNECTORS.aster) показала, что на споте Aster почти нет сделок — реальная ликвидность
+// именно здесь, во фьючерсах, только тут 29 алгоритмов физически есть чем кормить.
+//
+// Один ОБЩИЙ WS — wss://fstream.asterdex.com/ws, подписка/отписка через
+// {"method":"SUBSCRIBE"/"UNSUBSCRIBE","params":[...],"id":N} поверх уже открытого соединения — сервер
+// не помнит про разорванное соединение, при переподключении переподписываемся на весь текущий
+// watchlist заново, тот же приём, что у OKX/Gate.io/спота Aster.
+//
+// Формат сообщений — байт-в-байт идентичен споту (см. блок выше): "сырой" /ws-эндпоинт, тип события
+// по полю "e", символ по полю "s", depthUpdate несёт короткие ключи "b"/"a" (не "bids"/"asks",
+// подтверждено на живом сокете fstream.asterdex.com, а не только по документации).
+//
+// Ping/pong — на уровне WS-протокола, тот же режим, что у спота (сервер шлёт ping раз в 3 мин, ждёт
+// pong в течение 10 мин, максимум жизни соединения 24ч) — свой JSON-пинг не нужен.
+// ============================================================================
+const ASTERFUT_WS_URL = 'wss://fstream.asterdex.com/ws';
+const ASTERFUT_DEPTH_LEVEL = '20';
+const ASTERFUT_WATCHLIST_SIZE = 20;
+const ASTERFUT_WATCHLIST_HARD_CAP = 25;
+const ASTERFUT_WATCHLIST_EVICT_MARGIN = 8;
+const ASTERFUT_WATCHLIST_ADD_STREAK = 2;
+const ASTERFUT_WATCHLIST_EVICT_STREAK = 3;
+const ASTERFUT_WATCHLIST_EVAL_INTERVAL_MS = 20000;
+const ASTERFUT_WATCHLIST_COOLDOWN_MS = 5 * 60 * 1000;
+const ASTERFUT_TIER2_TRADES_CAP = 2000;
+const ASTERFUT_TIER2_DEPTH_CAP = 600;
+const ASTERFUT_WS_RECONNECT_DELAY_MS = 3000;
+
+const asterFutTier2Trades = new Map();  // "ASTERFUT:BTC/USDT" -> ring buffer {t,price,qty,side}
+const asterFutTier2Depth = new Map();   // "ASTERFUT:BTC/USDT" -> ring buffer {t,bids,asks,bestBid,bestAsk,bidVol,askVol}
+const asterFutWatchlist = new Map();    // symbol -> {addedAt, instId}
+const asterFutWatchlistCandidateStreaks = new Map();
+const asterFutWatchlistEvictStreaks = new Map();
+const asterFutWatchlistCooldowns = new Map();
+const asterFutInstIdToSymbol = new Map(); // "btcusdt" -> "ASTERFUT:BTC/USDT"
+const asterFutDensityAbsorptionBreakoutState = new Map();
+const asterFutFailedBreakoutState = new Map();
+const asterFutPossibleHiddenAbsorptionState = new Map();
+const asterFutCrossExchangeDivergenceState = new Map();
+const asterFutTwapState = new Map();
+const asterFutTier2Health = { watchlistSize: 0, connectionAttempts: 0, tradesIngested: 0, depthPushesIngested: 0, cooldownDrops: 0 };
+
+let asterFutWs = null;
+let asterFutWsReady = false;
+let asterFutWsReconnectTimer = null;
+let asterFutSubMsgId = 1;
+
+function asterFutWatchlistInCooldown(symbol) {
+  const until = asterFutWatchlistCooldowns.get(symbol);
+  if (until == null) return false;
+  if (Date.now() >= until) { asterFutWatchlistCooldowns.delete(symbol); return false; }
+  return true;
+}
+
+function asterFutWsSend(obj) {
+  if (!asterFutWs || asterFutWs.readyState !== WebSocket.OPEN) return;
+  try { asterFutWs.send(JSON.stringify(obj)); } catch (e) {}
+}
+function asterFutSubOrUnsub(instId, method) {
+  asterFutWsSend({ method: method, params: [instId + '@trade', instId + '@depth' + ASTERFUT_DEPTH_LEVEL], id: asterFutSubMsgId++ });
+}
+
+// Именованная функция — проверяема напрямую (window.__asterFutHandleMessage) без реального сокета.
+function handleAsterFutWsMessage(raw) {
+  let msg;
+  try { msg = JSON.parse(raw); } catch (e) { return; }
+  if (!msg || !msg.e) return; // подтверждение подписки ({result:null,id}) — не данные
+  const symbol = asterFutInstIdToSymbol.get(String(msg.s || '').toLowerCase());
+  if (!symbol) return;
+  if (msg.e === 'trade') {
+    pushRing(asterFutTier2Trades, symbol, {
+      t: Number(msg.T) || Date.now(), price: num(msg.p), qty: num(msg.q), side: msg.m ? 'sell' : 'buy'
+    }, ASTERFUT_TIER2_TRADES_CAP);
+    asterFutTier2Health.tradesIngested++;
+  } else if (msg.e === 'depthUpdate') {
+    // ЖИВОЙ трафик подтвердил: реальный payload несёт короткие ключи "b"/"a" (как у Binance
+    // futures-стиля), а НЕ "bids"/"asks", как показывал пример в официальной документации — расхождение
+    // между доками и реальным сервером, найдено проверкой на живом сокете, не предположено.
+    const bids = (msg.b || []).map(function (x) { return { p: num(x[0]), q: num(x[1]) }; });
+    const asks = (msg.a || []).map(function (x) { return { p: num(x[0]), q: num(x[1]) }; });
+    const bidVol = bids.reduce(function (a, x) { return a + x.p * x.q; }, 0);
+    const askVol = asks.reduce(function (a, x) { return a + x.p * x.q; }, 0);
+    pushRing(asterFutTier2Depth, symbol, {
+      t: Date.now(), bids: bids, asks: asks,
+      bestBid: bids.length ? bids[0].p : null, bestAsk: asks.length ? asks[0].p : null,
+      bidVol: bidVol, askVol: askVol
+    }, ASTERFUT_TIER2_DEPTH_CAP);
+    asterFutTier2Health.depthPushesIngested++;
+  }
+}
+
+function ensureAsterFutWs() {
+  if (asterFutWs && (asterFutWs.readyState === WebSocket.OPEN || asterFutWs.readyState === WebSocket.CONNECTING)) return;
+  asterFutTier2Health.connectionAttempts++;
+  let sock;
+  try {
+    sock = new WebSocket(ASTERFUT_WS_URL);
+  } catch (e) {
+    logW('Watchlist', 'AsterFut: не удалось создать сокет — ' + e.message);
+    scheduleAsterFutReconnect();
+    return;
+  }
+  asterFutWs = sock;
+  asterFutWsReady = false;
+  sock.onopen = function () {
+    if (asterFutWs !== sock) return;
+    clearTimeout(asterFutWsReconnectTimer);
+    asterFutWatchlist.forEach(function (entry) { asterFutSubOrUnsub(entry.instId, 'SUBSCRIBE'); });
+    asterFutWsReady = true;
+  };
+  sock.onmessage = function (ev) { handleAsterFutWsMessage(ev.data); };
+  sock.onerror = function () {};
+  sock.onclose = function () {
+    if (asterFutWs !== sock) return;
+    asterFutWs = null;
+    asterFutWsReady = false;
+    if (!asterFutWatchlist.size) return;
+    scheduleAsterFutReconnect();
+  };
+}
+function scheduleAsterFutReconnect() {
+  clearTimeout(asterFutWsReconnectTimer);
+  asterFutWsReconnectTimer = setTimeout(function () { if (asterFutWatchlist.size) ensureAsterFutWs(); }, ASTERFUT_WS_RECONNECT_DELAY_MS);
+}
+
+function subscribeAsterFutWatchlistSymbol(symbol, raw) {
+  if (asterFutWatchlist.has(symbol)) return;
+  const instId = String(raw || '').toLowerCase();
+  const entry = { addedAt: Date.now(), instId: instId };
+  asterFutWatchlist.set(symbol, entry);
+  asterFutInstIdToSymbol.set(instId, symbol);
+  logI('Watchlist', 'AsterFut ' + symbol + ' добавлена в глубокий анализ (' + raw + ')');
+  ensureAsterFutWs();
+  if (asterFutWsReady) asterFutSubOrUnsub(instId, 'SUBSCRIBE');
+}
+function unsubscribeAsterFutWatchlistSymbol(symbol) {
+  const entry = asterFutWatchlist.get(symbol);
+  if (!entry) return;
+  if (asterFutWsReady) asterFutSubOrUnsub(entry.instId, 'UNSUBSCRIBE');
+  asterFutInstIdToSymbol.delete(entry.instId);
+  asterFutWatchlist.delete(symbol);
+  asterFutWatchlistEvictStreaks.delete(symbol);
+  asterFutDensityAbsorptionBreakoutState.delete(symbol);
+  asterFutFailedBreakoutState.delete(symbol);
+  asterFutPossibleHiddenAbsorptionState.delete(symbol);
+  asterFutCrossExchangeDivergenceState.delete(symbol);
+  asterFutTwapState.delete(symbol);
+  logI('Watchlist', 'AsterFut ' + symbol + ' исключена из глубокого анализа');
+  if (!asterFutWatchlist.size && asterFutWs) { try { asterFutWs.close(); } catch (e) {} }
+}
+
+function asterFutTier2ForcedSymbols() {
+  const forced = new Set();
+  if (currentCoin && currentCoin.exchange === 'ASTERFUT') forced.add(currentCoin.symbol);
+  allCoins.forEach(function (c) { if (c.fav && c.exchange === 'ASTERFUT') forced.add(c.symbol); });
+  return forced;
+}
+
+function evaluateAsterFutWatchlist() {
+  const ranked = allCoins
+    .filter(function (c) { return c.exchange === 'ASTERFUT' && c.__wlScore >= 0 && !asterFutWatchlistInCooldown(c.symbol); })
+    .slice()
+    .sort(function (a, b) { return b.__wlScore - a.__wlScore; })
+    .map(function (c) { return c.symbol; });
+
+  const forced = asterFutTier2ForcedSymbols();
+  const currentMembers = new Set(asterFutWatchlist.keys());
+
+  const transitions = MexcCore.computeWatchlistTransitions({
+    rankedSymbols: ranked,
+    currentMembers: currentMembers,
+    candidateStreaks: asterFutWatchlistCandidateStreaks,
+    evictStreaks: asterFutWatchlistEvictStreaks,
+    size: ASTERFUT_WATCHLIST_SIZE,
+    evictMargin: ASTERFUT_WATCHLIST_EVICT_MARGIN,
+    addStreakNeeded: ASTERFUT_WATCHLIST_ADD_STREAK,
+    evictStreakNeeded: ASTERFUT_WATCHLIST_EVICT_STREAK,
+    forced: forced,
+    maxSize: ASTERFUT_WATCHLIST_HARD_CAP
+  });
+
+  transitions.toEvict.forEach(unsubscribeAsterFutWatchlistSymbol);
+  transitions.toAdd.forEach(function (symbol) {
+    const coin = coinMap.get(symbol);
+    if (coin) subscribeAsterFutWatchlistSymbol(symbol, coin.raw);
+  });
+  asterFutTier2Health.watchlistSize = asterFutWatchlist.size;
+}
+setInterval(evaluateAsterFutWatchlist, ASTERFUT_WATCHLIST_EVAL_INTERVAL_MS);
+setTimeout(evaluateAsterFutWatchlist, 5000);
+
 // Единственные два места во всём детекторном движке, которым честно нужно прочитать буфер ПО ЛЮБОЙ
 // поддерживаемой бирже, а не только MEXC (см. sweepCyclicalOutcomes/flushTimeWindowIfDue ниже) —
 // не переписываем сами tier2Trades/tier2Depth (MEXC-only, трогать лишний раз рискованно), просто
-// выбираем нужную Map по префиксу символа ("OKX:"/"BINANCE:"/"BITGET:"/"BINGX:"/"KUCOIN:"/"GATEIO:"
-// -> своя биржа, иначе MEXC).
+// выбираем нужную Map по префиксу символа ("OKX:"/"BINANCE:"/"BITGET:"/"BINGX:"/"KUCOIN:"/"GATEIO:"/
+// "ASTER:" -> своя биржа, иначе MEXC).
 function tier2TradesForSymbol(symbol) {
   if (symbol.indexOf('OKX:') === 0) return okxTier2Trades.get(symbol);
   if (symbol.indexOf('BITGET:') === 0) return bitgetTier2Trades.get(symbol);
   if (symbol.indexOf('BINGX:') === 0) return bingxTier2Trades.get(symbol);
   if (symbol.indexOf('KUCOIN:') === 0) return kucoinTier2Trades.get(symbol);
   if (symbol.indexOf('GATEIO:') === 0) return gateioTier2Trades.get(symbol);
+  if (symbol.indexOf('ASTERFUT:') === 0) return asterFutTier2Trades.get(symbol);
+  if (symbol.indexOf('ASTER:') === 0) return asterTier2Trades.get(symbol);
   return symbol.indexOf('BINANCE:') === 0 ? binanceTier2Trades.get(symbol) : tier2Trades.get(symbol);
 }
 function tier2DepthForSymbol(symbol) {
@@ -5468,6 +5891,8 @@ function tier2DepthForSymbol(symbol) {
   if (symbol.indexOf('BINGX:') === 0) return bingxTier2Depth.get(symbol);
   if (symbol.indexOf('KUCOIN:') === 0) return kucoinTier2Depth.get(symbol);
   if (symbol.indexOf('GATEIO:') === 0) return gateioTier2Depth.get(symbol);
+  if (symbol.indexOf('ASTERFUT:') === 0) return asterFutTier2Depth.get(symbol);
+  if (symbol.indexOf('ASTER:') === 0) return asterTier2Depth.get(symbol);
   return symbol.indexOf('BINANCE:') === 0 ? binanceTier2Depth.get(symbol) : tier2Depth.get(symbol);
 }
 
@@ -7456,6 +7881,537 @@ const GATEIO_DETECTOR_FNS = {
   cyclicalPattern: detectCyclicalPatternGateio, timeBasedImpulse: detectTimeBasedImpulseGateio,
   twap: detectTwapGateio, possibleMarketMakerBot: detectPossibleMarketMakerBotGateio
 };
+// Aster-версии всех детекторов выше — тот же контракт detect(symbol) -> event|null, только читают
+// asterTier2Trades/asterTier2Depth и свои aster*State карты (см. блок "TIER 2 — ASTER" выше).
+// Пороги/opts — намеренно один в один с остальными шестью биржами того же алгоритма.
+// ------------------------------------------------------------------------------------------
+function detectRepeatedTradeSizesAster(symbol) {
+  const ev = MexcCore.detectRepeatedTradeSizes(asterTier2Trades.get(symbol), {
+    tolerance: PATTERN_CLUSTER_TOLERANCE, minRepeats: DETECTOR_DEFS.repeatSize.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectRepeatedIntervalsAster(symbol) {
+  const ev = MexcCore.detectRepeatedIntervals(asterTier2Trades.get(symbol), {
+    tolerance: PATTERN_CLUSTER_TOLERANCE, minRepeats: DETECTOR_DEFS.repeatInterval.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectBurstNoFollowThroughAster(symbol) {
+  const ev = MexcCore.detectBurstNoFollowThrough(asterTier2Trades.get(symbol), {
+    bucketMs: PATTERN_BURST_BUCKET_MS, minRepeats: DETECTOR_DEFS.burstNoFollow.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectCyclicityAster(symbol) {
+  const ev = MexcCore.detectCyclicity(asterTier2Trades.get(symbol), {
+    bucketMs: 2000, minRepeats: DETECTOR_DEFS.cycle.minRepeats, tolerance: PATTERN_CLUSTER_TOLERANCE, lookback: 2000
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectRepeatingSequenceAster(symbol) {
+  const ev = MexcCore.detectRepeatingSequence(asterTier2Trades.get(symbol), {
+    minLen: 3, maxLen: 6, minRepeats: DETECTOR_DEFS.sequence.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectLadderAster(symbol) {
+  const ev = MexcCore.detectLadder(asterTier2Trades.get(symbol), {
+    tolerance: 0.3, minRepeats: DETECTOR_DEFS.ladder.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectErshikAster(symbol) {
+  const ev = MexcCore.detectErshik(asterTier2Trades.get(symbol), {
+    tolerance: 0.2, minRepeats: DETECTOR_DEFS.ershik.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectImbalanceAster(symbol) {
+  const ev = MexcCore.detectImbalance(asterTier2Depth.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.imbalance.minRepeats, minZ: 2.5, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectAbsorptionAster(symbol) {
+  const ev = MexcCore.detectAbsorption(asterTier2Depth.get(symbol), asterTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.absorption.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectFakeLiquidityAster(symbol) {
+  const ev = MexcCore.detectFakeLiquidity(asterTier2Depth.get(symbol), asterTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.fakeLiquidity.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectExhaustionAster(symbol) {
+  const ev = MexcCore.detectExhaustion(asterTier2Trades.get(symbol), {
+    bucketMs: PATTERN_BURST_BUCKET_MS, minRepeats: DETECTOR_DEFS.exhaustion.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectZoneReturnAster(symbol) {
+  const ev = MexcCore.detectZoneReturn(asterTier2Trades.get(symbol), {
+    tolerance: 0.005, minRepeats: DETECTOR_DEFS.zoneReturn.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectStandingWallAster(symbol) {
+  const ev = MexcCore.detectStandingWall(asterTier2Depth.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.standingWall.minRepeats, lookback: 20, minWallRatio: 5, maxDistancePct: 1.5
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDensityBreakAster(symbol) {
+  const ev = MexcCore.detectDensityBreak(asterTier2Depth.get(symbol), asterTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.densityBreak.minRepeats, lookback: 300, minWallRatio: 5, minShrinkRatio: 0.5
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDensityAbsorptionAster(symbol) {
+  const ev = MexcCore.detectDensityAbsorption(asterTier2Depth.get(symbol), asterTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.densityAbsorption.minRepeats, lookback: 300, minWallRatio: 5
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectLiquiditySweepAster(symbol) {
+  const ev = MexcCore.detectLiquiditySweep(asterTier2Trades.get(symbol), asterTier2Depth.get(symbol), { lookback: 200 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectImpulsePullbackContinuationAster(symbol) {
+  const ev = MexcCore.detectImpulsePullbackContinuation(asterTier2Trades.get(symbol), { lookback: 300 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPriceVolumeInefficiencyAster(symbol) {
+  const ev = MexcCore.detectPriceVolumeInefficiency(asterTier2Trades.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDensityAbsorptionBreakoutAster(symbol) {
+  const state = asterDensityAbsorptionBreakoutState.get(symbol) || {};
+  const result = MexcCore.detectDensityAbsorptionBreakout(asterTier2Depth.get(symbol), asterTier2Trades.get(symbol), {
+    minWallRatio: 5, maxDistancePct: 1.0, minTestCount: DETECTOR_DEFS.densityAbsorptionBreakout.minRepeats
+  }, state);
+  asterDensityAbsorptionBreakoutState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPumpReversalAster(symbol) {
+  const ev = MexcCore.detectPumpReversal(asterTier2Trades.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDumpReversalAster(symbol) {
+  const ev = MexcCore.detectDumpReversal(asterTier2Trades.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectCompressionBreakAster(symbol) {
+  const ev = MexcCore.detectCompressionBreak(asterTier2Trades.get(symbol), asterTier2Depth.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectFailedBreakoutAster(symbol) {
+  const state = asterFailedBreakoutState.get(symbol) || {};
+  const result = MexcCore.detectFailedBreakout(asterTier2Trades.get(symbol), { lookback: 300 }, state);
+  asterFailedBreakoutState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectVolumeAnomalyAster(symbol) {
+  const ev = MexcCore.detectVolumeAnomaly(asterTier2Trades.get(symbol), asterTier2Depth.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectLiquidityWithdrawalAster(symbol) {
+  const ev = MexcCore.detectLiquidityWithdrawal(asterTier2Depth.get(symbol), asterTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.liquidityWithdrawal.minRepeats, lookback: 200
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPossibleHiddenAbsorptionAster(symbol) {
+  const state = asterPossibleHiddenAbsorptionState.get(symbol) || {};
+  const result = MexcCore.detectPossibleHiddenAbsorption(asterTier2Depth.get(symbol), asterTier2Trades.get(symbol), {}, state);
+  asterPossibleHiddenAbsorptionState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+// base монеты из "ASTER:BTC/USDT" -> "BTC" — сравниваем цену Aster с MEXC (всегда доступна) и
+// любой ДРУГОЙ подключённой биржей (не с самим Aster).
+function crossExchangeCandidatesForAster(symbol) {
+  const base = symbol.split(':').pop().split('/')[0];
+  const candidates = [];
+  const mexcCoin = coinMap.get(base + '/USDT');
+  if (mexcCoin && mexcCoin.price > 0) candidates.push({ exchange: 'MEXC', price: mexcCoin.price });
+  Object.keys(EXCHANGE_CONNECTORS).forEach(function (id) {
+    if (id === 'aster') return;
+    if (!exchangeConnections[id] || !exchangeConnections[id].connected) return;
+    EXCHANGE_CONNECTORS[id].exchangeTags.filter(function (tag) { return !/FUT$/.test(tag); }).forEach(function (tag) {
+      const coin = coinMap.get(tag + ':' + base + '/USDT');
+      if (coin && coin.price > 0) candidates.push({ exchange: tag, price: coin.price });
+    });
+  });
+  return candidates;
+}
+function detectCrossExchangeDivergenceAster(symbol) {
+  const coin = coinMap.get(symbol);
+  if (!coin || !(coin.price > 0)) return null;
+  const candidates = crossExchangeCandidatesForAster(symbol);
+  if (!candidates.length) return null;
+  const state = asterCrossExchangeDivergenceState.get(symbol) || {};
+  const result = MexcCore.detectCrossExchangeDivergence(coin.price, candidates, { now: Date.now() }, state);
+  asterCrossExchangeDivergenceState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+// #12/#16 честно переиспользуют ОБЩИЕ cyclicalLibrary/timeBucketStats (обычные объекты, не Map,
+// ключ — уже уникальный "ASTER:BTC/USDT" строкой, коллизий с MEXC-символами нет) — и уже
+// обобщённые выше flushTimeWindowIfDue/symbolOverallMedianVolume (см. tier2TradesForSymbol).
+function detectCyclicalPatternAster(symbol) {
+  const trades = asterTier2Trades.get(symbol);
+  const library = cyclicalLibrary[symbol] || [];
+  const result = MexcCore.detectCyclicalPattern(trades, library, {});
+  if (result.library !== library) {
+    const added = result.library[result.library.length - 1];
+    if (added && added.priceAtEpisode == null && trades && trades.length) added.priceAtEpisode = trades[trades.length - 1].price;
+    cyclicalLibrary[symbol] = result.library;
+    saveCyclicalLibrary();
+  }
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectTimeBasedImpulseAster(symbol) {
+  const coin = coinMap.get(symbol);
+  if (!coin || !(coin.price > 0)) return null;
+  const now = Date.now();
+  flushTimeWindowIfDue(symbol, now, coin.price);
+  const bucketKey = MexcCore.timeBucketKeyFromDate(new Date(now));
+  const stats = (timeBucketStats[symbol] || {})[bucketKey];
+  const ev = MexcCore.detectTimeBasedImpulse(stats, symbolOverallMedianVolume(symbol), coin.price, {});
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectTwapAster(symbol) {
+  const state = asterTwapState.get(symbol) || {};
+  const result = MexcCore.detectTwap(asterTier2Trades.get(symbol), {}, state);
+  asterTwapState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPossibleMarketMakerBotAster(symbol) {
+  const ev = MexcCore.detectPossibleMarketMakerBot(asterTier2Trades.get(symbol), asterTier2Depth.get(symbol), {});
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+const ASTER_DETECTOR_FNS = {
+  repeatSize: detectRepeatedTradeSizesAster, repeatInterval: detectRepeatedIntervalsAster,
+  burstNoFollow: detectBurstNoFollowThroughAster, cycle: detectCyclicityAster,
+  sequence: detectRepeatingSequenceAster, ladder: detectLadderAster, ershik: detectErshikAster,
+  imbalance: detectImbalanceAster, absorption: detectAbsorptionAster, fakeLiquidity: detectFakeLiquidityAster,
+  exhaustion: detectExhaustionAster, zoneReturn: detectZoneReturnAster, standingWall: detectStandingWallAster,
+  densityBreak: detectDensityBreakAster, densityAbsorption: detectDensityAbsorptionAster,
+  liquiditySweep: detectLiquiditySweepAster, impulsePullbackContinuation: detectImpulsePullbackContinuationAster,
+  priceVolumeInefficiency: detectPriceVolumeInefficiencyAster, densityAbsorptionBreakout: detectDensityAbsorptionBreakoutAster,
+  pumpReversal: detectPumpReversalAster, dumpReversal: detectDumpReversalAster,
+  compressionBreak: detectCompressionBreakAster, failedBreakout: detectFailedBreakoutAster,
+  volumeAnomaly: detectVolumeAnomalyAster, liquidityWithdrawal: detectLiquidityWithdrawalAster,
+  possibleHiddenAbsorption: detectPossibleHiddenAbsorptionAster, crossExchangeDivergence: detectCrossExchangeDivergenceAster,
+  cyclicalPattern: detectCyclicalPatternAster, timeBasedImpulse: detectTimeBasedImpulseAster,
+  twap: detectTwapAster, possibleMarketMakerBot: detectPossibleMarketMakerBotAster
+};
+
+// Aster Futures-версии всех детекторов выше — тот же контракт detect(symbol) -> event|null, только
+// читают asterFutTier2Trades/asterFutTier2Depth и свои asterFut*State карты (см. блок
+// "TIER 2 — ASTER FUTURES" выше). Пороги/opts — намеренно один в один с остальным Tier-2.
+// ------------------------------------------------------------------------------------------
+function detectRepeatedTradeSizesAsterFut(symbol) {
+  const ev = MexcCore.detectRepeatedTradeSizes(asterFutTier2Trades.get(symbol), {
+    tolerance: PATTERN_CLUSTER_TOLERANCE, minRepeats: DETECTOR_DEFS.repeatSize.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectRepeatedIntervalsAsterFut(symbol) {
+  const ev = MexcCore.detectRepeatedIntervals(asterFutTier2Trades.get(symbol), {
+    tolerance: PATTERN_CLUSTER_TOLERANCE, minRepeats: DETECTOR_DEFS.repeatInterval.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectBurstNoFollowThroughAsterFut(symbol) {
+  const ev = MexcCore.detectBurstNoFollowThrough(asterFutTier2Trades.get(symbol), {
+    bucketMs: PATTERN_BURST_BUCKET_MS, minRepeats: DETECTOR_DEFS.burstNoFollow.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectCyclicityAsterFut(symbol) {
+  const ev = MexcCore.detectCyclicity(asterFutTier2Trades.get(symbol), {
+    bucketMs: 2000, minRepeats: DETECTOR_DEFS.cycle.minRepeats, tolerance: PATTERN_CLUSTER_TOLERANCE, lookback: 2000
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectRepeatingSequenceAsterFut(symbol) {
+  const ev = MexcCore.detectRepeatingSequence(asterFutTier2Trades.get(symbol), {
+    minLen: 3, maxLen: 6, minRepeats: DETECTOR_DEFS.sequence.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectLadderAsterFut(symbol) {
+  const ev = MexcCore.detectLadder(asterFutTier2Trades.get(symbol), {
+    tolerance: 0.3, minRepeats: DETECTOR_DEFS.ladder.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectErshikAsterFut(symbol) {
+  const ev = MexcCore.detectErshik(asterFutTier2Trades.get(symbol), {
+    tolerance: 0.2, minRepeats: DETECTOR_DEFS.ershik.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectImbalanceAsterFut(symbol) {
+  const ev = MexcCore.detectImbalance(asterFutTier2Depth.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.imbalance.minRepeats, minZ: 2.5, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectAbsorptionAsterFut(symbol) {
+  const ev = MexcCore.detectAbsorption(asterFutTier2Depth.get(symbol), asterFutTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.absorption.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectFakeLiquidityAsterFut(symbol) {
+  const ev = MexcCore.detectFakeLiquidity(asterFutTier2Depth.get(symbol), asterFutTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.fakeLiquidity.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectExhaustionAsterFut(symbol) {
+  const ev = MexcCore.detectExhaustion(asterFutTier2Trades.get(symbol), {
+    bucketMs: PATTERN_BURST_BUCKET_MS, minRepeats: DETECTOR_DEFS.exhaustion.minRepeats, lookback: 300
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectZoneReturnAsterFut(symbol) {
+  const ev = MexcCore.detectZoneReturn(asterFutTier2Trades.get(symbol), {
+    tolerance: 0.005, minRepeats: DETECTOR_DEFS.zoneReturn.minRepeats, lookback: PATTERN_LOOKBACK_TRADES
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectStandingWallAsterFut(symbol) {
+  const ev = MexcCore.detectStandingWall(asterFutTier2Depth.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.standingWall.minRepeats, lookback: 20, minWallRatio: 5, maxDistancePct: 1.5
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDensityBreakAsterFut(symbol) {
+  const ev = MexcCore.detectDensityBreak(asterFutTier2Depth.get(symbol), asterFutTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.densityBreak.minRepeats, lookback: 300, minWallRatio: 5, minShrinkRatio: 0.5
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDensityAbsorptionAsterFut(symbol) {
+  const ev = MexcCore.detectDensityAbsorption(asterFutTier2Depth.get(symbol), asterFutTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.densityAbsorption.minRepeats, lookback: 300, minWallRatio: 5
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectLiquiditySweepAsterFut(symbol) {
+  const ev = MexcCore.detectLiquiditySweep(asterFutTier2Trades.get(symbol), asterFutTier2Depth.get(symbol), { lookback: 200 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectImpulsePullbackContinuationAsterFut(symbol) {
+  const ev = MexcCore.detectImpulsePullbackContinuation(asterFutTier2Trades.get(symbol), { lookback: 300 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPriceVolumeInefficiencyAsterFut(symbol) {
+  const ev = MexcCore.detectPriceVolumeInefficiency(asterFutTier2Trades.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDensityAbsorptionBreakoutAsterFut(symbol) {
+  const state = asterFutDensityAbsorptionBreakoutState.get(symbol) || {};
+  const result = MexcCore.detectDensityAbsorptionBreakout(asterFutTier2Depth.get(symbol), asterFutTier2Trades.get(symbol), {
+    minWallRatio: 5, maxDistancePct: 1.0, minTestCount: DETECTOR_DEFS.densityAbsorptionBreakout.minRepeats
+  }, state);
+  asterFutDensityAbsorptionBreakoutState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPumpReversalAsterFut(symbol) {
+  const ev = MexcCore.detectPumpReversal(asterFutTier2Trades.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectDumpReversalAsterFut(symbol) {
+  const ev = MexcCore.detectDumpReversal(asterFutTier2Trades.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectCompressionBreakAsterFut(symbol) {
+  const ev = MexcCore.detectCompressionBreak(asterFutTier2Trades.get(symbol), asterFutTier2Depth.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectFailedBreakoutAsterFut(symbol) {
+  const state = asterFutFailedBreakoutState.get(symbol) || {};
+  const result = MexcCore.detectFailedBreakout(asterFutTier2Trades.get(symbol), { lookback: 300 }, state);
+  asterFutFailedBreakoutState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectVolumeAnomalyAsterFut(symbol) {
+  const ev = MexcCore.detectVolumeAnomaly(asterFutTier2Trades.get(symbol), asterFutTier2Depth.get(symbol), { lookback: 400 });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectLiquidityWithdrawalAsterFut(symbol) {
+  const ev = MexcCore.detectLiquidityWithdrawal(asterFutTier2Depth.get(symbol), asterFutTier2Trades.get(symbol), {
+    minSnapshots: DETECTOR_DEFS.liquidityWithdrawal.minRepeats, lookback: 200
+  });
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPossibleHiddenAbsorptionAsterFut(symbol) {
+  const state = asterFutPossibleHiddenAbsorptionState.get(symbol) || {};
+  const result = MexcCore.detectPossibleHiddenAbsorption(asterFutTier2Depth.get(symbol), asterFutTier2Trades.get(symbol), {}, state);
+  asterFutPossibleHiddenAbsorptionState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+// base монеты из "ASTERFUT:BTC/USDT" -> "BTC" — сравниваем цену AsterFut с MEXC (всегда доступна) и
+// любой ДРУГОЙ подключённой биржей (не с самим AsterFut).
+function crossExchangeCandidatesForAsterFut(symbol) {
+  const base = symbol.split(':').pop().split('/')[0];
+  const candidates = [];
+  const mexcCoin = coinMap.get(base + '/USDT');
+  if (mexcCoin && mexcCoin.price > 0) candidates.push({ exchange: 'MEXC', price: mexcCoin.price });
+  Object.keys(EXCHANGE_CONNECTORS).forEach(function (id) {
+    // Пропускаем ВЕСЬ коннектор 'aster' (не только тег 'ASTERFUT') — иначе спотовая цена ASTER того
+    // же коннектора попала бы в кандидаты как "кросс-биржевая", хотя это spot/futures-базис ОДНОЙ
+    // биржи, а не сравнение с другой биржей (см. тот же приём у спотовой версии выше, id === 'aster').
+    if (id === 'aster') return;
+    if (!exchangeConnections[id] || !exchangeConnections[id].connected) return;
+    EXCHANGE_CONNECTORS[id].exchangeTags.filter(function (tag) { return !/FUT$/.test(tag); }).forEach(function (tag) {
+      const coin = coinMap.get(tag + ':' + base + '/USDT');
+      if (coin && coin.price > 0) candidates.push({ exchange: tag, price: coin.price });
+    });
+  });
+  return candidates;
+}
+function detectCrossExchangeDivergenceAsterFut(symbol) {
+  const coin = coinMap.get(symbol);
+  if (!coin || !(coin.price > 0)) return null;
+  const candidates = crossExchangeCandidatesForAsterFut(symbol);
+  if (!candidates.length) return null;
+  const state = asterFutCrossExchangeDivergenceState.get(symbol) || {};
+  const result = MexcCore.detectCrossExchangeDivergence(coin.price, candidates, { now: Date.now() }, state);
+  asterFutCrossExchangeDivergenceState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+// #12/#16 честно переиспользуют ОБЩИЕ cyclicalLibrary/timeBucketStats (обычные объекты, не Map,
+// ключ — уже уникальный "ASTERFUT:BTC/USDT" строкой, коллизий с MEXC-символами нет) — и уже
+// обобщённые выше flushTimeWindowIfDue/symbolOverallMedianVolume (см. tier2TradesForSymbol).
+function detectCyclicalPatternAsterFut(symbol) {
+  const trades = asterFutTier2Trades.get(symbol);
+  const library = cyclicalLibrary[symbol] || [];
+  const result = MexcCore.detectCyclicalPattern(trades, library, {});
+  if (result.library !== library) {
+    const added = result.library[result.library.length - 1];
+    if (added && added.priceAtEpisode == null && trades && trades.length) added.priceAtEpisode = trades[trades.length - 1].price;
+    cyclicalLibrary[symbol] = result.library;
+    saveCyclicalLibrary();
+  }
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectTimeBasedImpulseAsterFut(symbol) {
+  const coin = coinMap.get(symbol);
+  if (!coin || !(coin.price > 0)) return null;
+  const now = Date.now();
+  flushTimeWindowIfDue(symbol, now, coin.price);
+  const bucketKey = MexcCore.timeBucketKeyFromDate(new Date(now));
+  const stats = (timeBucketStats[symbol] || {})[bucketKey];
+  const ev = MexcCore.detectTimeBasedImpulse(stats, symbolOverallMedianVolume(symbol), coin.price, {});
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectTwapAsterFut(symbol) {
+  const state = asterFutTwapState.get(symbol) || {};
+  const result = MexcCore.detectTwap(asterFutTier2Trades.get(symbol), {}, state);
+  asterFutTwapState.set(symbol, result.state);
+  const ev = result.event;
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+function detectPossibleMarketMakerBotAsterFut(symbol) {
+  const ev = MexcCore.detectPossibleMarketMakerBot(asterFutTier2Trades.get(symbol), asterFutTier2Depth.get(symbol), {});
+  if (ev) { ev.symbol = symbol; ev.detectedAt = Date.now(); }
+  return ev;
+}
+const ASTERFUT_DETECTOR_FNS = {
+  repeatSize: detectRepeatedTradeSizesAsterFut, repeatInterval: detectRepeatedIntervalsAsterFut,
+  burstNoFollow: detectBurstNoFollowThroughAsterFut, cycle: detectCyclicityAsterFut,
+  sequence: detectRepeatingSequenceAsterFut, ladder: detectLadderAsterFut, ershik: detectErshikAsterFut,
+  imbalance: detectImbalanceAsterFut, absorption: detectAbsorptionAsterFut, fakeLiquidity: detectFakeLiquidityAsterFut,
+  exhaustion: detectExhaustionAsterFut, zoneReturn: detectZoneReturnAsterFut, standingWall: detectStandingWallAsterFut,
+  densityBreak: detectDensityBreakAsterFut, densityAbsorption: detectDensityAbsorptionAsterFut,
+  liquiditySweep: detectLiquiditySweepAsterFut, impulsePullbackContinuation: detectImpulsePullbackContinuationAsterFut,
+  priceVolumeInefficiency: detectPriceVolumeInefficiencyAsterFut, densityAbsorptionBreakout: detectDensityAbsorptionBreakoutAsterFut,
+  pumpReversal: detectPumpReversalAsterFut, dumpReversal: detectDumpReversalAsterFut,
+  compressionBreak: detectCompressionBreakAsterFut, failedBreakout: detectFailedBreakoutAsterFut,
+  volumeAnomaly: detectVolumeAnomalyAsterFut, liquidityWithdrawal: detectLiquidityWithdrawalAsterFut,
+  possibleHiddenAbsorption: detectPossibleHiddenAbsorptionAsterFut, crossExchangeDivergence: detectCrossExchangeDivergenceAsterFut,
+  cyclicalPattern: detectCyclicalPatternAsterFut, timeBasedImpulse: detectTimeBasedImpulseAsterFut,
+  twap: detectTwapAsterFut, possibleMarketMakerBot: detectPossibleMarketMakerBotAsterFut
+};
+
 const KUCOIN_DETECTOR_FNS = {
   repeatSize: detectRepeatedTradeSizesKucoin, repeatInterval: detectRepeatedIntervalsKucoin,
   burstNoFollow: detectBurstNoFollowThroughKucoin, cycle: detectCyclicityKucoin,
@@ -8405,6 +9361,12 @@ function runPatternDetectors() {
   gateioWatchlist.forEach(function (entry, symbol) {
     runDetectorsForSymbolInto(symbol, GATEIO_DETECTOR_FNS, events, cycleNow);
   });
+  asterWatchlist.forEach(function (entry, symbol) {
+    runDetectorsForSymbolInto(symbol, ASTER_DETECTOR_FNS, events, cycleNow);
+  });
+  asterFutWatchlist.forEach(function (entry, symbol) {
+    runDetectorsForSymbolInto(symbol, ASTERFUT_DETECTOR_FNS, events, cycleNow);
+  });
 
   // Мульти-детекторное подтверждение (ТЗ #8, фактор "confirmation") — если на одной монете в ОДНОМ
   // прогоне сработало ≥2 разных детектора, это взаимное подтверждение: пересчитываем им score с
@@ -8811,6 +9773,7 @@ function graphsExchangeIdFor(coin) {
   if (coin.exchange === 'BINGX') return 'bingx';
   if (coin.exchange === 'KUCOIN') return 'kucoin';
   if (coin.exchange === 'GATEIO') return 'gateio';
+  if (coin.exchange === 'ASTER') return 'aster';
   return null; // биржа без своего REST-клиента здесь (пока нет ни одной такой в TIER2_EXTERNAL_EXCHANGES)
 }
 
@@ -13286,6 +14249,60 @@ const EXCHANGE_CONNECTORS = {
         upsertExternalCoin(rawSymbol, num(row.last), num(row.change_percentage), num(row.quote_volume), num(row.high_24h), num(row.low_24h), exchangeTag);
       });
     }
+  },
+  aster: {
+    label: 'Aster',
+    baseUrl: 'https://sapi.asterdex.com',
+    verifyPath: '/api/v1/account',
+    needsPassphrase: false,
+    // Aster — Binance-клон API (подтверждено официальными доками github.com/asterdex/api-docs,
+    // раздел "V1(Legacy)"): подпись байт-в-байт как у Binance — querystring-конкатенация всех
+    // параметров + timestamp (МИЛЛИСЕКУНДЫ, не секунды, как у Gate.io выше) -> HMAC-SHA256 hex,
+    // ключ в заголовке X-MBX-APIKEY, подпись — последним параметром query-строки.
+    // ЧЕСТНАЯ ОГОВОРКА: с 25.03.2026 у Aster закрыто СОЗДАНИЕ НОВЫХ ключей V1(Legacy) — новый
+    // (актуальный) способ авторизации V3 использует EIP-712 подпись кошелька, принципиально другую
+    // схему (не HMAC), плюс требует on-chain депозит с 01.09.2026 — это отдельная, более сложная
+    // задача, сознательно вне периметра этого захода (публичные тикер/свечи/WS ниже вообще не требуют
+    // авторизации). Этот sign() рассчитан на УЖЕ СУЩЕСТВУЮЩИЙ V1-ключ — если такого нет, кнопка
+    // «Подключить» здесь не сработает, но вся детекция (Tier-1/Tier-2/29 алгоритмов) работает и без
+    // подключения аккаунта, ровно как MEXC market-wide detection не требует подписанного доступа.
+    sign: async function (conn, path, params) {
+      const p = Object.assign({}, params, { timestamp: Date.now(), recvWindow: 10000 });
+      const qs = Object.keys(p).map(function (k) { return k + '=' + encodeURIComponent(p[k]); }).join('&');
+      const signature = await hmacSha256Hex(conn.apiSecret, qs);
+      return { url: this.baseUrl + path + '?' + qs + '&signature=' + signature, headers: { 'X-MBX-APIKEY': conn.apiKey } };
+    },
+    checkError: function (data) {
+      if (data && typeof data === 'object' && !Array.isArray(data) && typeof data.code === 'number' &&
+          data.code !== 200 && typeof data.balances === 'undefined') {
+        throw new Error(data.msg || ('Ошибка Aster (код ' + data.code + ')'));
+      }
+    },
+    // /api/v1/ticker/24hr — поля Binance-идентичны (lastPrice/priceChangePercent/quoteVolume/
+    // highPrice/lowPrice), символ слитно верхним регистром ("BTCUSDT"), без разделителя — как у
+    // MEXC/Binance, не как у OKX/BingX/KuCoin (дефис) или Gate.io (нижнее подчёркивание).
+    //
+    // ВТОРОЙ фид — ASTERFUT (perpetual-фьючерсы, fapi.asterdex.com), тот же приём, что у
+    // EXCHANGE_CONNECTORS.binance (BINANCE+BINANCEFUT) — отдельный псевдо-биржевой тег вместо поля
+    // рынка на "ASTER". Добавлен НЕ по аналогии "на всякий случай", а по факту живой проверки: на
+    // споте Aster (sapi/sstream) на 4 топ-парах не было НИ ОДНОЙ сделки за 40+ секунд наблюдения —
+    // реальный объём у Aster именно во фьючерсах (perpetual — их основной продукт), только там
+    // Tier-2-детекторам физически есть что ловить. В отличие от Binance, здесь фьючерсы получают
+    // СВОЙ ПОЛНЫЙ Tier-2 (watchlist + все 29 алгоритмов, см. "TIER 2 — ASTER FUTURES" ниже), не
+    // только Tier-1 тикер — у Binance таким набором пользуется только спот, потому что там разница
+    // спот/фьючерсы не так критична для реальной ликвидности сделок.
+    exchangeTags: ['ASTER', 'ASTERFUT'],
+    feeds: [
+      { exchangeTag: 'ASTER', url: 'https://sapi.asterdex.com/api/v1/ticker/24hr' },
+      { exchangeTag: 'ASTERFUT', url: 'https://fapi.asterdex.com/fapi/v1/ticker/24hr' }
+    ],
+    parseTickers: function (body, exchangeTag) {
+      const data = JSON.parse(body);
+      if (!Array.isArray(data)) throw new Error('неожиданный формат ответа Aster');
+      data.forEach(function (row) {
+        upsertExternalCoin(row.symbol, num(row.lastPrice), num(row.priceChangePercent), num(row.quoteVolume), num(row.highPrice), num(row.lowPrice), exchangeTag);
+      });
+    }
   }
 };
 
@@ -13738,9 +14755,9 @@ function setExchangeStatus(id, state, msg) {
 // "BINANCEFUT" — псевдо-биржа для фьючерсов Binance (см. exchangeTags/feeds у EXCHANGE_CONNECTORS.binance
 // выше) — своя буква "F" и своё полное имя для подсказки, но цвет кнопки (см. styles.css) намеренно
 // тот же жёлтый, что и у обычного Binance — это та же биржа, просто другой рынок.
-const EXCHANGE_SWITCH_LABELS = { MEXC: 'M', BINANCE: 'B', BINANCEFUT: 'F', OKX: 'O', BITGET: 'G', BINGX: 'X', KUCOIN: 'K', GATEIO: 'T' };
-const EXCHANGE_SWITCH_TITLES = { MEXC: 'MEXC', BINANCE: 'Binance Spot', BINANCEFUT: 'Binance Futures', OKX: 'OKX', BITGET: 'Bitget', BINGX: 'BingX', KUCOIN: 'KuCoin', GATEIO: 'Gate.io' };
-const EXCHANGE_MARKET_LABEL = { BINANCE: 'Спот', BINANCEFUT: 'Фьючерсы' };
+const EXCHANGE_SWITCH_LABELS = { MEXC: 'M', BINANCE: 'B', BINANCEFUT: 'F', OKX: 'O', BITGET: 'G', BINGX: 'X', KUCOIN: 'K', GATEIO: 'T', ASTER: 'A', ASTERFUT: 'AF' };
+const EXCHANGE_SWITCH_TITLES = { MEXC: 'MEXC', BINANCE: 'Binance Spot', BINANCEFUT: 'Binance Futures', OKX: 'OKX', BITGET: 'Bitget', BINGX: 'BingX', KUCOIN: 'KuCoin', GATEIO: 'Gate.io', ASTER: 'Aster Spot', ASTERFUT: 'Aster Futures' };
+const EXCHANGE_MARKET_LABEL = { BINANCE: 'Спот', BINANCEFUT: 'Фьючерсы', ASTER: 'Спот', ASTERFUT: 'Фьючерсы' };
 
 // Какая группа переключателя сейчас раскрыта (см. .exch-switch-submenu в styles.css) — только одна
 // одновременно, id коннектора ('binance'/'okx') или null, если ни одна не раскрыта. У группы с
@@ -15314,6 +16331,18 @@ window.__gateioTier2DepthFor = function (symbol) { return gateioTier2Depth.get(s
 window.__gateioHandleMessage = handleGateioWsMessage; // отладка разбора сообщений Gate.io WS без реального сокета
 window.__gateioTier2Health = gateioTier2Health;
 window.__gateioInstIdToSymbol = gateioInstIdToSymbol;
+window.__asterWatchlist = function () { return Array.from(asterWatchlist.keys()); };
+window.__asterTier2TradesFor = function (symbol) { return asterTier2Trades.get(symbol) || []; };
+window.__asterTier2DepthFor = function (symbol) { return asterTier2Depth.get(symbol) || []; };
+window.__asterHandleMessage = handleAsterWsMessage; // отладка разбора сообщений Aster WS без реального сокета
+window.__asterTier2Health = asterTier2Health;
+window.__asterInstIdToSymbol = asterInstIdToSymbol;
+window.__asterFutWatchlist = function () { return Array.from(asterFutWatchlist.keys()); };
+window.__asterFutTier2TradesFor = function (symbol) { return asterFutTier2Trades.get(symbol) || []; };
+window.__asterFutTier2DepthFor = function (symbol) { return asterFutTier2Depth.get(symbol) || []; };
+window.__asterFutHandleMessage = handleAsterFutWsMessage; // отладка разбора сообщений Aster Futures WS без реального сокета
+window.__asterFutTier2Health = asterFutTier2Health;
+window.__asterFutInstIdToSymbol = asterFutInstIdToSymbol;
 window.__patternHistory = function () { return patternHistory; };
 window.__sweepPatternOutcomesNow = sweepPatternOutcomes;
 // Только для ручной проверки UI страницы "Паттерны" без ожидания реальных срабатываний детекторов
