@@ -48,12 +48,13 @@ fi
 echo "    (использую Python: $($PYTHON --version 2>&1), команда: $PYTHON)"
 
 echo "==> 1/4  Копирую исходники web/ в desktop/resources/ и добавляю мост Neutralino..."
-rm -rf resources/index.html resources/css resources/js/app.js resources/js/core-utils.js
-mkdir -p resources/css resources/js
+rm -rf resources/index.html resources/css resources/js/app.js resources/js/core-utils.js resources/assets
+mkdir -p resources/css resources/js resources/assets
 cp ../web/index.html resources/index.html
 cp -r ../web/css/. resources/css/
 cp ../web/js/app.js resources/js/app.js
 cp ../web/js/core-utils.js resources/js/core-utils.js
+if [ -d ../web/assets ]; then cp -r ../web/assets/. resources/assets/; fi
 
 # Единственная разница между веб- и desktop-версией разметки: подключение клиентской библиотеки
 # Neutralino (resources/js/neutralino.js) — сам JS-код приложения (app.js) уже умеет работать в обоих
@@ -63,8 +64,20 @@ cp ../web/js/core-utils.js resources/js/core-utils.js
 import re
 with open('resources/index.html', encoding='utf-8') as f:
     html = f.read()
-marker = '<title>MEXC Screener</title>'
-assert html.count(marker) == 1, 'ожидался ровно один <title>MEXC Screener</title>'
+
+# ВАЖНО: ../web/index.html может уже нести встроенный base64 предыдущей сборки (см. шаг --embed
+# ниже) — если скопировать его как есть в ресурсы, новый .exe будет содержать внутри себя копию
+# самого себя (той предыдущей сборки), новый zip после упаковки — расти на этот же довесок, и при
+# каждом следующем "--embed" размер будет примерно УДВАИВАТЬСЯ (реально наблюдалось: 2.7МБ base64 ->
+# 5.5МБ после одной лишней пересборки). Поэтому перед копированием в ресурсы всегда вырезаем старый
+# встроенный блок — сборка должна идти только от исходников, а не от результата прошлой сборки.
+html = re.sub(r'\s*<!-- Десктоп-версия MEXC Screener для Windows.*?-->\s*'
+              r'<script type="text/plain" id="desktopAppData">.*?</script>\s*',
+              '\n', html, count=1, flags=re.S)
+html = re.sub(r'\s*<script type="text/plain" id="desktopAppData">.*?</script>\s*', '\n', html, count=1, flags=re.S)
+
+marker = '<title>Vision Screener</title>'
+assert html.count(marker) == 1, 'ожидался ровно один <title>Vision Screener</title>'
 html = html.replace(marker, marker + '\n<script src="/js/neutralino.js"></script>', 1)
 with open('resources/index.html', 'w', encoding='utf-8') as f:
     f.write(html)

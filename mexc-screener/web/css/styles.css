@@ -1,48 +1,100 @@
 /* ... весь ваш CSS без изменений ... */
 :root {
-  --bg-primary: #0B0E11;
-  --bg-secondary: #11161C;
-  --bg-card: #1A2028;
-  --bg-hover: #252B33;
-  --border-color: #2B3139;
-  --text-primary: #EAECEF;
-  --text-secondary: #848E9C;
-  --text-muted: #5E6673;
-  --green: #00C076;
-  --red: #F84960;
-  --orange: #F0B90B;
-  --blue: #1E80FF;
+  /* Editorial luxury-tech тема (редизайн 2026-09-3, по точному ТЗ пользователя: "85% black/graphite,
+     10% white/silver, 5% dusty pink accent", тонкие 1px обводки с приглушённым серебристым/розовым
+     свечением вместо неона — сознательный переход от предыдущей яркой сливово-магентовой темы,
+     которую сам же попросили заменить на приглушённую editorial-палитру). --green/--red НЕ трогаем —
+     финансовая семантика, не бренд-цвет. --blue переопределён на тёплый серебристо-серый — вторичный
+     акцент/активная вкладка по всему приложению (Финрез/Профили/Паттерны и т.д.), не ценовая
+     семантика, одна смена значения безопасно перекрашивает все те места разом. */
+  --bg-primary: #0a0a0c;
+  --bg-secondary: #101012;
+  --bg-card: #161618;
+  --bg-hover: #1e1e21;
+  --border-color: #2a2a2e;
+  --text-primary: #f2eeee;
+  --text-secondary: #a89ea0;
+  --text-muted: #665f60;
+  --green: #3ecf8e;
+  --red: #e8566f;
+  --orange: #d9a25c;
+  --blue: #b7aeab;
+  --accent: #c98fa0;
+  --accent-soft: #cdbfba;
+  --neon: #c98fa0;
+  --neon-glow: rgba(201, 143, 160, .26);
+  --neon-glow-soft: rgba(201, 143, 160, .09);
   --sidebar-width: 248px;
   --header-height: 56px;
   --font-main: 'Inter', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+  --font-display: 'Oswald', 'Inter', sans-serif;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
   font-family: var(--font-main);
-  background: var(--bg-primary);
   color: var(--text-primary);
   font-size: 13px;
   line-height: 1.5;
   overflow: hidden;
   height: 100vh;
   width: 100vw;
+  /* Едва заметный sci-fi фон (редизайн 2026-09, по образцу макета): очень тёмная база +
+     тончайшая сетка + пара статичных радиальных бликов дальних "прожекторов". Всё на фиксированном
+     background-attachment, не двигается при скролле контента, и достаточно тускло, чтобы не мешать
+     чтению данных поверх (контент всегда рисуется в своих собственных непрозрачных панелях). */
+  background-color: var(--bg-primary);
+  /* Мягкие розово-лавандовые дальние "прожекторы" вместо сетки (по образцу присланных постеров —
+     там фон почти чёрный с мягким блюром/glow, без технической сетки терминала). */
+  background-image:
+    radial-gradient(ellipse 1000px 560px at 6% -12%, rgba(236,72,153,.07), transparent 60%),
+    radial-gradient(ellipse 800px 560px at 100% 112%, rgba(192,132,252,.06), transparent 60%),
+    radial-gradient(ellipse 700px 500px at 55% 45%, rgba(236,72,153,.025), transparent 65%);
+  background-attachment: fixed;
+}
+/* Заголовки страниц (Графики/Паттерны/Аналитика/...) — тот же условный display-шрифт, что и у
+   логотипа, вместо обычного Inter, по образцу постеров с крупной жирной типографикой. */
+h2 { font-family: var(--font-display); letter-spacing: .3px; }
+/* Градиентная заливка текста заголовков страниц (по образцу постера "VISION" — там огромный
+   заголовок залит розово-лавандовым градиентом). Иконки перед заголовком свой цвет не теряют —
+   у них собственный inline color, наследование transparent их не касается. */
+h2 span[data-i18n] {
+  background: linear-gradient(135deg, var(--text-primary) 0%, var(--accent-soft) 55%, var(--accent) 100%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
 }
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #2B3139; border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: #3d4550; }
-.app { display: flex; height: 100vh; width: 100vw; overflow: hidden; }
+/* Шапка (баннер со статами) теперь ПОЛНОЙ ШИРИНЫ над сайдбаром+контентом (редизайн 2026-09-3, по
+   образцу присланного макета "NEURAL SCREENER" — там header идёт над трёхколоночным телом, а не
+   сбоку от сайдбара) — .app стал колонкой (topbar сверху), а бывшая горизонтальная раскладка
+   sidebar|main переехала в новый .app-body. */
+.app { display: flex; flex-direction: column; height: 100vh; width: 100vw; overflow: hidden; padding: 10px; gap: 10px; }
+.app-body { display: flex; flex: 1; min-height: 0; gap: 10px; }
 
-/* SIDEBAR */
+/* SIDEBAR — скруглённая панель со светящейся зелёной рамкой (редизайн 2026-09), а не сплошная
+   боковая колонка во всю высоту без зазоров, как раньше. */
 .sidebar {
   width: var(--sidebar-width);
   /* Раньше был литеральный тёмный градиент (#0E1318→#0B0E11), не завязанный на CSS-переменные —
      переключение на светлую тему (themeToggle в app.js переопределяет --bg-* на :root) сайдбар
      никак не затрагивало, он оставался тёмным. Теперь строим тот же по ощущению градиент из
-     переменных, чтобы сайдбар следовал теме, как и остальной интерфейс. */
-  background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
-  border-right: 1px solid var(--border-color);
+     переменных, чтобы сайдбар следовал теме, как и остальной интерфейс.
+     Пользовательская картинка (web/assets/custom/sidebar.png или .gif, см. README.txt рядом) — под
+     затемняющим градиентом, чтобы текст пунктов меню поверх неё оставался читаемым. sidebar.gif
+     лежит ВЫШЕ sidebar.png в списке слоёв — если gif есть, он и покажется (анимированный), png под
+     ним не виден; если gif нет — этот слой просто прозрачный, виден png. Ни того ни другого нет —
+     виден только сам градиент (тихий fallback, без битой иконки/ошибки). */
+  background:
+    linear-gradient(180deg, rgba(10,10,12,.55) 0%, rgba(10,10,12,.88) 55%, var(--bg-primary) 85%),
+    url('../assets/custom/sidebar.gif') top center / cover no-repeat,
+    url('../assets/custom/sidebar.png') top center / cover no-repeat,
+    linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  box-shadow: 0 0 0 1px var(--neon-glow-soft), 0 0 24px -8px var(--neon-glow);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -67,6 +119,11 @@ body {
   gap: 12px;
   border-bottom: 1px solid var(--border-color);
   min-height: 72px;
+  /* Своя тёмная подложка под лого/подзаголовок — сайдбар может нести пользовательскую картинку
+     (web/assets/custom/sidebar.png) прямо от самого верха, а общий затемняющий градиент сайдбара
+     тут ещё слабый, без этого текст лого терялся на светлых/пёстрых местах картинки. */
+  background: rgba(10, 10, 12, .5);
+  position: relative;
 }
 .logo-icon {
   width: 34px; height: 34px;
@@ -74,7 +131,8 @@ body {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  filter: drop-shadow(0 0 6px rgba(255,255,255,.4)) drop-shadow(0 0 14px rgba(255,255,255,.22));
+  color: var(--accent);
+  filter: drop-shadow(0 0 6px var(--neon-glow)) drop-shadow(0 0 14px var(--neon-glow-soft));
 }
 .logo-icon svg { width: 32px; height: 32px; display: block; }
 .logo-text {
@@ -83,8 +141,12 @@ body {
   overflow: hidden;
   transition: opacity .2s, transform .28s;
 }
-.logo-title { font-size: 13px; font-weight: 700; letter-spacing: .8px; color: var(--text-primary); }
-.logo-sub { font-size: 9px; color: var(--text-muted); letter-spacing: 1.6px; text-transform: uppercase; font-weight: 600; margin-top: 3px; }
+.logo-title {
+  font-family: var(--font-display); font-size: 16px; font-weight: 600; letter-spacing: .6px;
+  color: var(--text-primary); text-transform: uppercase; font-style: italic;
+  text-shadow: 0 0 16px var(--neon-glow-soft);
+}
+.logo-sub { font-size: 9px; color: var(--text-muted); letter-spacing: 2.2px; text-transform: uppercase; font-weight: 600; margin-top: 3px; text-shadow: 0 1px 4px rgba(0,0,0,.9); }
 .nav { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 10px 8px; }
 .nav-section {
   font-size: 10px;
@@ -96,6 +158,7 @@ body {
   white-space: nowrap;
   overflow: hidden;
   transition: opacity .2s;
+  text-shadow: 0 1px 4px rgba(0,0,0,.85);
 }
 .nav-item {
   display: flex; align-items: center; gap: 12px;
@@ -106,24 +169,19 @@ body {
   border-radius: 10px;
   margin-bottom: 2px;
   position: relative;
+  text-shadow: 0 1px 4px rgba(0,0,0,.7);
 }
 .nav-item span { overflow: hidden; transition: opacity .2s; }
 .nav-item i { font-size: 18px; width: 22px; text-align: center; flex-shrink: 0; }
-.nav-item:hover { background: rgba(128,128,128,.12); color: var(--text-primary); transform: translateX(2px); }
+.nav-item:hover { background: var(--neon-glow-soft); color: var(--text-primary); transform: translateX(2px); }
 .nav-item.active {
-  background: linear-gradient(90deg, rgba(30,128,255,.14), rgba(30,128,255,.03));
-  color: var(--text-primary);
-  box-shadow: inset 0 0 0 1px rgba(30,128,255,.18);
+  background: var(--neon-glow-soft);
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--neon-glow), 0 0 16px -4px var(--neon-glow);
 }
-.nav-item.active::before {
-  content: '';
-  position: absolute;
-  left: 0; top: 10px; bottom: 10px;
-  width: 3px;
-  background: var(--blue);
-  border-radius: 0 3px 3px 0;
-  box-shadow: 0 0 10px 1px rgba(30,128,255,.7);
-}
+.nav-item.active i { color: var(--accent); text-shadow: 0 0 8px var(--neon-glow); }
+.nav-item.active::before { display: none; }
 .nav-badge {
   margin-left: auto;
   min-width: 18px;
@@ -186,6 +244,21 @@ body {
 .sidebar.collapsed .sidebar-action span,
 .sidebar.collapsed .nav-badge,
 .sidebar.collapsed .conn-pill span { opacity: 0; width: 0; overflow: hidden; pointer-events: none; }
+.sidebar.collapsed .sidebar-mascot { display: none; }
+/* Маскот (редизайн 2026-09) — компактный icon-badge вместо freehand-лиц (те читались криво на
+   маленьком размере) — оригинальная sci-fi/lab тема без узнаваемых персонажей. */
+.sidebar-mascot { padding: 8px 12px 6px; display: flex; flex-direction: column; align-items: center; gap: 8px; position: relative; }
+.mascot-badge { position: relative;
+  width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(circle, var(--neon-glow-soft), transparent 70%);
+  box-shadow: inset 0 0 0 1px var(--border-color), 0 0 16px -6px var(--neon-glow);
+  color: var(--accent); font-size: 20px;
+}
+.sidebar-mascot-bubble {
+  background: var(--bg-card); border: 1px solid var(--border-color);
+  border-radius: 10px; padding: 4px 10px; font-size: 10px; color: var(--text-secondary);
+  white-space: nowrap;
+}
 /* Паддинг НЕ переопределяем (был "10px 0") — он не входит в transition у .nav-item, поэтому менялся
    мгновенно, пока ширина сайдбара плавно анимируется 320мс, и иконка визуально "прыгала" в середине
    анимации. Паддинг слева/справа и так симметричный (12px/12px), так что justify-content:center
@@ -209,55 +282,73 @@ body {
 /* --- Финрез: отдельная страница с реализованным PnL по сделкам --- */
 .finres-layout { display: flex; flex: 1; min-height: 0; overflow: hidden; }
 .finres-subnav {
-  width: 196px; flex-shrink: 0; border-right: 1px solid var(--border-color); background: var(--bg-secondary);
+  width: 196px; flex-shrink: 0; border-right: 1px solid var(--border-color);
   padding: 18px 10px; overflow-y: auto;
+  /* Пользовательская картинка (web/assets/custom/analytics-panel.png или .gif, см. README.txt рядом)
+     — тот же приём слоёв, что у .sidebar: затемняющий градиент поверх, чтобы вкладки/заголовок
+     оставались читаемыми; .gif выше .png в списке слоёв (если есть — показывается он, анимированный);
+     нет ни того ни другого — виден только сам градиент, без битой иконки. */
+  background:
+    linear-gradient(180deg, rgba(10,10,12,.6) 0%, rgba(10,10,12,.82) 60%, var(--bg-secondary) 88%),
+    url('../assets/custom/analytics-panel.gif') top center / cover no-repeat,
+    url('../assets/custom/analytics-panel.png') top center / cover no-repeat,
+    var(--bg-secondary);
 }
-.finres-subnav-title { font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .07em; font-weight: 700; padding: 2px 10px 12px; }
+.finres-subnav-title {
+  font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .07em; font-weight: 700;
+  padding: 2px 10px 12px; text-shadow: 0 1px 3px rgba(0,0,0,.6); /* читаемость поверх analytics-panel.png/gif */
+}
 .finres-tab {
   position: relative;
   display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 11px; border-radius: 8px;
   border: none; background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 13px;
   text-align: left; margin-bottom: 3px; transition: background .18s ease, color .18s ease, box-shadow .18s ease, transform .15s ease;
+  text-shadow: 0 1px 3px rgba(0,0,0,.6); /* читаемость поверх analytics-panel.png/gif, тот же приём что в .nav-item */
 }
 .finres-tab i { font-size: 16px; width: 18px; text-align: center; flex-shrink: 0; color: var(--text-muted); transition: color .18s ease; }
 .finres-tab:hover { background: rgba(255,255,255,.05); color: #fff; transform: translateX(1px); }
-.finres-tab.active { background: rgba(76,125,255,.14); color: #fff; box-shadow: inset 0 0 0 1px rgba(76,125,255,.3); }
+.finres-tab.active { background: rgba(201,143,160,.14); color: #fff; box-shadow: inset 0 0 0 1px rgba(201,143,160,.3); }
 .finres-tab.active::before {
   content: ''; position: absolute; left: -10px; top: 7px; bottom: 7px; width: 3px;
-  background: var(--blue); border-radius: 0 3px 3px 0; box-shadow: 0 0 8px -1px rgba(76,125,255,.6);
+  background: var(--blue); border-radius: 0 3px 3px 0; box-shadow: 0 0 8px -1px rgba(201,143,160,.6);
 }
 .finres-tab.active i { color: var(--blue); }
 .finres-content { flex: 1; overflow-y: auto; padding: 22px 26px 40px; min-width: 0; }
 
-/* --- Финрез: отдельная тёмная trading-terminal палитра (раунд 10), scoped исключительно на
-   #page-finres через переопределение CSS custom properties — не трогает общую тему остального
-   приложения (скринер, настройки и т.д.), т.к. все finres-компоненты и так рендерятся через var(). --- */
-#page-finres {
-  --bg-primary: #080B0F;
-  --bg-secondary: #0D1218;
-  /* ВАЖНО: --bg-card обязан быть заметно СВЕТЛЕЕ --bg-secondary (сохраняем 3-уровневую иерархию
-     primary < secondary < card, как в основной теме приложения). Раньше оба были #0D1218 —
-     карточка/ячейка сливалась с фоном контейнера и текст на ней становился нечитаемым
-     (регрессия читаемости календаря P&L, репорт пользователя). */
-  --bg-card: #161E27;
-  --bg-hover: #1E2732;
-  --border-color: #1A2630;
-  --text-primary: #E8EDF2;
-  --text-secondary: #7C8996;
-  --text-muted: #57626D;
-  --green: #00D084;
-  --red: #FF4D5A;
-  --blue: #4C7DFF;
-  background: var(--bg-primary);
-}
+/* Финрез раньше нёс СВОЮ отдельную палитру (--bg-*/--blue и т.д. переопределялись только для
+   #page-finres, "раунд 10", ДО редизайна 2026-09) — из-за этого страница осталась на старом
+   синем акценте и синеватом фоне, пока весь остальной интерфейс перешёл на editorial чёрный/
+   графит/пыльная роза (см. :root выше). Убрано: страница наследует общую тему напрямую, поэтому
+   "оформить по дизайну скринера" теперь автоматически верно и для Финреза, без отдельного
+   раздвоения палитры, которое опять разъедется при следующей смене темы. */
 .finres-subnav-title { position: relative; }
 .finres-subnav-title::after { content: ''; display: block; width: 20px; height: 2px; background: var(--blue); border-radius: 2px; margin-top: 9px; }
 
 /* Хиро-панель Финреза (общая стоимость портфеля + стат-плитки + график) — единственное место в
    приложении, где теперь показывается баланс: раньше дублировался на "Настройки аккаунта", с
    этого раунда живёт только здесь, видна над всеми вкладками Финреза сразу. */
-.finres-hero-bar { padding: 20px 26px 4px; flex-shrink: 0; }
-.finres-hero-bar:empty { padding: 0; }
+/* Пользовательская картинка (web/assets/custom/finres-hero.png, см. README.txt в той же папке) —
+   баннер виден ВСЕГДА, даже без подключённого API-ключа (раньше при пустом балансе блок схлопывался
+   в padding:0 — теперь у него есть min-height специально чтобы декоративный баннер не пропадал).
+   ВАЖНО: картинка сидит на псевдоэлементе С ФИКСИРОВАННОЙ высотой (170px), а НЕ прямо в background
+   самого .finres-hero-bar — тот растягивается под реальный контент (сумма портфеля + 4 стат-плитки,
+   легко 300px+), и картинка-баннер (широкая, невысокая по задумке) при cover на такую высоту дико
+   зумируется/обрезается и лезет под текст цифр. Так картинка всегда одного и того же масштаба
+   независимо от того, сколько реальных данных под ней. */
+.finres-hero-bar {
+  position: relative; padding: 20px 26px 4px; flex-shrink: 0; min-height: 96px;
+  margin: 0 20px 6px; border-radius: 14px; overflow: hidden;
+  background: var(--bg-secondary);
+}
+.finres-hero-bar::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 170px; z-index: 0;
+  background:
+    linear-gradient(100deg, rgba(10,10,12,.82) 0%, rgba(10,10,12,.55) 45%, rgba(10,10,12,.82) 100%),
+    url('../assets/custom/finres-hero.gif') center / cover no-repeat,
+    url('../assets/custom/finres-hero.png') center / cover no-repeat;
+}
+.finres-hero-bar > * { position: relative; z-index: 1; }
+.finres-hero-bar:empty { padding: 0 26px; }
 /* Переключатель "чей Финрез сейчас показан" — крупнее и заметнее, чем такой же (тот же .exch-switch-btn)
    в тулбаре скринера, т.к. тут он один на всю страницу, а не рядом с другими элементами тулбара. */
 .finres-exchange-tabs { margin: 18px 26px 0; padding: 3px; align-self: flex-start; }
@@ -416,10 +507,28 @@ body {
 .finres-warn-banner i { font-size: 15px; flex-shrink: 0; }
 
 .topbar {
-  height: var(--header-height); background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-color);
+  /* Баннер (редизайн 2026-09) — та же скруглённая светящаяся карточка, что у сайдбара/правой
+     панели, плюс мягкое радиальное "портальное" зелёное свечение по краям (чисто CSS-градиент,
+     не иллюстрация — см. .topbar-mascot ниже про маскотов). */
+  height: calc(var(--header-height) + 20px);
+  background:
+    radial-gradient(circle at 8% -40%, var(--neon-glow-soft), transparent 55%),
+    radial-gradient(circle at 96% 140%, var(--neon-glow-soft), transparent 55%),
+    var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  box-shadow: 0 0 0 1px var(--neon-glow-soft), 0 0 28px -10px var(--neon-glow);
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 20px; flex-shrink: 0;
+  position: relative; overflow: hidden;
+}
+/* Editorial-типографика на фоне (по ТЗ: "large-scale editorial typography... oversized and
+   partially cropped... feel like fashion magazine typography... must NOT interfere with data") —
+   огромное, еле видимое слово, обрезанное краем шапки, не задевает ни одной живой цифры. */
+.topbar::before {
+  content: 'MARKET'; position: absolute; right: -14px; top: 50%; transform: translateY(-50%);
+  font-family: var(--font-display); font-weight: 600; font-size: 84px; letter-spacing: .04em;
+  color: var(--text-primary); opacity: .035; white-space: nowrap; pointer-events: none; user-select: none;
 }
 .topbar-left { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .status-badge {
@@ -435,17 +544,29 @@ body {
 /* Верхний статус-бейдж подсвечивается под текущий выбор в переключателе бирж (activeExchangeFilter,
    см. applyConnectionBadge в app.js) — но только пока связь реально в порядке (mode "ok"); при warn/off
    выше эти цвета всё равно перекрываются — проблема со связью важнее бренд-цвета. */
-.status-badge.exch-mexc { background: rgba(30,128,255,.1); color: var(--blue); border-color: rgba(30,128,255,.25); box-shadow: 0 0 14px -4px rgba(30,128,255,.5); }
+.status-badge.exch-mexc { background: rgba(201,143,160,.1); color: var(--blue); border-color: rgba(201,143,160,.25); box-shadow: 0 0 14px -4px rgba(201,143,160,.5); }
 .status-badge.exch-binance { background: rgba(240,185,11,.14); color: #F0B90B; border-color: rgba(240,185,11,.3); box-shadow: 0 0 16px -3px rgba(240,185,11,.6); }
 .status-badge.exch-okx { background: var(--bg-hover); color: var(--text-primary); border-color: var(--border-color); box-shadow: none; }
 .status-dot { width: 6px; height: 6px; background: currentColor; border-radius: 50%; animation: pulse 2s infinite; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
-.topbar-metrics { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
-.metric { text-align: left; }
-.metric-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
-.metric-value { font-size: 13px; font-weight: 600; color: var(--text-primary); font-family: var(--font-mono); display: inline-block; }
+.topbar-metrics { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* Каждая метрика — своя тонкая стеклянная карточка (по образцу макета: ОБЩИЙ РЫНОК/ПОКАЗАНО/
+   СДЕЛОК/ВРЕМЯ РАБОТЫ были отдельными обведёнными блоками, а не голым инлайн-текстом). Круглая
+   иконка слева — по образцу карточек статистики "ACTIVE USERS/GAMES ONLINE" с референса. */
+.metric {
+  display: flex; align-items: center; gap: 9px;
+  text-align: left; padding: 4px 12px; border-radius: 6px;
+  background: rgba(255,255,255,.02); box-shadow: inset 0 0 0 1px var(--border-color);
+}
+.metric-icon {
+  width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--neon-glow-soft); color: var(--accent); font-size: 13px;
+}
+.metric-label { font-size: 9.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
+.metric-value { font-size: 14px; font-weight: 700; color: var(--text-primary); font-family: var(--font-mono); display: inline-block; }
 @keyframes metricPulse {
-  0% { color: var(--blue); text-shadow: 0 0 10px rgba(30,128,255,.7); transform: scale(1.08); }
+  0% { color: var(--blue); text-shadow: 0 0 10px rgba(201,143,160,.7); transform: scale(1.08); }
   100% { color: var(--text-primary); text-shadow: none; transform: scale(1); }
 }
 .metric-value.metric-pulse { animation: metricPulse .6s ease-out; }
@@ -453,21 +574,25 @@ body {
 
 /* FILTER BAR */
 .filter-bar {
-  min-height: 64px;
+  /* Строка 1 (редизайн 2026-09, по образцу макета): быстрые таблетки-алгоритмы + поиск, в один
+     ряд, поиск прижат к правому краю. Плотная сетка операторов/значений фильтров живёт ниже,
+     в .table-toolbar (строка 2) — так порядок совпадает с макетом ("плашки+поиск" над
+     "дропдауны+Применить"), а сама логика фильтров не меняется ни на бит. */
+  min-height: 48px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
-  display: flex; align-items: center; flex-wrap: wrap;
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
   padding: 8px 16px; gap: 10px; flex-shrink: 0;
 }
-.filter-group { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-.filter-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
+.filter-group { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.filter-label { font-size: 9.5px; color: var(--text-muted); text-transform: uppercase; }
 .filter-input {
   background: var(--bg-card); border: 1px solid var(--border-color);
-  color: var(--text-primary); padding: 5px 8px; border-radius: 4px;
-  font-size: 12px; font-family: var(--font-mono); width: 96px; outline: none;
+  color: var(--text-primary); padding: 5px 6px; border-radius: 4px;
+  font-size: 12px; font-family: var(--font-mono); width: 74px; outline: none;
 }
 .filter-input:focus, .filter-select:focus { border-color: #fff; }
-.filter-input.wide { width: 118px; }
+.filter-input.wide { width: 92px; }
 .filter-select {
   background: var(--bg-card); border: 1px solid var(--border-color);
   color: var(--text-primary); padding: 5px 6px; border-radius: 4px;
@@ -478,12 +603,41 @@ body {
   color: var(--text-secondary); padding: 6px 12px; border-radius: 4px;
   font-size: 12px; cursor: pointer; transition: all .15s; white-space: nowrap;
 }
-.filter-btn:hover { border-color: var(--text-secondary); color: var(--text-primary); }
+.filter-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+/* Мульти-select "какие биржи показывать" (стр. «Графики») — обычный <select> не умеет несколько
+   значений сразу без Ctrl+клик (не очевидно пользователю), поэтому свой маленький дропдаун:
+   кнопка в стиле .filter-select + всплывающая панель чекбоксов. */
+.ms-dropdown { position: relative; }
+.ms-dropdown-btn { display: flex; align-items: center; gap: 4px; }
+.ms-dropdown-btn i { font-size: 13px; color: var(--text-muted); }
+.ms-dropdown-panel {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; min-width: 150px;
+  background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 6px;
+  padding: 6px; box-shadow: 0 8px 24px -6px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 1px;
+}
+.ms-dropdown-panel[hidden] { display: none; }
+.ms-dropdown-item {
+  display: flex; align-items: center; gap: 7px; padding: 5px 8px; border-radius: 4px;
+  font-size: 12px; color: var(--text-secondary); cursor: pointer; white-space: nowrap;
+}
+.ms-dropdown-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+.ms-dropdown-item input { accent-color: var(--accent); cursor: pointer; }
+/* Тонкая "в скобках" ссылка (по образцу Yokai Reborn — "( VIEW ON OPENSEA )") вместо заливной
+   кнопки: без рамки/фона, только текст в скобках с трекингом. */
+.filter-btn.bracket-label {
+  background: transparent; border-color: transparent;
+  color: var(--accent); text-transform: uppercase; letter-spacing: .08em; font-weight: 600; font-size: 11px;
+}
+.filter-btn.bracket-label::before { content: '( '; }
+.filter-btn.bracket-label::after { content: ' )'; }
+.filter-btn.bracket-label:hover { color: var(--text-primary); border-color: transparent; }
 .filter-btn.primary {
-  background: #fff; border-color: #fff; color: #0B0E11; font-weight: 600;
+  background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700;
   display: flex; align-items: center; gap: 6px;
+  box-shadow: 0 0 18px -5px var(--neon-glow);
 }
 .filter-btn.primary:hover { opacity: .9; }
+.filter-btn, .filter-select { border-radius: 999px; }
 .app-toast {
   position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(12px);
   background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);
@@ -519,12 +673,16 @@ body {
 
 .content { flex: 1; overflow: hidden; position: relative; display: flex; flex-direction: column; min-height: 0; }
 .table-toolbar {
-  height: 48px; background: var(--bg-primary);
+  /* Строка 2 (редизайн 2026-09): дропдауны/операторы фильтров + "Применить" справа, под
+     плашками+поиском (см. .filter-bar выше). Плотная сетка контролов — min-height вместо
+     фиксированной, чтобы toolbar-left/-right (flex-wrap: wrap ниже) могли честно перенестись на
+     вторую строку на узких экранах, а не обрезаться. */
+  min-height: 48px; background: var(--bg-primary);
   border-bottom: 1px solid var(--border-color);
   display: flex; align-items: center; justify-content: space-between;
-  padding: 0 16px; flex-shrink: 0;
+  padding: 8px 16px; gap: 10px; flex-shrink: 0; flex-wrap: wrap;
 }
-.toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .profile-select {
   background: var(--bg-card); border: 1px solid var(--border-color);
   color: var(--text-primary); padding: 5px 10px; border-radius: 4px;
@@ -559,6 +717,11 @@ body {
 .exch-switch-btn.exch-switch-mexc { background: var(--blue); }
 .exch-switch-btn.exch-switch-binance { background: #F0B90B; color: #1a1a1a; }
 .exch-switch-btn.exch-switch-okx { background: #000; }
+.exch-switch-btn.exch-switch-bitget { background: #00F0B7; color: #0a0a0a; }
+.exch-switch-btn.exch-switch-bingx { background: #1F2937; color: #fff; }
+.exch-switch-btn.exch-switch-kucoin { background: #24AE8F; color: #0a0a0a; }
+.exch-switch-btn.exch-switch-gateio { background: #E3453D; color: #fff; }
+.exch-switch-btn.exch-switch-aster { background: #8B5CF6; color: #fff; }
 
 /* Группа с несколькими рынками (сейчас — только Binance: спот+фьючерсы, см. exchangeTags у
    EXCHANGE_CONNECTORS в app.js). Клик по самой букве не фильтрует напрямую — выдвигает ленту
@@ -599,19 +762,40 @@ body {
    на отдельную страницу "Профили" за расшифровкой. Полное описание с формулами по-прежнему там же. */
 .strategy-hint-bar {
   display: none; align-items: center; gap: 8px; padding: 7px 16px;
-  background: rgba(30,128,255,.06); border-bottom: 1px solid var(--border-color);
+  background: rgba(201,143,160,.06); border-bottom: 1px solid var(--border-color);
   font-size: 11.5px; color: var(--text-secondary); flex-shrink: 0;
 }
 .strategy-hint-bar.visible { display: flex; }
 .strategy-hint-bar i { color: var(--blue); }
 .strategy-hint-badge {
   font-weight: 700; color: var(--blue); font-family: var(--font-mono); font-size: 10.5px;
-  padding: 1px 7px; border: 1px solid rgba(30,128,255,.4); border-radius: 4px; flex-shrink: 0;
+  padding: 1px 7px; border: 1px solid rgba(201,143,160,.4); border-radius: 4px; flex-shrink: 0;
 }
 .strategy-hint-text { flex: 1; }
 .strategy-hint-count { color: var(--text-muted); font-family: var(--font-mono); white-space: nowrap; flex-shrink: 0; }
 @media (max-width: 1100px) { .strategy-hint-text { display: none; } }
 .table-container { overflow: auto; flex: 1; position: relative; min-height: 120px; }
+/* Пагинация под таблицей (редизайн 2026-09, по образцу макета «Найдено: N ‹ 1 2 3 … 28 ›») —
+   пусто (не рендерится совсем), пока видимых строк меньше одной страницы, см. renderTablePagination(). */
+.table-pagination {
+  flex-shrink: 0; display: flex; align-items: center; justify-content: center; gap: 4px;
+  padding: 8px 12px; border-top: 1px solid var(--border-color);
+}
+.table-pagination:empty { display: none; }
+.page-found { color: var(--text-muted); font-size: 11px; margin-right: 10px; font-family: var(--font-mono); }
+.page-nav, .page-num {
+  min-width: 24px; height: 24px; padding: 0 6px; display: flex; align-items: center; justify-content: center;
+  background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 4px;
+  color: var(--text-secondary); font-size: 11.5px; font-family: var(--font-mono); cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.page-nav:hover, .page-num:hover { background: var(--bg-hover); color: var(--text-primary); }
+.page-nav[disabled] { opacity: .35; cursor: default; pointer-events: none; }
+.page-num.active {
+  background: var(--neon-glow-soft); border-color: var(--accent); color: var(--accent); font-weight: 700;
+  box-shadow: 0 0 10px -3px var(--neon-glow);
+}
+.page-ellipsis { color: var(--text-muted); font-size: 11px; padding: 0 2px; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .data-table th {
   padding: 10px 8px; text-align: left; color: var(--text-muted);
@@ -655,15 +839,23 @@ body {
   -webkit-backdrop-filter: blur(10px) saturate(1.7) brightness(1.06);
   border-radius: 10px;
 }
-.data-table tr.selected { background: rgba(30,128,255,.08); box-shadow: inset 3px 0 0 var(--blue); }
+.data-table tr.selected { background: var(--neon-glow-soft); box-shadow: inset 3px 0 0 var(--accent); }
 @keyframes rowEnterIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 .data-table tr.row-enter { animation: rowEnterIn .3s ease both; }
 .cell-price { position: relative; }
 .coin-cell { display: flex; align-items: center; gap: 8px; }
 .coin-icon {
+  position: relative;
   width: 24px; height: 24px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   font-size: 10px; font-weight: 700; color: #fff; flex-shrink: 0;
+}
+/* Диагональный акцент на строке #1 (по образцу диагональной "SORROW"-ленты с постера "NIHILISM") —
+   чистая геометрия, без текста, чтобы не перегружать плотную таблицу. */
+tr.rank-one .coin-icon::after {
+  content: ''; position: absolute; top: -3px; left: -3px; width: 14px; height: 14px;
+  background: var(--accent); clip-path: polygon(0 0, 100% 0, 0 100%);
+  box-shadow: 0 0 6px -1px var(--accent);
 }
 /* Маленький бейдж биржи перед парой у монет с других бирж (Binance/OKX) — см. coinDisplayLabel() в app.js. */
 .exch-tag {
@@ -672,7 +864,12 @@ body {
 }
 .exch-tag-binance { background: rgba(240,185,11,.16); color: #F0B90B; }
 .exch-tag-okx { background: rgba(255,255,255,.14); color: var(--text-primary); }
-.exch-tag-mexc { background: rgba(30,128,255,.14); color: var(--blue); }
+.exch-tag-mexc { background: rgba(201,143,160,.14); color: var(--blue); }
+.exch-tag-bitget { background: rgba(0,240,183,.16); color: #00F0B7; }
+.exch-tag-bingx { background: rgba(31,41,55,.35); color: #9aa4b2; }
+.exch-tag-kucoin { background: rgba(36,174,143,.16); color: #24AE8F; }
+.exch-tag-gateio { background: rgba(227,69,61,.16); color: #E3453D; }
+.exch-tag-aster { background: rgba(139,92,246,.16); color: #8B5CF6; }
 .star { color: var(--text-muted); cursor: pointer; font-size: 14px; transition: color .15s; }
 .star:hover, .star.active { color: var(--orange); }
 .price-up { color: var(--green); }
@@ -689,8 +886,68 @@ body {
 .dot-buy { background: var(--green); box-shadow: 0 0 6px 1px rgba(0,192,118,.7); animation: pulse 2s infinite; }
 .dot-sell { background: var(--red); box-shadow: 0 0 6px 1px rgba(248,73,96,.7); animation: pulse 2s infinite; }
 .dot-wait { background: var(--text-muted); }
-.signal-strategy { background: rgba(30,128,255,.12); color: var(--blue); box-shadow: 0 0 12px -5px rgba(30,128,255,.65); }
-.dot-strategy { background: var(--blue); box-shadow: 0 0 6px 1px rgba(30,128,255,.6); }
+.signal-strategy { background: rgba(201,143,160,.12); color: var(--blue); box-shadow: 0 0 12px -5px rgba(201,143,160,.65); }
+.dot-strategy { background: var(--blue); box-shadow: 0 0 6px 1px rgba(201,143,160,.6); }
+/* Бейджи алгоритмов в строке таблицы (см. algoBadgesCellHtml) — компактные цветные "таблетки",
+   цвет по направлению сигнала (LONG зелёный/SHORT красный/BOTH нейтральный синий), полный текст
+   объяснения — во всплывающей подсказке (title), чтобы не раздувать саму ячейку. */
+.algo-badges { display: flex; gap: 3px; flex-wrap: wrap; max-width: 150px; align-items: center; }
+.algo-badges-empty { color: var(--text-muted); }
+.algo-badge {
+  display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px 1px 5px; border-radius: 999px;
+  font-size: 10px; font-weight: 700; font-family: var(--font-mono);
+  white-space: nowrap; cursor: default;
+}
+/* Цвет бейджа — по семейству детектора (см. algoBadgesCellHtml), а не по сигналу: так рядок
+   алгоритмов пёстрый и различимый с первого взгляда, как в макете, а не однотонный
+   зелёный/красный/синий по 3 состояниям сигнала. Направление — см. .badge-dot ниже. */
+/* Цвета категорий пересобраны под sci-fi/самурай-мудборд (2026-09-2): яркий tech-циан и sky-blue
+   из старой зелёной темы выбивались на фоне сливового/розово-лавандового фона — заменены на
+   тёплое бронзовое золото и приглушённый индиго, чтобы вся палитра бейджей читалась как единая
+   "драгоценная" гамма, а не остаток предыдущей темы. */
+.algo-badge.cat-repeat { background: rgba(212,165,116,.16); color: #d4a574; box-shadow: inset 0 0 0 1px rgba(212,165,116,.34); }
+.algo-badge.cat-inefficiency { background: rgba(255,178,56,.14); color: #ffb238; box-shadow: inset 0 0 0 1px rgba(255,178,56,.32); }
+.algo-badge.cat-cycle { background: rgba(255,94,196,.14); color: #ff5ec4; box-shadow: inset 0 0 0 1px rgba(255,94,196,.32); }
+.algo-badge.cat-sequence { background: rgba(167,139,250,.16); color: #a78bfa; box-shadow: inset 0 0 0 1px rgba(167,139,250,.34); }
+.algo-badge.cat-depth { background: rgba(129,140,248,.16); color: #818cf8; box-shadow: inset 0 0 0 1px rgba(129,140,248,.34); }
+.algo-badge.cat-heuristic-lowconf { background: rgba(143,163,173,.12); color: #8fa3ad; box-shadow: inset 0 0 0 1px rgba(143,163,173,.28); }
+
+/* Бейдж "Тип" на стр. «Спайки» — тот же пилюльный язык, что .algo-badge, но всего два состояния:
+   честный тиковый спайк (MEXC, зелёный) vs более грубая 24ч-аномалия (остальные 6 бирж, янтарный) —
+   разный цвет специально, чтобы не выдавать одно за другое (см. её же комментарий в app.js). */
+.spike-badge {
+  display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px 1px 5px; border-radius: 999px;
+  font-size: 10px; font-weight: 700; font-family: var(--font-mono); white-space: nowrap; cursor: default;
+}
+.spike-badge-tick { background: rgba(52,211,153,.14); color: #34d399; box-shadow: inset 0 0 0 1px rgba(52,211,153,.32); }
+.spike-badge-24h { background: rgba(255,178,56,.14); color: #ffb238; box-shadow: inset 0 0 0 1px rgba(255,178,56,.32); }
+.badge-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; background: var(--text-muted); }
+.badge-dot.up { background: var(--green); box-shadow: 0 0 4px -0.5px var(--green); }
+.badge-dot.down { background: var(--red); box-shadow: 0 0 4px -0.5px var(--red); }
+.badge-dot.neutral { background: var(--text-muted); }
+
+/* "Рейтинг" — процент (activityScore) + мини-спарклайн (см. ratingCellHtml). */
+.rating-cell { display: flex; align-items: center; gap: 8px; }
+.rating-pct { font-family: var(--font-mono); font-weight: 700; font-size: 12px; min-width: 32px; }
+.rating-pct.up { color: var(--green); }
+.rating-pct.down { color: var(--red); }
+.row-sparkline { width: 56px; height: 20px; display: block; flex-shrink: 0; }
+
+/* Таблетки быстрых фильтров над таблицей (редизайн 2026-09, по образцу макета) — реальный
+   дополнительный фильтр (см. algoCategoryPillMatches в app.js), НЕ дублирует и не заменяет
+   выпадающий список "Профиль/Стратегия" ниже — работает как AND поверх него. */
+.algo-pill-row { display: flex; gap: 8px; flex-wrap: wrap; padding: 0; }
+.algo-pill {
+  background: transparent; border: 1px solid var(--border-color); color: var(--text-secondary);
+  padding: 6px 16px; border-radius: 999px; font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: all .15s;
+}
+.algo-pill:hover { border-color: var(--accent); color: var(--text-primary); }
+.algo-pill.active {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+  box-shadow: 0 0 18px -5px var(--neon-glow);
+}
+
 .profile-nav-pills { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 22px; }
 .profile-nav-pill {
   border: 1px solid var(--border-color); border-radius: 20px; padding: 6px 14px; font-size: 12px;
@@ -707,13 +964,30 @@ body {
 }
 .detector-chip:hover { border-color: var(--blue); }
 .detector-chip .chip-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); flex-shrink: 0; transition: background .15s; }
-.detector-chip.on { color: var(--text-primary); border-color: rgba(30,128,255,.4); background: rgba(30,128,255,.06); }
-.detector-chip.on .chip-dot { background: var(--blue); box-shadow: 0 0 6px 1px rgba(30,128,255,.6); }
+.detector-chip.on { color: var(--text-primary); border-color: rgba(201,143,160,.4); background: rgba(201,143,160,.06); }
+.detector-chip.on .chip-dot { background: var(--blue); box-shadow: 0 0 6px 1px rgba(201,143,160,.6); }
 /* Категория "эвристика без ground truth" (fakeLiquidity) — янтарный тон даже когда включена,
    чтобы её "особый" статус был виден прямо в переключателях, а не только в самих карточках. */
 .detector-chip.on.cat-heuristic { color: var(--orange); border-color: rgba(255,159,10,.4); background: rgba(255,159,10,.07); }
 .detector-chip.on.cat-heuristic .chip-dot { background: var(--orange); box-shadow: 0 0 6px 1px rgba(255,159,10,.6); }
 .detector-chip.off { opacity: .55; }
+
+/* Пороги по алгоритмам (панель "Чувствительность детекторов", стр. «Паттерны») — тот же визуальный
+   язык, что у .detector-chip выше (пилюля, та же граница/фон), но с редактируемым числом вместо
+   переключателя — не два разных стиля ради одной страницы. */
+.detector-threshold-grid { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 4px; }
+.detector-threshold-row {
+  display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--border-color); border-radius: 16px;
+  padding: 5px 10px; font-size: 11.5px; color: var(--text-muted); background: var(--bg-secondary);
+}
+.detector-threshold-row input[type="number"] {
+  width: 46px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px;
+  color: var(--text-primary); font-size: 11.5px; padding: 2px 5px; text-align: center;
+}
+.detector-threshold-row .thr-reset {
+  cursor: pointer; color: var(--text-muted); font-size: 13px; line-height: 1; opacity: .6; transition: opacity .15s, color .15s;
+}
+.detector-threshold-row .thr-reset:hover { opacity: 1; color: var(--blue); }
 
 .pattern-log-panel {
   margin-top: 14px; border: 1px solid var(--border-color); border-radius: 10px; overflow: hidden; background: var(--bg-secondary);
@@ -729,12 +1003,54 @@ body {
 .pattern-log-scope { color: var(--blue); flex-shrink: 0; }
 .pattern-log-msg { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .profile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-bottom: 14px; }
+/* grid-template-columns/rows задаёт JS (applyGraphsGridLayout, app.js) под РЕАЛЬНОЕ число видимых
+   карточек — не под выбранный в фильтре размер (2×2/3×3/...), тот только определяет сколько монет
+   показывать, реальных карточек может быть и меньше (фильтры/избранное). Так сетка всегда честно
+   заполняет доступное место, а не оставляет пустой угол при малом числе карточек. auto-fill здесь —
+   только запасной вариант, пока JS не выставил inline-стиль (например самый первый рендер). */
+.graphs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; height: 100%; }
+.mini-chart-card {
+  border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-card);
+  transition: border-color .15s, transform .1s; overflow: hidden;
+  display: flex; flex-direction: column; min-height: 0;
+}
+.mini-chart-card:hover { border-color: var(--blue); transform: translateY(-1px); }
+.mini-chart-head { display: flex; align-items: center; gap: 6px; padding: 6px 8px; font-size: 11px; font-family: var(--font-mono); }
+.mini-chart-symbol { font-weight: 600; color: var(--text-primary); }
+.mini-chart-range {
+  font-size: 9px; color: var(--text-muted); background: var(--bg-hover); border-radius: 4px;
+  padding: 1px 5px; white-space: nowrap;
+}
+.mini-chart-price { margin-left: auto; }
+.mini-chart-change { min-width: 52px; text-align: right; }
+.mini-chart-price.up, .mini-chart-change.up { color: var(--green); }
+.mini-chart-price.down, .mini-chart-change.down { color: var(--red); }
+/* flex:1 вместо фиксированной высоты — растягивается вместе с карточкой, когда сетка заполняет
+   доступное место (см. applyGraphsGridLayout в app.js), min-height — пол на случай тесной сетки
+   (много карточек на невысоком окне), тогда обёртка карточек просто начинает скроллиться.
+   grab — можно зажать и потащить (пан), колесо мыши сверху — зум; см. wireGraphsGridClick */
+.mini-chart-canvas { width: 100%; flex: 1; min-height: 100px; display: block; cursor: grab; touch-action: none; }
+.mini-chart-canvas.dragging { cursor: grabbing; }
+.mini-chart-card.pinned { border-color: rgba(201,143,160,.45); }
+/* .rich — монета в Tier-2 watchlist («Паттерны»): у неё есть настоящий стакан/поток сделок, поэтому
+   мини-график несёт стены стакана (depthWallsForSymbol) и панель дельты (deltaSeriesForSymbol) —
+   им нужно чуть больше пола по высоте, чем обычной карточке. У остальных ~1600+ монет рынка такой
+   карточки честно быть не может (нет данных), см. коммит. */
+.mini-chart-card.rich .mini-chart-canvas { min-height: 150px; }
+.mini-chart-card.rich { border-color: rgba(129,140,248,.28); }
+.mini-chart-unpin, .mini-chart-copy, .mini-chart-open {
+  border: 0; background: none; color: var(--text-muted); font-size: 13px; line-height: 1; cursor: pointer;
+  padding: 2px 3px; margin-right: 2px; border-radius: 4px; display: inline-flex; align-items: center;
+}
+.mini-chart-unpin { font-size: 14px; }
+.mini-chart-unpin:hover { color: var(--red); }
+.mini-chart-copy:hover, .mini-chart-open:hover { color: var(--accent); background: var(--bg-hover); }
 .profile-strategy-card {
   position: relative; border: 1px solid var(--border-color); border-radius: 10px; padding: 16px 18px 18px;
   cursor: pointer; transition: border-color .15s, background .15s, transform .1s; display: flex; flex-direction: column; gap: 8px;
 }
 .profile-strategy-card:hover { border-color: var(--blue); background: var(--bg-hover); transform: translateY(-1px); }
-.profile-strategy-card.active { border-color: var(--blue); background: rgba(30,128,255,.07); box-shadow: inset 0 0 0 1px var(--blue), 0 0 22px -8px rgba(30,128,255,.45); }
+.profile-strategy-card.active { border-color: var(--blue); background: rgba(201,143,160,.07); box-shadow: inset 0 0 0 1px var(--blue), 0 0 22px -8px rgba(201,143,160,.45); }
 /* Паттерны без ground truth (например fakeLiquidity — эвристика, не подтверждённый факт по
    публичному стакану MEXC) — приглушённый янтарный тон вместо синего, чтобы визуально не выглядеть
    как обычный подтверждённый сигнал даже до прочтения текста карточки. */
@@ -742,7 +1058,7 @@ body {
 .pattern-card.pattern-card-heuristic:hover { border-color: var(--orange); background: rgba(255,159,10,.08); }
 .profile-strategy-card .card-icon {
   width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center;
-  background: rgba(30,128,255,.12); color: var(--blue); font-size: 17px; flex-shrink: 0;
+  background: rgba(201,143,160,.12); color: var(--blue); font-size: 17px; flex-shrink: 0;
 }
 .profile-strategy-card.active .card-icon { background: var(--blue); color: #fff; }
 .profile-strategy-card .card-top { display: flex; align-items: center; gap: 10px; }
@@ -784,7 +1100,7 @@ body {
   cursor: pointer; transition: border-color .15s, background .15s, transform .1s; position: relative;
 }
 .exch-tab:hover { border-color: var(--blue); background: var(--bg-hover); transform: translateY(-1px); }
-.exch-tab.active { border-color: var(--blue); background: rgba(30,128,255,.07); box-shadow: inset 0 0 0 1px var(--blue), 0 0 22px -8px rgba(30,128,255,.45); }
+.exch-tab.active { border-color: var(--blue); background: rgba(201,143,160,.07); box-shadow: inset 0 0 0 1px var(--blue), 0 0 22px -8px rgba(201,143,160,.45); }
 .exch-tab-icon {
   width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
   font-size: 13px; font-weight: 700; color: #fff; flex-shrink: 0;
@@ -792,6 +1108,11 @@ body {
 .exch-tab-icon-mexc { background: var(--blue); }
 .exch-tab-icon-binance { background: #F0B90B; color: #1a1a1a; }
 .exch-tab-icon-okx { background: #000; }
+.exch-tab-icon-bitget { background: #00F0B7; color: #0a0a0a; }
+.exch-tab-icon-bingx { background: #1F2937; color: #fff; }
+.exch-tab-icon-kucoin { background: #24AE8F; color: #0a0a0a; }
+.exch-tab-icon-gateio { background: #E3453D; color: #fff; }
+.exch-tab-icon-aster { background: #8B5CF6; color: #fff; }
 .exch-tab-mid { display: flex; flex-direction: column; gap: 2px; }
 .exch-tab-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
 .exch-tab-dot { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted); }
@@ -804,8 +1125,8 @@ body {
    переход на страницу "Финрез", где теперь живёт вся визуализация (см. #finresHeroBar). */
 .acct-finres-note {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-  border: 1px solid rgba(30,128,255,.25); border-radius: 10px; padding: 16px 18px;
-  background: linear-gradient(135deg, rgba(30,128,255,.07), rgba(30,128,255,0) 65%);
+  border: 1px solid rgba(201,143,160,.25); border-radius: 10px; padding: 16px 18px;
+  background: linear-gradient(135deg, rgba(201,143,160,.07), rgba(201,143,160,0) 65%);
 }
 .acct-finres-note i { font-size: 22px; color: var(--blue); flex-shrink: 0; }
 .acct-finres-note-mid { flex: 1; min-width: 220px; }
@@ -817,8 +1138,11 @@ body {
   position: relative; overflow: hidden;
   display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap;
   padding: 18px 20px; margin-bottom: 18px; border: 1px solid var(--border-color); border-radius: 10px;
-  background: linear-gradient(135deg, rgba(30,128,255,.06), rgba(30,128,255,0) 60%);
-  box-shadow: 0 0 32px -12px rgba(30,128,255,.25);
+  /* Непрозрачная (не растворяющаяся в фоне) подложка — эта карточка теперь сидит поверх
+     пользовательской картинки-баннера (.finres-hero-bar::before), сумма портфеля должна читаться
+     на ЛЮБОЙ картинке, а не только на пустом тёмном фоне. */
+  background: rgba(10,10,12,.62); backdrop-filter: blur(10px) saturate(1.3); -webkit-backdrop-filter: blur(10px) saturate(1.3);
+  box-shadow: 0 0 32px -12px rgba(201,143,160,.25);
 }
 /* Тонкий диагональный блик сверху-слева — лёгкий стеклянный акцент, без перегруза интерфейса */
 .balance-hero::before {
@@ -837,13 +1161,13 @@ body {
   color: var(--text-secondary); font-size: 11px; font-weight: 500; cursor: pointer;
   transition: background .12s, color .12s, border-color .12s; flex-shrink: 0;
 }
-.finres-refresh-btn:hover { background: rgba(30,128,255,.1); color: #fff; border-color: rgba(30,128,255,.4); }
+.finres-refresh-btn:hover { background: rgba(201,143,160,.1); color: #fff; border-color: rgba(201,143,160,.4); }
 .finres-refresh-btn:disabled { opacity: .6; cursor: default; }
 .finres-refresh-btn i { font-size: 13px; }
 .finres-refresh-btn.spinning i { animation: spin 0.8s linear infinite; }
 .finres-last-updated { font-size: 10.5px; color: var(--text-muted); margin-top: 8px; }
 .finres-last-updated.stale { color: var(--orange); }
-.balance-hero-value { font-size: 30px; font-weight: 700; color: var(--text-primary); font-family: var(--font-mono); line-height: 1.15; text-shadow: 0 0 24px rgba(30,128,255,.25); }
+.balance-hero-value { font-size: 30px; font-weight: 700; color: var(--text-primary); font-family: var(--font-mono); line-height: 1.15; text-shadow: 0 0 24px rgba(201,143,160,.25); }
 .balance-hero-delta { font-size: 12.5px; margin-top: 6px; display: flex; align-items: center; gap: 4px; font-weight: 600; }
 .balance-hero-delta.up { color: var(--green); }
 .balance-hero-delta.down { color: var(--red); }
@@ -928,13 +1252,13 @@ body {
 .stat-tile.down { border-color: rgba(248,73,96,.35); box-shadow: 0 0 20px -10px rgba(248,73,96,.5); }
 .stat-tile.down .stat-tile-label, .stat-tile.down .stat-tile-pct { color: var(--red); }
 .stat-tile.flat .stat-tile-pct { color: var(--text-secondary); }
-.stat-tile.neutral { border-color: rgba(30,128,255,.3); box-shadow: 0 0 20px -10px rgba(30,128,255,.45); }
+.stat-tile.neutral { border-color: rgba(201,143,160,.3); box-shadow: 0 0 20px -10px rgba(201,143,160,.45); }
 .stat-tile.neutral .stat-tile-label, .stat-tile.neutral .stat-tile-pct { color: var(--blue); }
 .balance-hero-value.pulse { animation: heroValuePulse .6s ease; }
 @keyframes heroValuePulse {
-  0% { text-shadow: 0 0 24px rgba(30,128,255,.25); }
-  35% { text-shadow: 0 0 34px rgba(30,128,255,.65); }
-  100% { text-shadow: 0 0 24px rgba(30,128,255,.25); }
+  0% { text-shadow: 0 0 24px rgba(201,143,160,.25); }
+  35% { text-shadow: 0 0 34px rgba(201,143,160,.65); }
+  100% { text-shadow: 0 0 24px rgba(201,143,160,.25); }
 }
 @keyframes balanceRowIn {
   from { opacity: 0; transform: translateX(-6px); }
@@ -945,7 +1269,7 @@ body {
 .balance-asset-row { transition: border-color .15s, background .15s; }
 .balance-asset-row:hover { border-color: rgba(255,255,255,.18); background: var(--bg-hover); }
 .balance-donut-card { transition: box-shadow .2s, border-color .2s; }
-.balance-donut-card:hover { border-color: rgba(30,128,255,.35); box-shadow: 0 0 26px -12px rgba(30,128,255,.4); }
+.balance-donut-card:hover { border-color: rgba(201,143,160,.35); box-shadow: 0 0 26px -12px rgba(201,143,160,.4); }
 /* --- Баланс: календарь P&L по дням (редизайн раунда 9 — крупнее, читаемее, каждая ячейка своя
    видимая карточка вместо еле заметных цифр по пустому фону) --- */
 .balance-calendar-card {
@@ -961,7 +1285,7 @@ body {
   color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 13px;
   transition: background .15s ease, color .15s ease, border-color .15s ease, transform .15s ease;
 }
-.balance-calendar-navbtn:hover { background: rgba(30,128,255,.12); color: #fff; border-color: var(--blue); transform: translateY(-1px); }
+.balance-calendar-navbtn:hover { background: rgba(201,143,160,.12); color: #fff; border-color: var(--blue); transform: translateY(-1px); }
 .balance-calendar-navbtn:active { transform: translateY(0); }
 .balance-calendar-month { font-size: 12.5px; font-weight: 700; color: var(--text-primary); min-width: 108px; text-align: center; font-family: var(--font-mono); }
 .balance-calendar-weekdays {
@@ -1002,10 +1326,10 @@ body {
 .balcal-cell-inner.down { background: rgba(255,77,90, var(--intensity, .16)); border-color: rgba(255,77,90,.3); }
 .balcal-cell-inner.down .balcal-daynum, .balcal-cell-inner.down .balcal-amount { color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.4); }
 .balcal-cell-inner.flat { background: rgba(255,255,255,.06); }
-.balcal-cell.today .balcal-cell-inner { box-shadow: inset 0 0 0 1.5px var(--blue), 0 0 14px -4px rgba(76,125,255,.5); animation: balcalTodayGlow 2.6s ease-in-out infinite; }
+.balcal-cell.today .balcal-cell-inner { box-shadow: inset 0 0 0 1.5px var(--blue), 0 0 14px -4px rgba(201,143,160,.5); animation: balcalTodayGlow 2.6s ease-in-out infinite; }
 @keyframes balcalTodayGlow {
-  0%, 100% { box-shadow: inset 0 0 0 1.5px var(--blue), 0 0 12px -5px rgba(76,125,255,.45); }
-  50% { box-shadow: inset 0 0 0 1.5px var(--blue), 0 0 18px -3px rgba(76,125,255,.75); }
+  0%, 100% { box-shadow: inset 0 0 0 1.5px var(--blue), 0 0 12px -5px rgba(201,143,160,.45); }
+  50% { box-shadow: inset 0 0 0 1.5px var(--blue), 0 0 18px -3px rgba(201,143,160,.75); }
 }
 .balance-calendar-summary { margin-top: 10px; font-size: 11px; color: var(--text-muted); text-align: center; }
 .balance-calendar-summary .up { color: var(--green); font-weight: 600; }
@@ -1051,7 +1375,7 @@ body {
   border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-secondary);
   cursor: pointer; font-size: 12px; font-weight: 600; transition: border-color .15s, color .15s, background .15s, transform .12s, box-shadow .15s;
 }
-.journal-chip:hover { border-color: var(--blue); color: #fff; background: rgba(30,128,255,.08); transform: translateY(-1px) scale(1.03); box-shadow: 0 4px 14px -8px rgba(30,128,255,.5); }
+.journal-chip:hover { border-color: var(--blue); color: #fff; background: rgba(201,143,160,.08); transform: translateY(-1px) scale(1.03); box-shadow: 0 4px 14px -8px rgba(201,143,160,.5); }
 .journal-chip-avatar {
   width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
   font-size: 8.5px; font-weight: 700; color: #fff; flex-shrink: 0;
@@ -1073,12 +1397,12 @@ body {
     0 2px 0 rgba(255,255,255,.03) inset,
     0 30px 70px -24px rgba(0,0,0,.7),
     0 10px 28px -12px rgba(0,0,0,.5),
-    0 0 40px -16px rgba(30,128,255,.18);
+    0 0 40px -16px rgba(201,143,160,.18);
 }
 .journal-modal-header {
   display: flex; align-items: center; justify-content: space-between; padding: 14px 18px;
   border-bottom: 1px solid var(--border-color); flex-shrink: 0;
-  background: linear-gradient(180deg, rgba(30,128,255,.06), transparent);
+  background: linear-gradient(180deg, rgba(201,143,160,.06), transparent);
 }
 .journal-modal-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; }
 .journal-modal-title i { color: var(--blue); }
@@ -1169,8 +1493,20 @@ body {
 }
 .acct-wide-input { width: 320px !important; font-family: var(--font-mono); }
 @media (max-width: 900px) { .acct-wide-input { width: 100% !important; } }
-.empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); font-size: 14px; }
-.empty-state i { font-size: 48px; display: block; margin-bottom: 16px; }
+/* Драматичный пустой экран (по образцу постера "B&Y 404" — крупная фигура/номер в центре с
+   рассыпанными лепестками вокруг) — крупная светящаяся иконка + пара тусклых лепестков-акцентов
+   по бокам, чисто декоративная геометрия. */
+.empty-state { position: relative; text-align: center; padding: 60px 20px; color: var(--text-muted); font-size: 14px; }
+.empty-state i {
+  font-size: 52px; display: block; margin-bottom: 16px; color: var(--accent-soft);
+  text-shadow: 0 0 26px var(--neon-glow-soft);
+}
+.empty-state::before, .empty-state::after {
+  content: ''; position: absolute; top: 50%; width: 20px; height: 20px; margin-top: -46px;
+  background: radial-gradient(circle, var(--accent-soft), transparent 70%); opacity: .25; border-radius: 50%;
+}
+.empty-state::before { left: calc(50% - 90px); transform: scale(1.4, 1); }
+.empty-state::after { left: calc(50% + 70px); transform: scale(1, 1.4); }
 
 .grid-view { display: none; padding: 12px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
 .content.grid-mode .data-table { display: none; }
@@ -1197,37 +1533,69 @@ body {
 .grid-card-price { font-family: var(--font-mono); font-size: 18px; font-weight: 700; }
 .grid-card-meta { display: flex; justify-content: space-between; margin-top: 8px; font-size: 11px; color: var(--text-muted); }
 
+/* Правая колонка вместо нижней панели (редизайн 2026-09, по образцу макета) — #page-screener ниже
+   переопределяет .page на CSS Grid (2 колонки: контент таблицы | правая панель монеты), и
+   .bottom-panel/.coin-info/.chart-area из горизонтальной нижней плашки становятся вертикальной
+   колонкой во всю высоту, оформленной как отдельная светящаяся карточка. */
+#page-screener.active {
+  /* .active — иначе правило форсировало бы display:grid ВСЕГДА, даже когда открыта другая
+     страница (у .page есть свой display:none по умолчанию, .active его переопределяет на flex —
+     без этого уточнения #page-screener оставался бы видимым поверх/под любой другой активной
+     страницей; ровно так это и сломалось при первой проверке). */
+  display: grid !important;
+  grid-template-columns: 1fr 320px;
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "filterbar filterbar" "content bottompanel";
+  gap: 10px;
+  padding: 10px;
+  min-height: 0;
+}
+#page-screener > .filter-bar { grid-area: filterbar; }
+#page-screener > #screenerContent { grid-area: content; min-width: 0; min-height: 0; }
 .bottom-panel {
-  background: var(--bg-secondary); border-top: 1px solid var(--border-color);
-  display: flex; height: clamp(230px, 34vh, 400px); flex-shrink: 0;
+  grid-area: bottompanel;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  box-shadow: 0 0 0 1px var(--neon-glow-soft), 0 0 24px -10px var(--neon-glow);
+  /* height:100% (не auto!) — по умолчанию грид уже растягивает элемент на всю клетку, но auto тут
+     явно ломал это (сайзинг по контенту вместо доступной высоты), из-за чего .chart-area{flex:1}
+     ниже было НЕЧЕГО растягивать: колонка сама уже "сколько нужно" под контент. min-height:0 —
+     чтобы flex-дети могли сжиматься и работал именно ВНУТРЕННИЙ скролл (у .trades-panel/.algo-panel
+     ниже), а не рост всей карточки с overflow на ней самой. */
+  display: flex; flex-direction: column; height: 100%; min-height: 0; overflow-y: auto;
 }
 .coin-info {
-  width: 250px; padding: 16px;
-  border-right: 1px solid var(--border-color);
+  width: auto; padding: 12px 16px;
+  border-right: none; border-bottom: 1px solid var(--border-color);
   display: flex; flex-direction: column; flex-shrink: 0;
 }
-.coin-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.coin-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .coin-header .coin-icon { width: 32px; height: 32px; font-size: 14px; }
 .coin-title { font-size: 16px; font-weight: 700; }
 .coin-sub {
   font-size: 11px; color: var(--text-muted); background: var(--bg-card);
   padding: 2px 6px; border-radius: 3px; margin-left: auto;
 }
-.coin-price { font-size: 26px; font-weight: 700; font-family: var(--font-mono); margin-bottom: 4px; }
-.coin-change { font-size: 14px; font-weight: 600; margin-bottom: 16px; }
-.info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: auto; }
+.coin-price { font-size: 24px; font-weight: 700; font-family: var(--font-mono); margin-bottom: 2px; }
+.coin-change { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+.info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: auto; }
 .info-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
 .info-value { font-size: 13px; font-weight: 600; font-family: var(--font-mono); }
 
-.chart-area { flex: 1; display: flex; flex-direction: column; border-right: 1px solid var(--border-color); min-width: 0; }
+.chart-area { flex: 5 1 0; display: flex; flex-direction: column; border-right: none; min-width: 0; min-height: 430px; }
 .chart-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 16px; border-bottom: 1px solid var(--border-color); gap: 10px;
+  /* Раньше рассчитан на широкую горизонтальную нижнюю панель — в узкой правой колонке (редизайн
+     2026-09) 7 кнопок таймфрейма + цена + кнопка "Открыть на бирже" переносились на несколько
+     строк и раздували высоту шапки графика (169px в самом узком случае), отъедая место у самого
+     графика. flex-wrap + более компактные .tf-btn ниже держат высоту в разумных пределах. */
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  padding: 6px 10px; border-bottom: 1px solid var(--border-color); gap: 6px;
 }
-.timeframes { display: flex; gap: 2px; flex-wrap: wrap; }
+.timeframes { display: flex; gap: 1px; flex-wrap: wrap; }
 .tf-btn {
-  padding: 3px 10px; background: transparent; border: none;
-  color: var(--text-muted); font-size: 11px; cursor: pointer;
+  padding: 2px 6px; background: transparent; border: none;
+  color: var(--text-muted); font-size: 10px; cursor: pointer;
   border-radius: 3px; font-family: var(--font-mono); font-weight: 500;
 }
 .tf-btn:hover, .tf-btn.active { color: #fff; background: var(--bg-hover); }
@@ -1236,7 +1604,7 @@ body {
    не статичное описание алгоритма (оно есть в .strategy-hint-bar), а живой разбор её поведения. */
 .coin-analysis-bar {
   display: none; align-items: center; gap: 10px; padding: 6px 16px; border-bottom: 1px solid var(--border-color);
-  background: rgba(30,128,255,.05); font-size: 11.5px; line-height: 1.3;
+  background: rgba(201,143,160,.05); font-size: 11.5px; line-height: 1.3;
 }
 .coin-analysis-bar.visible { display: flex; }
 .coin-analysis-bar.matched { background: rgba(0,192,118,.07); }
@@ -1244,7 +1612,7 @@ body {
 .coin-analysis-bar.matched i { color: var(--green); }
 .coin-analysis-badge {
   font-weight: 700; font-family: var(--font-mono); font-size: 10.5px; flex-shrink: 0;
-  padding: 1px 7px; border-radius: 4px; color: var(--blue); border: 1px solid rgba(30,128,255,.4);
+  padding: 1px 7px; border-radius: 4px; color: var(--blue); border: 1px solid rgba(201,143,160,.4);
 }
 .coin-analysis-bar.matched .coin-analysis-badge { color: var(--green); border-color: rgba(0,192,118,.4); }
 /* Раньше переносилось на несколько строк и заметно "съедало" высоту графика — теперь одна строка
@@ -1270,7 +1638,15 @@ body {
   display: flex; align-items: center; justify-content: center;
   color: var(--text-muted); font-size: 14px;
   flex-direction: column; gap: 12px; pointer-events: none;
-  background: #131722;
+  /* Пользовательская картинка (web/assets/custom/chart-placeholder.png, см. README.txt в той же
+     папке) — та же схема, что и у сайдбара: под затемняющим виньеточным градиентом, чтобы текст
+     "Выберите монету..." и 3D-акцент поверх оставались читаемыми. Нет файла — просто не подгружается,
+     виден один #131722 (родной фон-заглушка TradingView), как и раньше. */
+  background:
+    radial-gradient(ellipse at center, rgba(19,23,34,.45), rgba(19,23,34,.88) 75%),
+    url('../assets/custom/chart-placeholder.gif') center / cover no-repeat,
+    url('../assets/custom/chart-placeholder.png') center / cover no-repeat,
+    #131722;
 }
 .chart-placeholder i { font-size: 32px; }
 
@@ -1289,7 +1665,7 @@ body {
   cursor: pointer; font-size: 15px; transition: background .15s, color .15s, border-color .15s, transform .1s;
 }
 .ochart-tool:hover { background: rgba(255,255,255,.07); color: #fff; }
-.ochart-tool.active { background: rgba(30,128,255,.16); border-color: rgba(30,128,255,.5); color: #fff; box-shadow: 0 0 12px -4px rgba(30,128,255,.55); }
+.ochart-tool.active { background: rgba(201,143,160,.16); border-color: rgba(201,143,160,.5); color: #fff; box-shadow: 0 0 12px -4px rgba(201,143,160,.55); }
 .ochart-sep { width: 1px; align-self: stretch; margin: 4px 4px; background: var(--border-color); }
 .ochart-hint {
   flex: 1; min-width: 0; font-size: 11px; color: var(--text-muted); white-space: nowrap;
@@ -1310,7 +1686,7 @@ body {
 }
 .ochart-pill i { font-size: 14px; }
 .ochart-pill:hover { color: #fff; border-color: rgba(255,255,255,.22); }
-.ochart-pill.active { background: rgba(30,128,255,.16); border-color: rgba(30,128,255,.5); color: #fff; box-shadow: 0 0 12px -4px rgba(30,128,255,.55); }
+.ochart-pill.active { background: rgba(201,143,160,.16); border-color: rgba(201,143,160,.5); color: #fff; box-shadow: 0 0 12px -4px rgba(201,143,160,.55); }
 .ochart-indicators-wrap { position: relative; flex-shrink: 0; }
 .ochart-indicators-panel {
   display: none; position: fixed; z-index: 200; min-width: 168px;
@@ -1326,7 +1702,7 @@ body {
 .ochart-ind-row.ind-off { color: var(--text-muted); }
 .ochart-ind-eye {
   display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; flex-shrink: 0;
-  border: none; background: transparent; color: #1e80ff; font-size: 15px; cursor: pointer; padding: 0;
+  border: none; background: transparent; color: var(--accent); font-size: 15px; cursor: pointer; padding: 0;
 }
 .ochart-ind-eye:not(.active) { color: var(--text-muted); }
 /* Тело графика: слева — вертикальная колонка инструментов рисования (курсор/уровень/лучи/линейка),
@@ -1349,11 +1725,11 @@ body {
 .ochart-live-btn {
   position: absolute; right: 64px; bottom: 14px; z-index: 4; display: none;
   align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px;
-  background: rgba(30,128,255,.16); border: 1px solid rgba(30,128,255,.5); color: #fff;
-  font-size: 11px; cursor: pointer; box-shadow: 0 4px 14px -4px rgba(30,128,255,.5);
+  background: rgba(201,143,160,.16); border: 1px solid rgba(201,143,160,.5); color: #fff;
+  font-size: 11px; cursor: pointer; box-shadow: 0 4px 14px -4px rgba(201,143,160,.5);
   transition: background .15s;
 }
-.ochart-live-btn:hover { background: rgba(30,128,255,.3); }
+.ochart-live-btn:hover { background: rgba(201,143,160,.3); }
 .ochart-live-btn.show { display: flex; }
 .own-chart-empty {
   position: absolute; inset: 0; z-index: 3; display: none; align-items: center; justify-content: center;
@@ -1372,10 +1748,19 @@ body {
 .chart-tip-change { margin-top: 2px; font-weight: 600; }
 .chart-tip-change.up { color: var(--green); }
 .chart-tip-change.down { color: var(--red); }
-.filter-btn.active { border-color: var(--blue); color: #fff; background: rgba(30,128,255,.12); box-shadow: 0 0 14px -4px rgba(30,128,255,.45); }
+.filter-btn.active { border-color: var(--blue); color: #fff; background: rgba(201,143,160,.12); box-shadow: 0 0 14px -4px rgba(201,143,160,.45); }
 
-.right-panel { width: 300px; display: flex; flex-direction: column; flex-shrink: 0; background: linear-gradient(180deg, rgba(255,255,255,.015), transparent 140px); }
-.trades-panel { flex: 1; border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column; overflow: hidden; }
+.right-panel {
+  width: auto; display: flex; flex-direction: column; flex-shrink: 0;
+  background: linear-gradient(180deg, rgba(255,255,255,.015), transparent 140px);
+  border-top: 1px solid var(--border-color);
+  /* Правая колонка (редизайн 2026-09-4, по фидбэку "график должен быть НАВЕРХУ и без скролла") —
+     алгоритмы+статистика+сделки идут ПОСЛЕ графика (.chart-area, flex:5 min-height:460 выше), а не
+     перед ним, чтобы график был виден сразу под шапкой монеты без прокрутки колонки. Капаем высоту
+     плотнее (было 300) и даём свой скролл только этому блоку — график в приоритете. */
+  max-height: 220px; overflow-y: auto;
+}
+.trades-panel { flex: 1; min-height: 70px; display: flex; flex-direction: column; overflow: hidden; }
 .panel-title {
   padding: 10px 16px; font-size: 11px; font-weight: 600;
   color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px;
@@ -1443,14 +1828,14 @@ body {
 }
 .trades-empty i { font-size: 22px; opacity: .6; }
 
-.algo-panel { position: relative; height: 168px; padding: 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; }
+.algo-panel { position: relative; flex-shrink: 0; padding: 14px 16px; display: flex; flex-direction: column; align-items: center; border-bottom: 1px solid var(--border-color); }
 .algo-panel::before {
   content: ''; position: absolute; top: -20px; left: 50%; transform: translateX(-50%);
   width: 200px; height: 200px; border-radius: 50%; pointer-events: none;
   background: radial-gradient(circle, var(--gauge-glow, rgba(0,192,118,.1)), transparent 70%);
   transition: background .4s ease;
 }
-.gauge-container { position: relative; width: 100%; max-width: 140px; aspect-ratio: 140 / 80; margin-bottom: 8px; }
+.gauge-container { position: relative; width: 100%; max-width: 120px; aspect-ratio: 140 / 80; margin-bottom: 6px; }
 .gauge-container svg { width: 100%; height: 100%; display: block; overflow: visible; }
 .gauge-bg { fill: none; stroke: var(--bg-card); stroke-width: 12; }
 .gauge-fill {
@@ -1460,11 +1845,36 @@ body {
   color: var(--green);
 }
 .gauge-text { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); text-align: center; }
-.gauge-value { font-size: 32px; font-weight: 700; font-family: var(--font-mono); line-height: 1; text-shadow: 0 0 18px rgba(255,255,255,.12); }
+.gauge-value { font-size: 28px; font-weight: 700; font-family: var(--font-mono); line-height: 1; text-shadow: 0 0 18px rgba(255,255,255,.12); }
 .gauge-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
-.algo-status { position: relative; display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--green); font-weight: 500; }
+.algo-status { position: relative; display: flex; align-items: center; gap: 6px; margin-bottom: 10px; font-size: 12px; color: var(--green); font-weight: 500; }
+.panel-subtitle {
+  position: relative; width: 100%; font-size: 10px; font-weight: 700; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: .06em; margin: 6px 0 6px;
+}
+/* Активные алгоритмы у выбранной монеты — реальные события Tier-2 (activePatternEvents), та же
+   правда/пусто-если-нечего-показать логика, что и у бейджей в таблице (algoBadgesCellHtml). */
+.active-algos-list { position: relative; width: 100%; display: flex; flex-direction: column; gap: 5px; }
+.active-algos-empty { font-size: 11px; color: var(--text-muted); padding: 4px 0; }
+.active-algo-row { display: flex; align-items: center; gap: 7px; font-size: 11.5px; padding: 3px 0; }
+.active-algo-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--text-muted); }
+.active-algo-dot.up { background: var(--green); box-shadow: 0 0 6px -1px var(--green); }
+.active-algo-dot.down { background: var(--red); box-shadow: 0 0 6px -1px var(--red); }
+.active-algo-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+.active-algo-signal { font-weight: 700; font-size: 10px; letter-spacing: .03em; }
+.active-algo-signal.up { color: var(--green); }
+.active-algo-signal.down { color: var(--red); }
+.active-algo-signal.neutral { color: var(--text-muted); }
+.active-algo-score { font-family: var(--font-mono); font-weight: 700; color: var(--text-primary); width: 32px; text-align: right; }
+/* Краткая статистика — только уже посчитанные в другом месте реальные числа (см. miniStatsListHtml). */
+.mini-stats-list { position: relative; width: 100%; display: flex; flex-direction: column; gap: 3px; }
+.mini-stat-row { display: flex; align-items: center; justify-content: space-between; font-size: 11.5px; padding: 2px 0; }
+.mini-stat-label { color: var(--text-muted); }
+.mini-stat-value { font-family: var(--font-mono); font-weight: 600; color: var(--text-primary); }
+.mini-stat-value.up { color: var(--green); }
+.mini-stat-value.down { color: var(--red); }
 .algo-fav {
-  position: relative; margin-top: auto; width: 100%; padding: 8px;
+  position: relative; margin-top: 12px; width: 100%; padding: 8px;
   background: var(--bg-card); border: 1px solid var(--border-color);
   color: var(--text-primary); border-radius: 4px; cursor: pointer;
   font-size: 12px; display: flex; align-items: center; justify-content: center;
@@ -1665,7 +2075,7 @@ body {
 .settings-btn.danger { background: var(--red); color: #fff; }
 .settings-btn.danger:hover { box-shadow: 0 0 16px -3px rgba(248,73,96,.6); }
 .settings-btn.secondary { background: var(--bg-hover); color: var(--text-secondary); }
-.settings-btn.secondary:hover { box-shadow: 0 0 14px -4px rgba(30,128,255,.35); }
+.settings-btn.secondary:hover { box-shadow: 0 0 14px -4px rgba(201,143,160,.35); }
 
 .hidden { display: none !important; }
 @media (max-width: 1500px) {
