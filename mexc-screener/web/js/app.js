@@ -18,7 +18,7 @@ const LEV_RE = /(UP|DOWN|BULL|BEAR|3L|3S|5L|5S)USDT$/;
 // собственный WS-мост ниже по файлу); в обычной веб-версии (без desktop-обёртки) его нет, тогда
 // берём запасную строку — держите её в СИНХРОНЕ с "version" в desktop/neutralino.config.json при
 // каждом релизе, иначе версия в интерфейсе разойдётся с реальной.
-const APP_VERSION = (typeof window.NL_APPVERSION === 'string' && window.NL_APPVERSION) || '1.7.1';
+const APP_VERSION = (typeof window.NL_APPVERSION === 'string' && window.NL_APPVERSION) || '1.8.0';
 // ЗАПОЛНИТЕ после создания GitHub-репозитория и первого релиза (см. docs/updates.md) — до этого
 // кнопка "Проверить обновления" будет честно показывать понятную ошибку, а не тихо молчать или
 // стучаться в несуществующий адрес.
@@ -13569,13 +13569,65 @@ window.addEventListener('online', function () {
 // vs любая другая подключённая биржа (см. EXCHANGE_CONNECTORS) — тогда через exchangeSignedRequest,
 // тот же ответ-формат {price,qty,time,isBuyer}, что и у MEXC (документированный Binance-клон).
 async function fetchMyTrades(raw, limit, exchangeId) {
-  const data = (!exchangeId || exchangeId === 'mexc')
-    ? await mexcSignedRequest('/api/v3/myTrades', { symbol: raw, limit: limit || 500 })
-    : await exchangeSignedRequest(exchangeId, '/api/v3/myTrades', { symbol: raw, limit: limit || 500 });
-  if (!Array.isArray(data)) throw new Error((data && (data.msg || data.message)) || 'Некорректный ответ биржи');
-  return data.map(function (t) {
-    return { price: Number(t.price), qty: Number(t.qty), time: Number(t.time), buy: !!t.isBuyer };
-  }).filter(function (t) {
+  const isBitget = exchangeId === 'bitget';
+  const isBingx = exchangeId === 'bingx';
+  const isKucoin = exchangeId === 'kucoin';
+  const isGateio = exchangeId === 'gateio';
+  const isAster = exchangeId === 'aster';
+
+  let data;
+  if (isBitget) {
+    // limit у Bitget ограничен 100 за запрос (у остальных бирж здесь — 500-1000) — для активного
+    // скальпинга на одном символе "сегодня" может не поместиться в один запрос целиком; пагинацию
+    // сознательно не делаем в этот заход, только честно клампим, чтобы не улететь в ошибку API.
+    data = await exchangeSignedRequest(exchangeId, '/api/v2/spot/trade/fills', { symbol: raw, limit: Math.min(limit || 100, 100) });
+  } else if (isBingx) {
+    data = await exchangeSignedRequest(exchangeId, '/openApi/spot/v1/trade/myTrades', { symbol: bingxInstIdForRaw(raw), limit: limit || 500 });
+  } else if (isKucoin) {
+    data = await exchangeSignedRequest(exchangeId, '/api/v1/hf/fills', { symbol: kucoinInstIdForRaw(raw) });
+  } else if (isGateio) {
+    data = await exchangeSignedRequest(exchangeId, '/api/v4/spot/my_trades', { currency_pair: gateioInstIdForRaw(raw), limit: limit || 500 });
+  } else if (isAster) {
+    data = await exchangeSignedRequest(exchangeId, '/api/v1/userTrades', { symbol: raw, limit: limit || 500 });
+  } else if (!exchangeId || exchangeId === 'mexc') {
+    data = await mexcSignedRequest('/api/v3/myTrades', { symbol: raw, limit: limit || 500 });
+  } else {
+    data = await exchangeSignedRequest(exchangeId, '/api/v3/myTrades', { symbol: raw, limit: limit || 500 }); // binance
+  }
+
+  let list, mapFn;
+  if (isBitget) {
+    list = (data && Array.isArray(data.data)) ? data.data : null;
+    mapFn = function (t) {
+      const rawTime = Number(t.cTime);
+      // ЧЕСТНАЯ ОГОВОРКА: доки Bitget текстом утверждают "секунды", но их же пример ответа в тех
+      // же доках — 13-значное число (миллисекунды), внутреннее противоречие в документации биржи.
+      // Доверяем формату примера, но подстраховываемся: если значение похоже на секунды (10 цифр,
+      // не 13) — домножаем, чтобы не улететь в 1970 год на графике.
+      const time = rawTime < 1e12 ? rawTime * 1000 : rawTime;
+      return { price: Number(t.priceAvg), qty: Number(t.size), time: time, buy: String(t.side).toLowerCase() === 'buy' };
+    };
+  } else if (isBingx) {
+    list = (data && Array.isArray(data.data)) ? data.data : null;
+    mapFn = function (t) { return { price: Number(t.price), qty: Number(t.qty), time: Number(t.time), buy: !!t.isBuyer }; };
+  } else if (isKucoin) {
+    list = (data && data.data && Array.isArray(data.data.items)) ? data.data.items : null;
+    mapFn = function (t) { return { price: Number(t.price), qty: Number(t.size), time: Number(t.createdAt), buy: String(t.side).toLowerCase() === 'buy' }; };
+  } else if (isGateio) {
+    list = Array.isArray(data) ? data : null;
+    // create_time_ms, НЕ create_time — единицы измерения последнего доками однозначно не подтверждены.
+    mapFn = function (t) { return { price: Number(t.price), qty: Number(t.amount), time: Number(t.create_time_ms), buy: String(t.side).toLowerCase() === 'buy' }; };
+  } else if (isAster) {
+    list = Array.isArray(data) ? data : null;
+    // side у Aster — ЗАГЛАВНЫМИ ("BUY"/"SELL"), в отличие от остальных 4 бирж выше — сравниваем
+    // регистронезависимо, чтобы не полагаться на то, что регистр никогда не поменяется.
+    mapFn = function (t) { return { price: Number(t.price), qty: Number(t.qty), time: Number(t.time), buy: String(t.side).toUpperCase() === 'BUY' }; };
+  } else {
+    list = Array.isArray(data) ? data : null;
+    mapFn = function (t) { return { price: Number(t.price), qty: Number(t.qty), time: Number(t.time), buy: !!t.isBuyer }; };
+  }
+  if (!Array.isArray(list)) throw new Error((data && (data.msg || data.message)) || 'Некорректный ответ биржи');
+  return list.map(mapFn).filter(function (t) {
     return Number.isFinite(t.price) && Number.isFinite(t.qty) && Number.isFinite(t.time);
   }).sort(function (a, b) { return a.time - b.time; });
 }
@@ -15073,8 +15125,8 @@ function applyFinresSnapshot(snap) {
 // сегодня (см. Настройки аккаунта), но у нас пока нет её адаптера для Финреза (её REST не идентичен
 // Binance/MEXC по форме ответов) — явно исключаем, чтобы не предлагать вкладку, которая тут же
 // покажет "Не подключено" без реального пути её когда-либо подключить.
-const FINRES_SUPPORTED_EXCHANGES = ['mexc', 'binance'];
-const FINRES_EXCHANGE_LABEL = { mexc: 'MEXC', binance: 'Binance' };
+const FINRES_SUPPORTED_EXCHANGES = ['mexc', 'binance', 'bitget', 'bingx', 'kucoin', 'gateio', 'aster'];
+const FINRES_EXCHANGE_LABEL = { mexc: 'MEXC', binance: 'Binance', bitget: 'Bitget', bingx: 'BingX', kucoin: 'KuCoin', gateio: 'Gate.io', aster: 'Aster' };
 
 function switchFinresExchange(id) {
   if (id === finresActiveExchange || FINRES_SUPPORTED_EXCHANGES.indexOf(id) === -1) return;
@@ -15144,6 +15196,37 @@ function renderFinresExchangeTabs() {
   }
 }
 
+// Приводит "сырой" ответ баланс-эндпоинта КАЖДОЙ биржи к единому виду {asset,free,locked}[] —
+// тому же, что уже нативно отдают MEXC/Binance/Aster (Binance-клоны, поэтому для них функция не
+// вызывается вовсе, см. isBinanceClone у вызывающего кода). Путь запроса для каждой биржи БЕРЁТСЯ
+// из EXCHANGE_CONNECTORS[id].verifyPath — тот же самый эндпоинт, что уже используется для проверки
+// подключения ("Подключить" в Настройках аккаунта), отдельно хардкодить путь не нужно.
+function normalizeExchangeBalances(exchangeId, rawData) {
+  if (exchangeId === 'bitget') {
+    const rows = (rawData && Array.isArray(rawData.data)) ? rawData.data : [];
+    // frozen, НЕ locked — у Bitget поле "locked" означает статус фиат-мерчанта (у обычного
+    // пользователя всегда "0"), а реально удержанное в открытых ордерах — "frozen".
+    return rows.map(function (r) { return { asset: r.coin, free: r.available, locked: r.frozen }; });
+  }
+  if (exchangeId === 'bingx') {
+    // Поля уже названы asset/free/locked 1-в-1 как у Binance — разворачиваем только конверт
+    // {code,msg,data:{balances:[...]}} (обратите внимание — на уровень глубже, чем у большинства).
+    return (rawData && rawData.data && Array.isArray(rawData.data.balances)) ? rawData.data.balances : [];
+  }
+  if (exchangeId === 'kucoin') {
+    const rows = (rawData && Array.isArray(rawData.data)) ? rawData.data : [];
+    // KuCoin отдаёт вперемешку суб-аккаунты "main" (фиатный/общий кошелёк) и "trade" (спот-торговля)
+    // в ОДНОМ массиве — без фильтра тут задвоился бы баланс, не относящийся к спот-торговле вовсе.
+    return rows.filter(function (r) { return r.type === 'trade'; })
+      .map(function (r) { return { asset: r.currency, free: r.available, locked: r.holds }; });
+  }
+  if (exchangeId === 'gateio') {
+    const rows = Array.isArray(rawData) ? rawData : []; // голый массив, БЕЗ {code,data}-обёртки
+    return rows.map(function (r) { return { asset: r.currency, free: r.available, locked: r.locked }; });
+  }
+  return []; // mexc/binance/aster сюда не попадают — см. isBinanceClone у вызывающего кода
+}
+
 let balanceRefreshInFlight = false;
 let balanceRefreshFailStreak = 0;
 function refreshAccountBalancesIfConnected() {
@@ -15151,12 +15234,18 @@ function refreshAccountBalancesIfConnected() {
   if (!finresActiveExchangeConnected() || balanceRefreshInFlight) return Promise.resolve(); // не копим параллельные запросы, если предыдущий ещё не ответил
   balanceRefreshInFlight = true;
   const isMexc = finresActiveExchange === 'mexc';
+  // binance/aster — Binance-идентичный ответ {balances:[{asset,free,locked}]} без переформатирования;
+  // остальные (bitget/bingx/kucoin/gateio) — через normalizeExchangeBalances (см. её комментарий).
+  const isBinanceClone = finresActiveExchange === 'binance' || finresActiveExchange === 'aster';
   // return — чтобы вызывающий код (например, кнопка «Обновить» в Финрезе) мог дождаться реального
   // завершения запроса, а не только поставить его в очередь.
-  const req = isMexc ? mexcSignedRequest('/api/v3/account', {}) : exchangeSignedRequest(finresActiveExchange, '/api/v3/account', {});
+  const req = isMexc
+    ? mexcSignedRequest('/api/v3/account', {})
+    : exchangeSignedRequest(finresActiveExchange, EXCHANGE_CONNECTORS[finresActiveExchange].verifyPath, {});
   return req.then(function (data) {
     balanceRefreshFailStreak = 0;
-    renderAccountBalances(data && data.balances);
+    const balances = (isMexc || isBinanceClone) ? (data && data.balances) : normalizeExchangeBalances(finresActiveExchange, data);
+    renderAccountBalances(balances);
     // Раз соединение прямо сейчас реально работает — статус должен это отражать, даже если до этого
     // была временная ошибка (сеть моргнула, биржа на секунду не ответила и т.п.). Иначе бейдж "Ошибка"
     // мог бы навсегда зависнуть в интерфейсе даже после того, как всё восстановилось.
