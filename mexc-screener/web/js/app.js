@@ -11116,6 +11116,31 @@ async function nativeCurlGet(url, headers, method) {
   return { ok: true, body: (result && result.body) || '' };
 }
 
+// Коррекция расхождения ЛОКАЛЬНЫХ часов с сервером биржи — самая частая причина ошибки "Timestamp
+// for this request is outside of the recvWindow" (у Windows авто-синхронизация времени нередко
+// молча выключена/не срабатывает, а у бирж подпись обязана нести timestamp близко к ИХ времени).
+// Раньше это лечилось только советом "проверьте системные часы" (см. mexcSignedRequest ниже) —
+// теперь, как и любой нормальный торговый бот, один раз при подключении спрашиваем ПУБЛИЧНЫЙ (без
+// ключа/подписи, значит сам не подвержен этой же проблеме) server time биржи и добавляем разницу
+// к каждому подписанному timestamp — работает, даже если часы у пользователя реально врут на минуты,
+// без необходимости лезть в настройки Windows. exchangeTimeOffsetMs[id] == 0 (по умолчанию,
+// Map.get на отсутствующий ключ) значит "ещё не синхронизировано или синхронизация не удалась" —
+// в этом случае просто используется чистый Date.now(), как раньше (никакой регрессии).
+const exchangeTimeOffsetMs = {};
+async function syncExchangeTimeOffset(id, timeUrl, extractServerMs) {
+  try {
+    const res = await fetchWithTimeout(timeUrl, {}, 5000);
+    const data = await res.json();
+    const serverMs = extractServerMs(data);
+    if (serverMs && isFinite(serverMs)) {
+      exchangeTimeOffsetMs[id] = serverMs - Date.now();
+      logD('Exchange', id + ': смещение локальных часов относительно сервера ' + exchangeTimeOffsetMs[id] + 'мс');
+    }
+  } catch (e) {
+    logW('Exchange', id + ': не удалось синхронизировать время с сервером (' + (e && e.message || e) + ') — подпись пойдёт по локальным часам как раньше');
+  }
+}
+
 // Подписанный GET-запрос к приватному REST API MEXC (timestamp + HMAC-SHA256 подпись параметров).
 // Сначала пробует обычный fetch() из браузера; если MEXC блокирует его по CORS (частая практика
 // бирж для приватных эндпоинтов) — в десктоп-приложении автоматически пробует нативный запрос
@@ -11128,7 +11153,7 @@ async function nativeCurlGet(url, headers, method) {
 // исходная подпись уже может оказаться вне recvWindow, даже если часы на компьютере верны.
 // Это и есть частая причина ошибки "Timestamp for this request is outside of the recvWindow.".
 async function buildSignedUrl(path, params) {
-  const p = Object.assign({}, params, { timestamp: Date.now(), recvWindow: 10000 });
+  const p = Object.assign({}, params, { timestamp: Date.now() + (exchangeTimeOffsetMs.mexc || 0), recvWindow: 10000 });
   const qs = Object.keys(p).map(function (k) { return k + '=' + encodeURIComponent(p[k]); }).join('&');
   const signature = await hmacSha256Hex(mexcApiSecret, qs);
   return MEXC_REST + path + '?' + qs + '&signature=' + signature;
@@ -14104,6 +14129,7 @@ async function connectMexcAccount(silent) {
   mexcApiKey = key;
   mexcApiSecret = secret;
   setAccountStatus('connecting');
+  await syncExchangeTimeOffset('mexc', MEXC_REST + '/api/v3/time', function (d) { return d && d.serverTime; });
   try {
     const data = await mexcSignedRequest('/api/v3/account', {}, function (stage) {
       setAccountStatus('connecting', stage === 'native'
@@ -14191,8 +14217,12 @@ const EXCHANGE_CONNECTORS = {
     baseUrl: 'https://api.binance.com',
     verifyPath: '/api/v3/account',
     needsPassphrase: false,
+    // Публичный (без ключа) server time — используется syncExchangeTimeOffset() перед подключением,
+    // см. её комментарий выше про "Timestamp for this request is outside of the recvWindow".
+    timeSyncUrl: 'https://api.binance.com/api/v3/time',
+    parseServerTimeMs: function (d) { return d && d.serverTime; },
     sign: async function (conn, path, params) {
-      const p = Object.assign({}, params, { timestamp: Date.now(), recvWindow: 10000 });
+      const p = Object.assign({}, params, { timestamp: Date.now() + (exchangeTimeOffsetMs.binance || 0), recvWindow: 10000 });
       const qs = Object.keys(p).map(function (k) { return k + '=' + encodeURIComponent(p[k]); }).join('&');
       const signature = await hmacSha256Hex(conn.apiSecret, qs);
       return { url: this.baseUrl + path + '?' + qs + '&signature=' + signature, headers: { 'X-MBX-APIKEY': conn.apiKey } };
@@ -14236,12 +14266,14 @@ const EXCHANGE_CONNECTORS = {
     baseUrl: 'https://www.okx.com',
     verifyPath: '/api/v5/account/balance',
     needsPassphrase: true,
+    timeSyncUrl: 'https://www.okx.com/api/v5/public/time',
+    parseServerTimeMs: function (d) { return d && Array.isArray(d.data) && d.data[0] ? Number(d.data[0].ts) : null; },
     sign: async function (conn, path, params, method) {
       const qs = params && Object.keys(params).length
         ? '?' + Object.keys(params).map(function (k) { return k + '=' + encodeURIComponent(params[k]); }).join('&')
         : '';
       const requestPath = path + qs;
-      const timestamp = new Date().toISOString(); // уже ровно нужный формат: YYYY-MM-DDTHH:mm:ss.sssZ
+      const timestamp = new Date(Date.now() + (exchangeTimeOffsetMs.okx || 0)).toISOString(); // уже ровно нужный формат: YYYY-MM-DDTHH:mm:ss.sssZ
       const prehash = timestamp + (method || 'GET') + requestPath;
       const signature = await hmacSha256Base64(conn.apiSecret, prehash);
       return {
@@ -14288,12 +14320,14 @@ const EXCHANGE_CONNECTORS = {
     // Схема подписи 1-в-1 как у OKX (тот же timestamp+METHOD+requestPath(+query)+body -> HMAC-SHA256
     // -> base64), отличие только в именах заголовков (без префикса "OK-") и в формате timestamp —
     // у Bitget это просто миллисекунды эпохи строкой, а не ISO8601.
+    timeSyncUrl: 'https://api.bitget.com/api/v2/public/time',
+    parseServerTimeMs: function (d) { return d && d.data ? Number(d.data.serverTime) : null; },
     sign: async function (conn, path, params, method) {
       const qs = params && Object.keys(params).length
         ? '?' + Object.keys(params).map(function (k) { return k + '=' + encodeURIComponent(params[k]); }).join('&')
         : '';
       const requestPath = path + qs;
-      const timestamp = String(Date.now());
+      const timestamp = String(Date.now() + (exchangeTimeOffsetMs.bitget || 0));
       const prehash = timestamp + (method || 'GET') + requestPath;
       const signature = await hmacSha256Base64(conn.apiSecret, prehash);
       return {
@@ -14336,8 +14370,14 @@ const EXCHANGE_CONNECTORS = {
     // Схема подписи 1-в-1 как у Binance (не совпадение — BingX документированно моделирует свой
     // REST по Binance): параметры сортируются по ключу, HMAC-SHA256 в HEX (не base64, как у OKX/
     // Bitget), подпись — доп. query-параметр "signature", ключ — в заголовке.
+    // ВАЖНО (подтверждено вживую curl): в отличие от Binance/MEXC, публичный /server/time у BingX
+    // отдаёт serverTime В СЕКУНДАХ, не в миллисекундах ({"data":{"serverTime":1789750027}}, не
+    // 1789750027xxx) — при том что сама ПОДПИСЬ (timestamp ниже) по-прежнему в мс, как у Binance.
+    // *1000 обязателен, иначе offset получился бы в тысячу раз меньше нужного и ничего не чинил бы.
+    timeSyncUrl: 'https://open-api.bingx.com/openApi/spot/v1/server/time',
+    parseServerTimeMs: function (d) { return d && d.data && d.data.serverTime ? Number(d.data.serverTime) * 1000 : null; },
     sign: async function (conn, path, params) {
-      const p = Object.assign({}, params, { timestamp: Date.now(), recvWindow: 5000 });
+      const p = Object.assign({}, params, { timestamp: Date.now() + (exchangeTimeOffsetMs.bingx || 0), recvWindow: 5000 });
       const qs = Object.keys(p).sort().map(function (k) { return k + '=' + p[k]; }).join('&');
       const signature = await hmacSha256Hex(conn.apiSecret, qs);
       return { url: this.baseUrl + path + '?' + qs + '&signature=' + signature, headers: { 'X-BX-APIKEY': conn.apiKey } };
@@ -14372,12 +14412,14 @@ const EXCHANGE_CONNECTORS = {
     // SHA256 -> base64), но у KuCoin (API-ключ v2/v3, стандарт для всех новых ключей) САМ ПАРОЛЬ
     // (passphrase) тоже обязан идти зашифрованным тем же HMAC-SHA256+base64 через secret — plain-
     // text passphrase новые ключи просто не принимают. Плюс отдельный заголовок версии ключа.
+    timeSyncUrl: 'https://api.kucoin.com/api/v1/timestamp',
+    parseServerTimeMs: function (d) { return d && d.data ? Number(d.data) : null; },
     sign: async function (conn, path, params, method) {
       const qs = params && Object.keys(params).length
         ? '?' + Object.keys(params).map(function (k) { return k + '=' + encodeURIComponent(params[k]); }).join('&')
         : '';
       const endpoint = path + qs;
-      const timestamp = String(Date.now());
+      const timestamp = String(Date.now() + (exchangeTimeOffsetMs.kucoin || 0));
       const prehash = timestamp + (method || 'GET').toUpperCase() + endpoint;
       const signature = await hmacSha256Base64(conn.apiSecret, prehash);
       const encryptedPassphrase = await hmacSha256Base64(conn.apiSecret, conn.passphrase);
@@ -14420,11 +14462,13 @@ const EXCHANGE_CONNECTORS = {
     // ЕДИНСТВЕННАЯ из шести бирж здесь с HMAC-SHA512 (не SHA256): подписываемая строка — пять частей
     // через "\n" (МЕТОД, URL-путь, query-строка, hex(SHA512(тело)), timestamp) — не просто конкатенация,
     // как у остальных. timestamp — В СЕКУНДАХ (не мс, как у всех остальных бирж здесь).
+    timeSyncUrl: 'https://api.gateio.ws/api/v4/spot/time',
+    parseServerTimeMs: function (d) { return d && d.server_time ? Number(d.server_time) : null; },
     sign: async function (conn, path, params, method) {
       const qs = params && Object.keys(params).length
         ? Object.keys(params).map(function (k) { return k + '=' + encodeURIComponent(params[k]); }).join('&')
         : '';
-      const timestamp = String(Math.floor(Date.now() / 1000));
+      const timestamp = String(Math.floor((Date.now() + (exchangeTimeOffsetMs.gateio || 0)) / 1000));
       const bodyHash = await sha512Hex(''); // GET без тела — хэш пустой строки
       const signString = (method || 'GET').toUpperCase() + '\n' + path + '\n' + qs + '\n' + bodyHash + '\n' + timestamp;
       const signature = await hmacSha512Hex(conn.apiSecret, signString);
@@ -14471,8 +14515,10 @@ const EXCHANGE_CONNECTORS = {
     // авторизации). Этот sign() рассчитан на УЖЕ СУЩЕСТВУЮЩИЙ V1-ключ — если такого нет, кнопка
     // «Подключить» здесь не сработает, но вся детекция (Tier-1/Tier-2/29 алгоритмов) работает и без
     // подключения аккаунта, ровно как MEXC market-wide detection не требует подписанного доступа.
+    timeSyncUrl: 'https://sapi.asterdex.com/api/v1/time',
+    parseServerTimeMs: function (d) { return d && d.serverTime; },
     sign: async function (conn, path, params) {
-      const p = Object.assign({}, params, { timestamp: Date.now(), recvWindow: 10000 });
+      const p = Object.assign({}, params, { timestamp: Date.now() + (exchangeTimeOffsetMs.aster || 0), recvWindow: 10000 });
       const qs = Object.keys(p).map(function (k) { return k + '=' + encodeURIComponent(p[k]); }).join('&');
       const signature = await hmacSha256Hex(conn.apiSecret, qs);
       return { url: this.baseUrl + path + '?' + qs + '&signature=' + signature, headers: { 'X-MBX-APIKEY': conn.apiKey } };
@@ -15112,7 +15158,18 @@ async function exchangeSignedRequest(id, path, params, onProgress, method) {
   try { data = text ? JSON.parse(text) : null; } catch (e) {
     throw new Error(connector.label + ' вернул нераспознаваемый ответ: ' + String(text).slice(0, 200));
   }
-  if (connector.checkError) connector.checkError(data);
+  try {
+    if (connector.checkError) connector.checkError(data);
+  } catch (checkErr) {
+    // Тот же приём, что у mexcSignedRequest выше — если синхронизация времени (см. connectExchange)
+    // почему-то не сработала (например, timeSyncUrl недоступен) и ошибка всё равно про recvWindow,
+    // явно подсказываем причину, а не пробрасываем голый английский текст биржи.
+    if (/recvWindow|Timestamp for this request/i.test(checkErr.message)) {
+      throw new Error(checkErr.message + ' Похоже, системные часы на этом компьютере расходятся с реальным временем — ' +
+        'проверьте дату/время (Windows: Параметры → Время и язык → «Синхронизировать сейчас») и попробуйте подключиться снова.');
+    }
+    throw checkErr;
+  }
   return data;
 }
 
@@ -15130,6 +15187,10 @@ async function connectExchange(id, silent) {
   }
   exchangeConnections[id] = { apiKey: key, apiSecret: secret, passphrase: passphrase, connected: false };
   setExchangeStatus(id, 'connecting');
+  // Синхронизация локальных часов с сервером ПЕРЕД подписью — см. syncExchangeTimeOffset() выше.
+  // Реальный кейс, который это чинит: "Не удалось подключить Binance — Timestamp for this request
+  // is outside of the recvWindow" при том, что API Key/Secret введены верно.
+  if (connector.timeSyncUrl) await syncExchangeTimeOffset(id, connector.timeSyncUrl, connector.parseServerTimeMs);
   try {
     await exchangeSignedRequest(id, connector.verifyPath, {}, function (stage) {
       setExchangeStatus(id, 'connecting', stage === 'native'
