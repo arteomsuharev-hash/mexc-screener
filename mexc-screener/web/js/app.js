@@ -15962,6 +15962,7 @@ function widgetPillRowHtml(symbol, subText, subClass, rowClass, rowAttrs) {
   '</div>';
 }
 
+let lastWidgetF1Signature = null;
 function renderWidgetSignals() {
   const listEl = document.getElementById('widgetSignalList');
   const emptyEl = document.getElementById('widgetEmpty');
@@ -15978,6 +15979,14 @@ function renderWidgetSignals() {
     seen.add(r.symbol);
     top.push(r);
   }
+  // Перерисовываем DOM, ТОЛЬКО когда реально что-то обнаружено/пропало (по запросу, 2026-09) —
+  // сигнатура строится по id записей (уникальны и неизменны с момента детекции), НЕ по вечно
+  // тикающим % 24ч-движения/возрасту строки — иначе виджет продолжал бы перерисовываться каждые
+  // 3с просто от того, что цена шевельнулась, что и была исходная жалоба ("тупит без причины").
+  const signature = top.map(function (r) { return r.id; }).join(',');
+  if (signature === lastWidgetF1Signature) return;
+  lastWidgetF1Signature = signature;
+
   if (!top.length) {
     emptyEl.style.display = 'block';
     listEl.innerHTML = '';
@@ -16013,6 +16022,7 @@ let widgetActiveFilterTab = 1;
 const widgetF2AutoOpenedAt = new Map(); // symbol -> ts, анти-дребезг Auto Open отдельно от Filter 1
 const WIDGET_F2_AUTO_OPEN_COOLDOWN_MS = 60000;
 let widgetF2ExpandedSymbol = null;
+let lastWidgetF2Signature = null;
 
 function renderWidgetFilter2Signals() {
   if (!isWidgetMode || widgetSettingsOpen || typeof WidgetFilter2 === 'undefined') return;
@@ -16040,6 +16050,13 @@ function renderWidgetFilter2Signals() {
   }
 
   if (widgetActiveFilterTab !== 2) return; // считаем и авто-открываем всегда, рисуем — только на активной вкладке
+
+  // Перерисовываем DOM, ТОЛЬКО когда реально что-то обнаружено/пропало (по запросу, 2026-09) —
+  // сигнатура по символу+набору сработавших типов (НЕ по score/цене — те вечно чуть колышутся) +
+  // текущий развёрнутый ряд (иначе клик "развернуть" не подействовал бы, пока набор не изменится).
+  const signature = signals.map(function (rec) { return rec.symbol + '|' + rec.types.join(','); }).join(';') + '#' + (widgetF2ExpandedSymbol || '');
+  if (signature === lastWidgetF2Signature) return;
+  lastWidgetF2Signature = signature;
 
   if (!signals.length) {
     emptyEl.style.display = 'block';
@@ -16090,6 +16107,7 @@ function getF3VolaEnabled() { try { return localStorage.getItem(F3_SETTINGS_KEYS
 function getF3VolaPct() { try { const v = parseFloat(localStorage.getItem(F3_SETTINGS_KEYS.volaPct)); return isFinite(v) && v >= 0 ? v : 1.5; } catch (e) { return 1.5; } }
 function getF3VolaWindow() { try { const v = localStorage.getItem(F3_SETTINGS_KEYS.volaWindow); return (v === 'vol30s' || v === 'vol60s') ? v : 'vol5s'; } catch (e) { return 'vol5s'; } }
 
+let lastWidgetF3Signature = null;
 function renderWidgetFilter3Signals() {
   if (!isWidgetMode || widgetSettingsOpen || widgetActiveFilterTab !== 3) return;
   const listEl = document.getElementById('widgetFilter3List');
@@ -16135,6 +16153,14 @@ function renderWidgetFilter3Signals() {
   }
   results.sort(function (a, b) { return (b.prokidVolumeUsd || b.volaPct || 0) - (a.prokidVolumeUsd || a.volaPct || 0); });
   const top = results.slice(0, getWidgetMaxSignals());
+
+  // Перерисовываем DOM, ТОЛЬКО когда реально что-то обнаружено/пропало (по запросу, 2026-09) —
+  // сигнатура строится по МНОЖЕСТВУ символов (отсортированному по имени, не по значению) — иначе
+  // просто перестановка мест из-за вечно колышущихся объёма/волатильности каждый раз считалась бы
+  // "новым обнаружением", хотя набор монет тот же самый.
+  const signature = top.map(function (r) { return r.symbol + (r.matchedProkid ? 'P' : 'V'); }).sort().join(',');
+  if (signature === lastWidgetF3Signature) return;
+  lastWidgetF3Signature = signature;
 
   if (!prokidOn && !volaOn) {
     emptyEl.textContent = t('Включите хотя бы один параметр выше (⚙ значок вкладки).');
@@ -16245,6 +16271,13 @@ function renderWidgetFilter3Signals() {
 function enterWidgetMode() {
   if (isWidgetMode) return;
   isWidgetMode = true;
+  // Сбрасываем сигнатуры "последнего показанного" (см. renderWidgetSignals/Filter2/Filter3 —
+  // 2026-09, обновление DOM только при реальном обнаружении) — иначе если между закрытием и
+  // повторным открытием виджета набор сигналов не изменился, первый рендер после открытия был бы
+  // молча пропущен как "ничего нового", хотя список сейчас нигде не отрисован.
+  lastWidgetF1Signature = null;
+  lastWidgetF2Signature = null;
+  lastWidgetF3Signature = null;
   const view = document.getElementById('widgetView');
   document.body.classList.add('widget-mode-active');
   view.classList.toggle('widget-compact', getWidgetCompact());
