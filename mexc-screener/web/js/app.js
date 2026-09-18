@@ -9472,37 +9472,10 @@ function runDetectorsForSymbolInto(symbol, detectFnsByKey, events, cycleNow) {
   });
 }
 
-function runPatternDetectors() {
-  const events = [];
-  const cycleNow = Date.now();
-  watchlist.forEach(function (entry, symbol) {
-    runDetectorsForSymbolInto(symbol, DETECTOR_DEFS_AS_FNS, events, cycleNow);
-  });
-  binanceWatchlist.forEach(function (entry, symbol) {
-    runDetectorsForSymbolInto(symbol, BINANCE_DETECTOR_FNS, events, cycleNow);
-  });
-  okxWatchlist.forEach(function (entry, symbol) {
-    runDetectorsForSymbolInto(symbol, OKX_DETECTOR_FNS, events, cycleNow);
-  });
-  bitgetWatchlist.forEach(function (entry, symbol) {
-    runDetectorsForSymbolInto(symbol, BITGET_DETECTOR_FNS, events, cycleNow);
-  });
-  bingxWatchlist.forEach(function (entry, symbol) {
-    runDetectorsForSymbolInto(symbol, BINGX_DETECTOR_FNS, events, cycleNow);
-  });
-  kucoinWatchlist.forEach(function (entry, symbol) {
-    runDetectorsForSymbolInto(symbol, KUCOIN_DETECTOR_FNS, events, cycleNow);
-  });
-  gateioWatchlist.forEach(function (entry, symbol) {
-    runDetectorsForSymbolInto(symbol, GATEIO_DETECTOR_FNS, events, cycleNow);
-  });
-  asterWatchlist.forEach(function (entry, symbol) {
-    runDetectorsForSymbolInto(symbol, ASTER_DETECTOR_FNS, events, cycleNow);
-  });
-  asterFutWatchlist.forEach(function (entry, symbol) {
-    runDetectorsForSymbolInto(symbol, ASTERFUT_DETECTOR_FNS, events, cycleNow);
-  });
-
+// Пост-обработка ПОСЛЕ того, как детекторы прогнаны по ВСЕМ символам всех бирж (мульти-детекторное
+// подтверждение/сортировка/публикация) — вынесена отдельно, вызывается один раз на весь цикл, не
+// на каждый чанк (см. чанкинг ниже).
+function finishPatternDetectCycle(events) {
   // Мульти-детекторное подтверждение (ТЗ #8, фактор "confirmation") — если на одной монете в ОДНОМ
   // прогоне сработало ≥2 разных детектора, это взаимное подтверждение: пересчитываем им score с
   // confirmation=1 через applyPatternScore (НЕ прямым scorePatternEvent — тот не знает про
@@ -9537,6 +9510,57 @@ function runPatternDetectors() {
   const badge = document.getElementById('navPatternBadge');
   if (badge) badge.textContent = activePatternEvents.length;
   updatePatternsPage();
+}
+
+// Чанкинг (2026-09, тот же фикс реального бага, что и у Filter 2 recompute() — "виджет виснет при
+// перетаскивании, когда появляются монеты"): раньше runPatternDetectors() синхронно прогонял ВСЕ
+// символы watchlist ПО ВСЕМ 9 подключённым рынкам (MEXC + 7 внешних бирж + Aster Futures) одним
+// блокирующим куском — до ~186 символов × до 31 детектора = тысячи синхронных вызовов каждые 2с.
+// Это оказался ВТОРОЙ (независимый от Filter 2) источник того же подвисания — детекторы Filter 1
+// работают ВСЕГДА, не только в Widget Mode. Теперь обрабатываем по PATTERN_DETECT_CHUNK_SIZE
+// символов за синхронный кусок, между кусками setTimeout(0) отдаёt поток event loop'у.
+const PATTERN_DETECT_CHUNK_SIZE = 25;
+let patternDetectInProgress = false;
+let patternDetectQueue = null;
+
+function buildPatternDetectQueueItems() {
+  const items = [];
+  function addAll(map, fns) { map.forEach(function (entry, symbol) { items.push({ symbol: symbol, fns: fns }); }); }
+  addAll(watchlist, DETECTOR_DEFS_AS_FNS);
+  addAll(binanceWatchlist, BINANCE_DETECTOR_FNS);
+  addAll(okxWatchlist, OKX_DETECTOR_FNS);
+  addAll(bitgetWatchlist, BITGET_DETECTOR_FNS);
+  addAll(bingxWatchlist, BINGX_DETECTOR_FNS);
+  addAll(kucoinWatchlist, KUCOIN_DETECTOR_FNS);
+  addAll(gateioWatchlist, GATEIO_DETECTOR_FNS);
+  addAll(asterWatchlist, ASTER_DETECTOR_FNS);
+  addAll(asterFutWatchlist, ASTERFUT_DETECTOR_FNS);
+  return items;
+}
+
+function runPatternDetectChunk() {
+  const q = patternDetectQueue;
+  if (!q) { patternDetectInProgress = false; return; }
+  const end = Math.min(q.idx + PATTERN_DETECT_CHUNK_SIZE, q.items.length);
+  for (let i = q.idx; i < end; i++) {
+    const it = q.items[i];
+    runDetectorsForSymbolInto(it.symbol, it.fns, q.events, q.cycleNow);
+  }
+  q.idx = end;
+  if (q.idx < q.items.length) {
+    setTimeout(runPatternDetectChunk, 0);
+    return;
+  }
+  finishPatternDetectCycle(q.events);
+  patternDetectQueue = null;
+  patternDetectInProgress = false;
+}
+
+function runPatternDetectors() {
+  if (patternDetectInProgress) return; // предыдущий цикл ещё доедает чанки — не запускаем поверх
+  patternDetectQueue = { items: buildPatternDetectQueueItems(), idx: 0, events: [], cycleNow: Date.now() };
+  patternDetectInProgress = true;
+  runPatternDetectChunk(); // первый чанк — сразу
 }
 setInterval(runPatternDetectors, PATTERN_DETECT_INTERVAL_MS);
 
