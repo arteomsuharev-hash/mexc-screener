@@ -33,8 +33,13 @@
     aggressorSizeMult: 7,            // сделка >= baseline*7 — кандидат в "агрессор"
     displayThreshold: 78,            // quality score >= это -> реально показываем (п.24)
     watchThreshold: 62,              // ниже — не показываем, но не мусор, просто "не дотянул"
-    minVol24Usd: 150000,             // ликвидностный фильтр (п.21) — вне этого монета не рассматривается
-    maxSpreadPct: 1.2,               // ликвидностный фильтр по спреду (если есть стакан)
+    // Ликвидностный "пол" (п.21) — не про то, что фильтр ищет ликвидные монеты, а чтобы отсечь
+    // совсем мёртвые пары без реальной торговли (там детекторы просто шумят на 2-3 сделках). Сам
+    // упор на НЕликвидные, но живые рынки делается бонусом в qualityScore (regime === 'LOW_LIQUIDITY'),
+    // а не этим порогом — поэтому порог заметно ниже прежнего (был 150000), чтобы такие пары вообще
+    // доходили до скоринга, а не отсеивались на входе.
+    minVol24Usd: 40000,
+    maxSpreadPct: 2.5,                // шире прежнего (1.2) — на неликвиде спред объективно больше; реальный экономический фильтр всё равно ниже, в tradeabilityMoveOk (движение должно перекрывать спред+комиссию)
     staleMs: 15000,                  // те же 15с, что и у остальных детекторов проекта (протухшие данные)
     signalDecayMs: 75000,            // сигнал без переподтверждения дольше этого — считается ACTIVE -> истёк
     cooldownPerSymbolTypeMs: 45000,  // анти-дребезг: тот же тип сигнала на той же монете не чаще этого
@@ -78,6 +83,18 @@
     sniperLike: '🎯 LIQUIDITY-TAKER',
     distributedLiquidity: '🧹 ЁРШИК (ликвидность)'
   };
+
+  // Категории типов — упор Filter 2 (по запросу): роботы/алгоритмы и рыночные неэффективности
+  // получают бонус к score (см. qualityScore ниже), чтобы при прочих равных именно они чаще
+  // всплывали над порогом показа, а не тонули среди обычных momentum-сигналов (агрессор/вылет/тик).
+  const BOT_TYPES = new Set([
+    'robotBuyer', 'robotSeller', 'twapLike', 'vwapLike', 'gridLike', 'marketMakerLike',
+    'icebergLike', 'sniperLike', 'distributedLiquidity', 'inventoryUnload'
+  ]);
+  const INEFFICIENCY_TYPES = new Set([
+    'absorptionBuy', 'absorptionSell', 'refill', 'holderBid', 'holderAsk',
+    'liquidityPull', 'liquidityVacuum', 'ladder', 'flowCascade', 'rangeSpikeRevert'
+  ]);
 
   // ------------------------------------------------------------------------
   // Статистика — маленькие локальные хелперы (не тянем MexcCore, модуль изолирован намеренно).
@@ -143,7 +160,10 @@
     const baselineVol = median(vols.slice(0, -3)) || 0;
     const curVol = mean(vols.slice(-3));
     const coin = global.mexcCoinMap.get(symbol);
-    if (coin && coin.vol24 < CFG.minVol24Usd * 1.3) return 'LOW_LIQUIDITY';
+    // *3, не *1.3 — по запросу упор на неликвид: полоса LOW_LIQUIDITY (и, значит, бонус в
+    // qualityScore) должна реально накрывать "обычный неликвидный альт", а не только узкую щель
+    // прямо над минимальным порогом входа CFG.minVol24Usd.
+    if (coin && coin.vol24 < CFG.minVol24Usd * 3) return 'LOW_LIQUIDITY';
     if (baselineVol > 0 && curVol > baselineVol * 2.5) return 'HIGH_VOLATILITY';
     return 'NORMAL';
   }
@@ -897,11 +917,20 @@
     if (candidate.direction === 'LONG' && candidate.ofi != null) score += clamp(candidate.ofi * 12, -10, 10);
     if (candidate.direction === 'SHORT' && candidate.ofi != null) score += clamp(-candidate.ofi * 12, -10, 10);
 
+    // УПОР Filter 2 (по запросу) — роботы/алгоритмы и рыночные неэффективности приоритетнее обычных
+    // momentum-сигналов (агрессор/вылет/тик), т.к. именно там реально есть что эксплуатировать.
+    if (BOT_TYPES.has(candidate.type)) score += 8;
+    if (INEFFICIENCY_TYPES.has(candidate.type)) score += 6;
+
     // Regime-адаптация (п.38 ТЗ): в HIGH_VOLATILITY то, что выглядело бы аномальным в спокойном
     // рынке, для этой монеты прямо сейчас может быть нормой — небольшой штраф на "обычных для
     // текущего режима" детекторах (агрессор/вылет), чтобы не флагать весь рынок разом при общем шторме.
     if (candidate.regime === 'HIGH_VOLATILITY' && (candidate.type === 'aggressor' || candidate.type === 'breakout')) score -= 8;
-    if (candidate.regime === 'LOW_LIQUIDITY') score -= 6; // и так уже прошли tradeabilityOk, но подстрахуемся
+    // LOW_LIQUIDITY — раньше штрафовалось (-6): предполагалось, что неликвид менее надёжен. По
+    // запросу это осознанно перевёрнуто в бонус — на неликвидных парах у роботов/неэффективностей
+    // куда меньше конкуренции и они заметнее на тонком стакане, это и есть цель этого фильтра.
+    // tradeabilityOk/tradeabilityMoveOk ниже по-прежнему не пускают совсем мёртвые/неторгуемые пары.
+    if (candidate.regime === 'LOW_LIQUIDITY') score += 7;
 
     return clamp(Math.round(score), 0, 100);
   }
@@ -937,7 +966,14 @@
 
   function collectSymbolCandidates(symbol, now, hasTier2) {
     const out = [];
-    let ofi = 0, regime = 'NORMAL';
+    // БАГ (нашёл при аудите, 2026-09): regime раньше оставался на дефолтном 'NORMAL', если
+    // hasTier2=true, но computeFeatures() вернул null (мало сделок для baseline) — а это ИМЕННО
+    // самые неликвидные Tier2-монеты, то есть ровно те, для которых регим-бонус LOW_LIQUIDITY в
+    // qualityScore важнее всего. classifyRegime(symbol) не завязан на computeFeatures (использует
+    // отдельно tier1History/coinMap), поэтому его безопасно звать всегда заранее как базовое
+    // значение — f.regime (когда f есть) всё равно считается тем же classifyRegime() внутри
+    // computeFeatures, так что двойного вызова с разными результатами тут не бывает.
+    let ofi = 0, regime = classifyRegime(symbol);
     if (hasTier2) {
       const f = computeFeatures(symbol, now);
       if (f) {
@@ -962,8 +998,6 @@
           if (res) out.push.apply(out, res);
         });
       }
-    } else {
-      regime = classifyRegime(symbol);
     }
     // Tier-1 (широкий скан по цене/объёму) — работает ВСЕГДA, независимо от того, есть ли у
     // монеты Tier2-подписка: там, где есть ещё и реальные сделки, это просто дополнительное

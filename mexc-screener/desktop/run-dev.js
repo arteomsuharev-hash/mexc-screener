@@ -32,6 +32,8 @@ function syncResourcesFromWeb() {
   const resIndex = path.join(ROOT, 'resources', 'index.html');
   const resAssets = path.join(ROOT, 'resources', 'assets');
   const webAssets = path.join(WEB, 'assets');
+  const resJsVendor = path.join(ROOT, 'resources', 'js', 'vendor');
+  const webJsVendor = path.join(WEB, 'js', 'vendor');
 
   fs.rmSync(resIndex, { force: true });
   fs.rmSync(resCss, { recursive: true, force: true });
@@ -40,9 +42,11 @@ function syncResourcesFromWeb() {
   fs.rmSync(resJsTerminal, { force: true });
   fs.rmSync(resJsFilter2, { force: true });
   fs.rmSync(resAssets, { recursive: true, force: true });
+  fs.rmSync(resJsVendor, { recursive: true, force: true });
   fs.mkdirSync(resCss, { recursive: true });
   fs.mkdirSync(path.join(ROOT, 'resources', 'js'), { recursive: true });
   if (fs.existsSync(webAssets)) fs.cpSync(webAssets, resAssets, { recursive: true });
+  if (fs.existsSync(webJsVendor)) fs.cpSync(webJsVendor, resJsVendor, { recursive: true });
 
   let html = fs.readFileSync(path.join(WEB, 'index.html'), 'utf8');
   const marker = '<title>Vision Screener</title>';
