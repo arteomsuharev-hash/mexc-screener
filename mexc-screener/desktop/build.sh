@@ -48,12 +48,14 @@ fi
 echo "    (использую Python: $($PYTHON --version 2>&1), команда: $PYTHON)"
 
 echo "==> 1/4  Копирую исходники web/ в desktop/resources/ и добавляю мост Neutralino..."
-rm -rf resources/index.html resources/css resources/js/app.js resources/js/core-utils.js resources/assets
+rm -rf resources/index.html resources/css resources/js/app.js resources/js/core-utils.js resources/js/terminal.js resources/js/widget-filter2.js resources/assets
 mkdir -p resources/css resources/js resources/assets
 cp ../web/index.html resources/index.html
 cp -r ../web/css/. resources/css/
 cp ../web/js/app.js resources/js/app.js
 cp ../web/js/core-utils.js resources/js/core-utils.js
+cp ../web/js/terminal.js resources/js/terminal.js
+cp ../web/js/widget-filter2.js resources/js/widget-filter2.js
 if [ -d ../web/assets ]; then cp -r ../web/assets/. resources/assets/; fi
 
 # Единственная разница между веб- и desktop-версией разметки: подключение клиентской библиотеки

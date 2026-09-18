@@ -870,6 +870,13 @@ tr.rank-one .coin-icon::after {
 .exch-tag-kucoin { background: rgba(36,174,143,.16); color: #24AE8F; }
 .exch-tag-gateio { background: rgba(227,69,61,.16); color: #E3453D; }
 .exch-tag-aster { background: rgba(139,92,246,.16); color: #8B5CF6; }
+/* Вариант с реальным лого биржи вместо буквы (см. exchTagHtml() в app.js) — кружок под картинку,
+   цветной фон биржи остаётся мягкой подложкой на случай прозрачных PNG. */
+.exch-tag-logo {
+  display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px;
+  padding: 0; border-radius: 50%; overflow: hidden; vertical-align: -3px;
+}
+.exch-tag-logo img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .star { color: var(--text-muted); cursor: pointer; font-size: 14px; transition: color .15s; }
 .star:hover, .star.active { color: var(--orange); }
 .price-up { color: var(--green); }
@@ -2093,3 +2100,178 @@ tr.rank-one .coin-icon::after {
   .coin-info { width: 160px; padding: 12px; }
   .bottom-panel { height: clamp(200px, 40vh, 340px); }
 }
+
+/* ============================================================================
+   TICKER — открытие в торговом терминале (клик по тикеру). Иконка скрыта, пока не
+   наведён курсор на строку/карточку — чтобы не шуметь визуально (п.20 ТЗ).
+   ============================================================================ */
+.terminal-open-btn {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 18px; height: 18px; margin-left: 2px; border-radius: 4px; color: var(--text-muted);
+  opacity: 0; transition: opacity .12s, color .12s, background .12s; cursor: pointer; font-size: 12px;
+}
+tr:hover .terminal-open-btn, .grid-card:hover .terminal-open-btn, .mini-chart-card:hover .terminal-open-btn { opacity: 1; }
+.terminal-open-btn:hover { color: var(--accent); background: var(--neon-glow-soft); }
+.terminal-open-btn.no-terminal { color: var(--text-muted); opacity: .55; }
+
+/* ============================================================================
+   WIDGET MODE — компактный плавающий режим того же приложения. Показывается вместо
+   .app целиком (см. body.widget-mode-active ниже) — та же вкладка/окно, тот же
+   WebSocket и state, просто другая раскладка (см. app.js enterWidgetMode/exitWidgetMode).
+   ============================================================================ */
+.widget-toggle-btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 8px;
+  border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-secondary);
+  font-size: 12px; font-weight: 600; cursor: pointer; transition: border-color .15s, color .15s, background .15s;
+}
+.widget-toggle-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+.widget-toggle-btn.active { border-color: var(--accent); color: var(--accent); background: var(--neon-glow-soft); }
+
+body.widget-mode-active .app { display: none; }
+.widget-view {
+  display: none; flex-direction: column; width: 100%; height: 100vh; background: var(--bg-primary);
+  border: 1px solid var(--border-color); overflow: hidden; -webkit-user-select: none; user-select: none;
+  position: relative;
+}
+.widget-resize-handle {
+  position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 50%, var(--border-color) 50%, var(--border-color) 62%, transparent 62%,
+    transparent 74%, var(--border-color) 74%, var(--border-color) 86%, transparent 86%);
+}
+.widget-resize-handle:hover { background: linear-gradient(135deg, transparent 50%, var(--accent) 50%, var(--accent) 62%, transparent 62%,
+    transparent 74%, var(--accent) 74%, var(--accent) 86%, transparent 86%); }
+body.widget-mode-active .widget-view { display: flex; }
+.widget-header {
+  display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+  padding: 8px 10px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color);
+  cursor: move; /* сам drag реализован через Neutralino window.beginDrag — курсор просто честная подсказка */
+}
+.widget-title {
+  display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700;
+  letter-spacing: .04em; text-transform: uppercase; color: var(--text-primary);
+}
+.widget-title i { color: var(--accent); }
+.widget-header-actions { display: flex; align-items: center; gap: 2px; -webkit-user-select: none; user-select: none; }
+.widget-header-actions button {
+  display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px;
+  border: none; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer;
+  font-size: 14px; transition: color .12s, background .12s;
+}
+.widget-header-actions button:hover { color: var(--text-primary); background: var(--bg-hover); }
+#widgetCloseBtn:hover { color: var(--red); background: rgba(248,73,96,.12); }
+.widget-filter-tabs { display: flex; flex-shrink: 0; border-bottom: 1px solid var(--border-color); background: var(--bg-primary); }
+.widget-filter-tab {
+  flex: 1; padding: 7px 4px; border: none; background: transparent; color: var(--text-muted);
+  font-size: 10.5px; font-weight: 700; letter-spacing: .04em; cursor: pointer; transition: color .12s, border-color .12s;
+  border-bottom: 2px solid transparent;
+}
+.widget-filter-tab:hover { color: var(--text-primary); }
+.widget-filter-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.widget-body { flex: 1; overflow-y: auto; padding: 6px; -webkit-user-select: text; user-select: text; }
+.widget-signal-row.f2 { flex-wrap: wrap; cursor: pointer; }
+.widget-signal-row.f2 .widget-signal-type { font-size: 10.5px; color: var(--accent); white-space: nowrap; }
+.widget-signal-row.f2 .widget-signal-score {
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 700; color: var(--text-primary);
+  background: var(--neon-glow-soft); border-radius: 5px; padding: 1px 5px;
+}
+.widget-f2-evidence {
+  flex-basis: 100%; margin-top: 6px; padding: 8px; border-radius: 8px; background: var(--bg-hover);
+  font-size: 10.5px; color: var(--text-secondary); line-height: 1.6;
+}
+.widget-f2-evidence b { color: var(--text-primary); }
+.widget-empty { padding: 24px 12px; text-align: center; color: var(--text-muted); font-size: 12px; }
+.widget-signal-row {
+  display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px;
+  transition: background .12s; animation: rowEnterIn .2s ease both;
+}
+.widget-signal-row:hover { background: var(--bg-hover); }
+.widget-signal-symbol {
+  display: flex; align-items: center; gap: 4px; font-family: var(--font-mono); font-size: 12.5px;
+  font-weight: 700; color: var(--text-primary); cursor: pointer; white-space: nowrap;
+}
+.widget-signal-symbol:hover { color: var(--accent); }
+.widget-signal-symbol .terminal-open-btn { opacity: .6; }
+.widget-signal-symbol:hover .terminal-open-btn { opacity: 1; }
+.widget-signal-change { font-family: var(--font-mono); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.widget-signal-badge {
+  font-size: 10px; font-weight: 700; letter-spacing: .03em; padding: 2px 6px; border-radius: 5px;
+  background: var(--neon-glow-soft); color: var(--accent); white-space: nowrap;
+}
+.widget-signal-age { margin-left: auto; font-size: 10.5px; color: var(--text-muted); white-space: nowrap; }
+.widget-view.widget-compact .widget-signal-age, .widget-view.widget-compact .widget-signal-badge { display: none; }
+
+/* ============================================================================
+   PILL ROWS — компактные «таблетки» на список сигналов виджета (по референсу пользователя),
+   цвета — наша уже существующая палитра бирж (.exch-tag-*), не выдуманные заново.
+   ============================================================================ */
+.widget-pill-row {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px; margin: 3px 0;
+  border-radius: 999px; background: var(--bg-secondary); border: 1px solid var(--border-color);
+  transition: background .12s, border-color .12s; animation: rowEnterIn .2s ease both;
+}
+.widget-pill-row:hover { background: var(--bg-hover); border-color: var(--accent); }
+/* Filter 2 строки умеют разворачиваться (панель "почему сработало") — полностью круглые края
+   на растянутой по высоте карточке выглядели бы криво, поэтому чуть менее скруглённый прямоугольник. */
+.widget-pill-row.f2 { flex-wrap: wrap; border-radius: 14px; cursor: pointer; }
+.widget-pill-badge {
+  flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center;
+  justify-content: center; font-size: 10.5px; font-weight: 800; font-family: var(--font-mono);
+}
+.widget-pill-main {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; cursor: pointer;
+}
+.widget-pill-ticker {
+  font-size: 12px; font-weight: 700; color: var(--text-primary); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono);
+}
+.widget-pill-main:hover .widget-pill-ticker { color: var(--accent); }
+.widget-pill-sub { font-size: 10.5px; color: var(--text-muted); white-space: nowrap; }
+/* Реальное лого биржи перед тикером в "таблетке" виджета — см. widgetPillRowHtml() в app.js. */
+.widget-pill-logo {
+  width: 12px; height: 12px; border-radius: 50%; object-fit: cover; vertical-align: -1px;
+  margin-right: 4px;
+}
+.widget-pill-sub.price-up { color: var(--green, #16c784); }
+.widget-pill-sub.price-down { color: var(--red); }
+/* Отдельные проценты внутри строки (confidence ситуации, 24ч-движение и т.д.) красим по стороне
+   движения — вся строка приглушённо-серая (.widget-pill-sub), а числа должны выделяться. */
+.widget-pill-sub .tok-up { color: var(--green, #16c784); font-weight: 700; }
+.widget-pill-sub .tok-down { color: var(--red); font-weight: 700; }
+.widget-pill-icon {
+  flex-shrink: 0; width: 20px; height: 20px; border-radius: 7px; display: flex; align-items: center;
+  justify-content: center; font-size: 11px; cursor: pointer; opacity: .85; transition: opacity .12s, transform .12s;
+}
+.widget-pill-icon:hover { opacity: 1; transform: scale(1.08); }
+.widget-pill-icon .terminal-open-btn { opacity: 1; width: auto; height: auto; }
+.widget-settings-view, .widget-f3-params { padding: 4px; }
+.widget-f3-group-title {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .03em; color: var(--accent);
+  padding: 8px 6px 4px;
+}
+.widget-f3-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 6px; font-size: 11.5px; color: var(--text-secondary); border-bottom: 1px solid var(--border-color);
+}
+.widget-f3-row select, .widget-f3-row input[type="number"] {
+  background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;
+  color: var(--text-primary); font-size: 11px; padding: 4px 6px; width: 90px;
+}
+.widget-setting-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 9px 6px; font-size: 12px; color: var(--text-secondary); border-bottom: 1px solid var(--border-color);
+}
+.widget-setting-row select, .widget-setting-row input[type="number"] {
+  background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;
+  color: var(--text-primary); font-size: 11.5px; padding: 4px 6px;
+}
+#widgetOpenFullSettingsLink {
+  display: block; text-align: center; margin-top: 12px; font-size: 11px; color: var(--accent); text-decoration: none;
+}
+#widgetOpenFullSettingsLink:hover { text-decoration: underline; }
+.widget-open-full-footer {
+  flex-shrink: 0; display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 9px; border: none; border-top: 1px solid var(--border-color); background: var(--bg-secondary);
+  color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .04em; cursor: pointer;
+  transition: background .12s;
+}
+.widget-open-full-footer:hover { background: var(--neon-glow-soft); }

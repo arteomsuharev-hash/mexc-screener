@@ -27,17 +27,25 @@ function syncResourcesFromWeb() {
   const resCss = path.join(ROOT, 'resources', 'css');
   const resJsApp = path.join(ROOT, 'resources', 'js', 'app.js');
   const resJsCore = path.join(ROOT, 'resources', 'js', 'core-utils.js');
+  const resJsTerminal = path.join(ROOT, 'resources', 'js', 'terminal.js');
+  const resJsFilter2 = path.join(ROOT, 'resources', 'js', 'widget-filter2.js');
   const resIndex = path.join(ROOT, 'resources', 'index.html');
+  const resAssets = path.join(ROOT, 'resources', 'assets');
+  const webAssets = path.join(WEB, 'assets');
 
   fs.rmSync(resIndex, { force: true });
   fs.rmSync(resCss, { recursive: true, force: true });
   fs.rmSync(resJsApp, { force: true });
   fs.rmSync(resJsCore, { force: true });
+  fs.rmSync(resJsTerminal, { force: true });
+  fs.rmSync(resJsFilter2, { force: true });
+  fs.rmSync(resAssets, { recursive: true, force: true });
   fs.mkdirSync(resCss, { recursive: true });
   fs.mkdirSync(path.join(ROOT, 'resources', 'js'), { recursive: true });
+  if (fs.existsSync(webAssets)) fs.cpSync(webAssets, resAssets, { recursive: true });
 
   let html = fs.readFileSync(path.join(WEB, 'index.html'), 'utf8');
-  const marker = '<title>MEXC Screener</title>';
+  const marker = '<title>Vision Screener</title>';
   if (!html.includes('/js/neutralino.js')) {
     if (!html.includes(marker)) {
       throw new Error('Не нашёл "' + marker + '" в web/index.html — разметку кто-то поменял, проверьте вручную.');
@@ -48,6 +56,8 @@ function syncResourcesFromWeb() {
   fs.cpSync(path.join(WEB, 'css'), resCss, { recursive: true });
   fs.copyFileSync(path.join(WEB, 'js', 'app.js'), resJsApp);
   fs.copyFileSync(path.join(WEB, 'js', 'core-utils.js'), resJsCore);
+  fs.copyFileSync(path.join(WEB, 'js', 'terminal.js'), resJsTerminal);
+  fs.copyFileSync(path.join(WEB, 'js', 'widget-filter2.js'), resJsFilter2);
 }
 
 function platformBinaryName() {

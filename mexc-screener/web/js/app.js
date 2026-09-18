@@ -636,6 +636,31 @@ const EXCHANGE_BADGE_TEXT = {
   BINANCE: 'B', BINANCEFUT: 'F', OKX: 'O', BITGET: 'G', BINGX: 'X', KUCOIN: 'K', GATEIO: 'T', ASTER: 'A', ASTERFUT: 'AF'
 };
 
+// Реальные лого бирж — скачаны один раз в web/assets/exchange-logos/ (источник: публичный CDN
+// CoinGecko, coin-images.coingecko.com), не хотлинкаются, чтобы десктоп-приложение показывало их
+// и без интернета. Заменяют букву в цветных .exch-tag-бейджах везде, где раньше была только буква —
+// см. exchTagHtml() ниже. Если файла нет или картинка не загрузилась — тихий фолбэк на старый текст.
+const EXCHANGE_LOGO_FILE = {
+  binance: 'binance.jpg', okx: 'okx.png', mexc: 'mexc.jpg', bitget: 'bitget.jpg',
+  bingx: 'bingx.jpg', kucoin: 'kucoin.png', gateio: 'gateio.png', aster: 'aster.png'
+};
+
+// Единая точка отрисовки бейджа биржи (раньше в 4 местах дублировался один и тот же
+// '<span class="exch-tag exch-tag-X">TEXT</span>' — теперь все они собирают его здесь, чтобы лого
+// сразу появилось везде разом). colorCls — ключ без суффикса FUT ("binance"/"okx"/...), fallbackText —
+// то, что покажется, если лого для этой биржи нет в EXCHANGE_LOGO_FILE или картинка не загрузилась
+// (старая буква/название, чтобы разметка никогда не осталась пустой).
+function exchTagHtml(colorCls, fallbackText, extraClass) {
+  const cls = 'exch-tag exch-tag-' + colorCls + (extraClass ? ' ' + extraClass : '');
+  const safeText = String(fallbackText).replace(/"/g, '&quot;');
+  const file = EXCHANGE_LOGO_FILE[colorCls];
+  if (!file) return '<span class="' + cls + '">' + safeText + '</span>';
+  return '<span class="' + cls + ' exch-tag-logo" title="' + safeText + '">' +
+    '<img src="assets/exchange-logos/' + file + '" alt="' + safeText + '" loading="lazy" ' +
+    'onerror="this.parentElement.classList.remove(\'exch-tag-logo\');this.parentElement.textContent=\'' + safeText.replace(/'/g, "\\'") + '\';">' +
+    '</span>';
+}
+
 // Подпись под названием монеты в инфо-панели справа ("MEXC Spot"/"Binance Futures"/...) — раньше
 // была жёстко "MEXC Spot" всегда, даже для монет с других бирж/рынков (см. updateInfoPanel).
 const EXCHANGE_SUB_LABEL = { MEXC: 'MEXC Spot', BINANCE: 'Binance Spot', BINANCEFUT: 'Binance Futures', OKX: 'OKX Spot', ASTER: 'Aster Spot', ASTERFUT: 'Aster Futures' };
@@ -648,7 +673,7 @@ function coinDisplayLabel(c) {
   const pair = c.baseAsset + '/USDT';
   const colorCls = c.exchange.replace(/FUT$/, '').toLowerCase();
   const text = EXCHANGE_BADGE_TEXT[c.exchange] || c.exchange.slice(0, 3);
-  return '<span class="exch-tag exch-tag-' + colorCls + '">' + text + '</span>' + pair;
+  return exchTagHtml(colorCls, text) + pair;
 }
 
 function getSignal(c) {
@@ -979,6 +1004,110 @@ function openInMexcTerminal(symbol) {
     window.open(url, '_blank', 'noopener');
   }
 }
+
+// ============================================================================
+// ОТКРЫТИЕ ТИКЕРА В СТОРОННЕМ ТОРГОВОМ ТЕРМИНАЛЕ (MetaScalp/Vataga/Tiger, см. terminal.js).
+// Единственный путь что для ручного клика по тикеру (Full Mode + Widget Mode — обе строки
+// рендера ниже используют terminalOpenIconHtml + openSymbolInSelectedTerminal), что для Auto
+// Open (см. её вызов внутри registerPatternEvent) — оба идут через MexcTerminal.openSymbol,
+// никакой второй/дублирующей логики открытия здесь нет.
+// ============================================================================
+const TERMINAL_SETTINGS_KEYS = {
+  selected: 'mexc_terminal_selected',
+  binding: 'mexc_terminal_binding',
+  autoOpenEnabled: 'mexc_autoopen_enabled',
+  autoOpenMinConfidence: 'mexc_autoopen_min_confidence',
+  autoOpenCooldownSec: 'mexc_autoopen_cooldown_sec'
+};
+function getSelectedTerminal() { try { return localStorage.getItem(TERMINAL_SETTINGS_KEYS.selected) || ''; } catch (e) { return ''; } }
+function getTerminalBinding() { try { return localStorage.getItem(TERMINAL_SETTINGS_KEYS.binding) || ''; } catch (e) { return ''; } }
+function getAutoOpenEnabled() { try { return localStorage.getItem(TERMINAL_SETTINGS_KEYS.autoOpenEnabled) === '1'; } catch (e) { return false; } }
+function getAutoOpenMinConfidence() { try { const v = parseFloat(localStorage.getItem(TERMINAL_SETTINGS_KEYS.autoOpenMinConfidence)); return isFinite(v) ? v : 80; } catch (e) { return 80; } }
+function getAutoOpenCooldownSec() { try { const v = parseFloat(localStorage.getItem(TERMINAL_SETTINGS_KEYS.autoOpenCooldownSec)); return isFinite(v) ? v : 10; } catch (e) { return 10; } }
+
+// Scanner Event -> AutoOpenManager -> TerminalManager -> выбранный адаптер -> Open Symbol —
+// единственный путь, которым Auto Open открывает терминал (см. её единственный вызов —
+// maybeAutoOpen(ev) внутри registerPatternEvent, только на ГЕНУИННО новом эпизоде паттерна).
+// Ручные клики по тикеру идут через openSymbolInSelectedTerminal НАПРЯМУЮ, в обход этого
+// cooldown — если человек кликнул сам, это должно срабатывать каждый раз.
+const autoOpenCooldown = new MexcTerminal.CooldownManager(getAutoOpenCooldownSec());
+function maybeAutoOpen(ev) {
+  if (!getAutoOpenEnabled()) return;
+  const terminalKey = getSelectedTerminal();
+  if (!terminalKey) return; // терминал выбран — включает только РУЧНЫЕ клики, Auto Open требует явного включения отдельно
+  if ((ev.confidencePct || 0) < getAutoOpenMinConfidence()) return;
+  autoOpenCooldown.cooldownSec = getAutoOpenCooldownSec(); // подхватываем правки настроек на лету
+  const key = exchangeOfSymbol(ev.symbol) + ':' + ev.symbol;
+  if (!autoOpenCooldown.allow(key)) return;
+  MexcTerminal.openSymbol(terminalKey, ev.symbol, getTerminalBinding()).then(function (result) {
+    logD('AutoOpen', ev.symbol + ' -> ' + terminalKey + ': success=' + result.success + ' ' + result.message);
+  });
+}
+
+// Иконка "открыть в терминале" рядом с тикером — видна по hover строки/карточки (см. CSS
+// .terminal-open-btn), кликабельна даже если терминал ещё не выбран (объясняет это тултипом
+// и тостом вместо того, чтобы просто не показываться — пользователь должен понимать, что
+// функция есть, а не гадать, куда делась иконка).
+function terminalOpenIconHtml(symbol) {
+  const terminalKey = getSelectedTerminal();
+  let title = terminalKey ? ('Открыть ' + rawSymbol(symbol.replace(/^[A-Z]+:/, '')) + ' в ' + MexcTerminal.displayName(terminalKey)) : 'Терминал не выбран (Настройки)';
+  if (terminalKey === 'metascalp') title += ' (Ctrl+клик — Комбо-окно)';
+  const cls = terminalKey ? 'terminal-open-btn' : 'terminal-open-btn no-terminal';
+  return '<i class="' + cls + ' ri-share-forward-line" data-terminal-open="' + symbol.replace(/"/g, '&quot;') + '" title="' + title.replace(/"/g, '&quot;') + '"></i>';
+}
+
+async function openSymbolInSelectedTerminal(symbol, wantCombo) {
+  const terminalKey = getSelectedTerminal();
+  if (!terminalKey) {
+    showAppToast('Сначала выберите торговый терминал в Настройках.');
+    switchPage('settings');
+    return;
+  }
+  if (wantCombo && terminalKey !== 'metascalp') {
+    showAppToast('Комбо-окно (Ctrl+клик) поддерживается только для MetaScalp.');
+    return;
+  }
+  if (wantCombo) {
+    showAppToast('MetaScalp: запрашиваю комбо-окно для ' + MexcTerminal.SymbolNormalizer.bare(symbol) + '...');
+    try {
+      const result = await MexcTerminal.openMetaScalpCombo(symbol);
+      showAppToast(result.message);
+    } catch (e) {
+      showAppToast('Ошибка открытия комбо-окна: ' + (e && e.message || e));
+    }
+    return;
+  }
+  showAppToast(MexcTerminal.displayName(terminalKey) + ': открываю ' + MexcTerminal.SymbolNormalizer.bare(symbol) + '...');
+  try {
+    const result = await MexcTerminal.openSymbol(terminalKey, symbol, getTerminalBinding());
+    showAppToast(result.message);
+  } catch (e) {
+    showAppToast('Ошибка открытия в терминале: ' + (e && e.message || e));
+  }
+}
+
+// Делегированный клик на статичных контейнерах — строки/карточки внутри пересоздаются
+// каждый рендер (см. её же комментарий у wireAlgoPillRow выше), поэтому вешаем один раз.
+// Ctrl+клик (по самому тикеру ИЛИ по иконке) — отдельный жест "Комбо-окно" MetaScalp, см.
+// openSymbolInSelectedTerminal(symbol, true).
+(function wireTerminalOpenClick() {
+  function onClick(e) {
+    const el = e.target.closest('[data-terminal-open]');
+    if (!el) return;
+    e.stopPropagation();
+    openSymbolInSelectedTerminal(el.dataset.terminalOpen, e.ctrlKey || e.metaKey);
+  }
+  const tbody = document.getElementById('tableBody');
+  const grid = document.getElementById('gridView');
+  const widgetList = document.getElementById('widgetSignalList');
+  const widgetF2List = document.getElementById('widgetFilter2List');
+  const widgetF3List = document.getElementById('widgetFilter3List');
+  if (tbody) tbody.addEventListener('click', onClick);
+  if (grid) grid.addEventListener('click', onClick);
+  if (widgetList) widgetList.addEventListener('click', onClick);
+  if (widgetF2List) widgetF2List.addEventListener('click', onClick);
+  if (widgetF3List) widgetF3List.addEventListener('click', onClick);
+})();
 
 // ------------------------------------------------------------------
 // Копирование тикера для стороннего терминала Vataga.terminal.
@@ -2068,7 +2197,7 @@ function renderTable() {
     return '<tr data-symbol="' + c.symbol + '" class="' + (sel ? 'selected' : '') + rankCls + rowAnim + '">' +
       '<td><i class="ri-star-line star ' + (c.fav ? 'active' : '') + '" data-symbol="' + c.symbol + '"></i></td>' +
       '<td>' + (i + 1) + '</td>' +
-      '<td><div class="coin-cell"><div class="coin-icon" style="background:' + c.color + '">' + c.baseAsset.charAt(0) + '</div><span>' + coinDisplayLabel(c) + '</span></div></td>' +
+      '<td><div class="coin-cell"><div class="coin-icon" style="background:' + c.color + '">' + c.baseAsset.charAt(0) + '</div><span>' + coinDisplayLabel(c) + '</span>' + terminalOpenIconHtml(c.symbol) + '</div></td>' +
       '<td class="cell-price">' + fmtPrice(c.price) + '</td>' +
       '<td class="' + (chg >= 0 ? 'price-up' : 'price-down') + '">' + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%</td>' +
       '<td>' + fmtNum(c.vol24) + '</td>' +
@@ -2084,7 +2213,7 @@ function renderTable() {
     const chg = c.change24 || 0;
     const sel = currentCoin && c.symbol === currentCoin.symbol;
     return '<div class="grid-card ' + (sel ? 'selected' : '') + '" data-symbol="' + c.symbol + '">' +
-      '<div class="grid-card-top"><div class="coin-icon" style="background:' + c.color + '">' + c.baseAsset.charAt(0) + '</div><strong>' + coinDisplayLabel(c) + '</strong></div>' +
+      '<div class="grid-card-top"><div class="coin-icon" style="background:' + c.color + '">' + c.baseAsset.charAt(0) + '</div><strong>' + coinDisplayLabel(c) + '</strong>' + terminalOpenIconHtml(c.symbol) + '</div>' +
       '<div class="grid-card-price">' + fmtPrice(c.price) + '</div>' +
       '<div class="' + (chg >= 0 ? 'price-up' : 'price-down') + '">' + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%</div>' +
       '<div class="grid-card-meta"><span>24ч ' + fmtNum(c.vol24) + '</span><span>5с ' + fmtNum(c.vol5) + '</span></div></div>';
@@ -2092,7 +2221,7 @@ function renderTable() {
 
   function bindSelect(el) {
     el.addEventListener('click', function (e) {
-      if (e.target.closest('.star')) return;
+      if (e.target.closest('.star') || e.target.closest('[data-terminal-open]')) return;
       selectCoin(el.dataset.symbol);
     });
   }
@@ -8780,6 +8909,7 @@ function registerPatternEvent(ev, now) {
   });
   savePatternHistory();
   patternActiveSessions.set(key, { historyId: id, lastSeenAt: now });
+  maybeAutoOpen(ev); // только тут, на ГЕНУИННО новом эпизоде — не на продолжении (ранний return выше)
 }
 
 // Раз в 10с проверяет, не пересекли ли записи истории очередную контрольную точку (30с/2м/10м/30м
@@ -8925,7 +9055,7 @@ function renderAlertHistoryTable() {
       const pair = r.symbol.replace(/^[A-Z]+:/, '');
       return '<tr>' +
         '<td style="white-space:nowrap;color:var(--text-muted);">' + alertAgeLabel(r.detectedAt) + '</td>' +
-        '<td><span class="exch-tag exch-tag-' + exch.toLowerCase() + '">' + exch + '</span></td>' +
+        '<td>' + exchTagHtml(exch.replace(/FUT$/, '').toLowerCase(), exch) + '</td>' +
         '<td>' + pair + '</td>' +
         '<td><span class="algo-badge ' + catCls + '" title="' + t(def ? def.label : r.detectorKey) + '">' + (def ? def.badge : r.detectorKey) + '</span></td>' +
         '<td class="' + dirCls + '">' + (r.direction || '—') + '</td>' +
@@ -9123,7 +9253,7 @@ function renderSpikeHistoryTable() {
       const kindTitle = r.kind === 'TICK' ? t('Тиковый спайк — реальное движение цены за последние 5с') : t('24ч-аномалия — крупное движение за сутки (грубее, чем тиковый спайк: этой бирже недоступен тиковый поток по всему рынку)');
       return '<tr>' +
         '<td style="white-space:nowrap;color:var(--text-muted);">' + alertAgeLabel(r.detectedAt) + '</td>' +
-        '<td><span class="exch-tag exch-tag-' + exch.toLowerCase() + '">' + exch + '</span></td>' +
+        '<td>' + exchTagHtml(exch.replace(/FUT$/, '').toLowerCase(), exch) + '</td>' +
         '<td>' + pair + '</td>' +
         '<td><span class="spike-badge ' + kindCls + '" title="' + kindTitle + '">' + kindLabel + '</span></td>' +
         '<td class="' + dirCls + '">' + (r.direction || '—') + '</td>' +
@@ -10824,6 +10954,29 @@ async function nlCall(method, data, timeoutMs) {
     }
   });
 }
+// terminal.js — отдельный файл со своим замыканием, у него нет доступа к nlCall выше (она
+// объявлена внутри IIFE этого файла) — явно выносим на window, чтобы MetaScalp/Vataga/Tiger
+// адаптеры (запуск процесса, фокус окна, отправка хоткея комбо-окна) могли им пользоваться.
+window.nlCall = nlCall;
+
+// Filter 2 виджета (web/js/widget-filter2.js) — отдельный файл/замыкание, читает те же самые
+// РЕАЛЬНЫЕ буферы сделок/стакана Tier 2, что уже наполняет весь остальной код (никакого второго
+// WebSocket/потока данных не создаёт) — эти accessor'ы специально вынесены на window, чтобы
+// widget-filter2.js мог их читать, не зная о приватных per-биржевых Map выше по файлу.
+window.mexcTier2TradesForSymbol = tier2TradesForSymbol;
+window.mexcTier2DepthForSymbol = tier2DepthForSymbol;
+window.mexcSymbolDataIsFresh = symbolDataIsFresh;
+window.mexcCoinMap = coinMap;
+window.mexcExchangeOfSymbol = exchangeOfSymbol;
+window.mexcTier2ActiveSymbols = function () {
+  const maps = [
+    tier2Trades, binanceTier2Trades, okxTier2Trades, bitgetTier2Trades,
+    bingxTier2Trades, kucoinTier2Trades, gateioTier2Trades, asterTier2Trades, asterFutTier2Trades
+  ];
+  const out = [];
+  maps.forEach(function (m) { m.forEach(function (_v, k) { out.push(k); }); });
+  return out;
+};
 
 // ============================================================================
 // ДОЛГОВЕЧНОЕ ХРАНИЛИЩЕ ПОВЕРХ localStorage (только desktop-обёртка).
@@ -14666,7 +14819,7 @@ function updateListingsPage() {
     const colorCls = e.exchange.replace(/FUT$/, '').toLowerCase();
     const st = listingRowStatus(e, now);
     return '<div class="listing-row ' + st.cls + '" data-id="' + e.id + '" style="animation-delay:' + (Math.min(i, 20) * 22) + 'ms">' +
-      '<span class="exch-tag exch-tag-' + colorCls + '">' + badgeText + '</span>' +
+      exchTagHtml(colorCls, badgeText) +
       '<div class="listing-row-coin"><strong>' + pair + '</strong></div>' +
       st.statusHtml +
       '<button type="button" class="listing-row-copy" data-copy="' + e.baseAsset + '" title="' + t('Скопировать название монеты') + '"><i class="ri-file-copy-line"></i></button>' +
@@ -14753,8 +14906,14 @@ async function pollExternalTickers(id) {
   // таблицы каждые EXTERNAL_TICKER_POLL_MS=4с на КАЖДУЮ подключённую биржу, даже когда пользователь
   // сидит на «Графиках»/«Паттернах»/где угодно ещё. Тот же идиом, что уже у redrawGraphsGrid/
   // updateGraphsPage/balanceRefreshTimer.
+  // ВАЖНО (2026-09, доп. оптимизация после подключения всех 7 внешних бирж разом): у каждой биржи
+  // СВОЙ независимый несинхронизированный 4с-таймер (см. startExternalTickerPolling) — раньше прямой
+  // renderTable() здесь означал, что при N подключённых биржах таблица могла полностью перестраиваться
+  // до N раз за несколько сотен мс (когда их таймеры случайно "слипались"), это и давало видимые лаги/
+  // фризы интерфейса. scheduleRender() (тот же дебаунс 400мс, что и у основного MEXC-тикера) схлопывает
+  // такие всплески в ОДНУ перерисовку, вместо N подряд.
   const screenerPage = document.getElementById('page-screener');
-  if (screenerPage && screenerPage.classList.contains('active')) renderTable();
+  if (screenerPage && screenerPage.classList.contains('active')) scheduleRender();
 }
 
 // Запускается при успешном connectExchange(id) — публичные рыночные данные качаются периодическим
@@ -15547,6 +15706,654 @@ document.getElementById('clearData').addEventListener('click', function () {
   updateFavoritesPage();
   renderTable();
 });
+
+// ============================================================================
+// НАСТРОЙКИ ТЕРМИНАЛА — тот же localStorage/persistSet, что и остальные настройки
+// приложения. Сохраняются сразу по изменению (без отдельной кнопки "Сохранить" — как
+// у themeToggle/langToggle выше), потому что это переключатели/выпадающие списки, а не
+// поля ввода, которые естественно копить до явного сохранения.
+// ============================================================================
+(function wireTerminalSettings() {
+  const selectEl = document.getElementById('terminalSelect');
+  const bindingEl = document.getElementById('terminalBinding');
+  const autoOpenToggleEl = document.getElementById('autoOpenToggle');
+  const autoOpenMinConfEl = document.getElementById('autoOpenMinConfidence');
+  const autoOpenCooldownEl = document.getElementById('autoOpenCooldownSec');
+  if (!selectEl) return;
+
+  selectEl.value = getSelectedTerminal();
+  bindingEl.value = getTerminalBinding();
+  autoOpenToggleEl.classList.toggle('active', getAutoOpenEnabled());
+  autoOpenMinConfEl.value = getAutoOpenMinConfidence();
+  autoOpenCooldownEl.value = getAutoOpenCooldownSec();
+
+  selectEl.addEventListener('change', function () {
+    persistSet(TERMINAL_SETTINGS_KEYS.selected, selectEl.value);
+    renderTable(); // тултипы иконок "открыть в терминале" ссылаются на выбранный терминал
+  });
+  bindingEl.addEventListener('change', function () { persistSet(TERMINAL_SETTINGS_KEYS.binding, bindingEl.value.trim()); });
+  autoOpenToggleEl.addEventListener('click', function () {
+    const next = !autoOpenToggleEl.classList.contains('active');
+    autoOpenToggleEl.classList.toggle('active', next);
+    persistSet(TERMINAL_SETTINGS_KEYS.autoOpenEnabled, next ? '1' : '0');
+  });
+  autoOpenMinConfEl.addEventListener('change', function () { persistSet(TERMINAL_SETTINGS_KEYS.autoOpenMinConfidence, String(parseFloat(autoOpenMinConfEl.value) || 0)); });
+  autoOpenCooldownEl.addEventListener('change', function () {
+    const sec = Math.max(1, parseFloat(autoOpenCooldownEl.value) || 10);
+    autoOpenCooldownEl.value = sec;
+    persistSet(TERMINAL_SETTINGS_KEYS.autoOpenCooldownSec, String(sec));
+    autoOpenCooldown.cooldownSec = sec;
+  });
+})();
+
+// ============================================================================
+// WIDGET MODE — компактный плавающий режим ТОГО ЖЕ приложения (не второе окно, не второй
+// сканер — см. шапку web/js/terminal.js и комментарий у #widgetView в index.html). Реальный
+// Always on Top/перемещение/ресайз — через уже существующий мост nlCall(...) к нативному
+// Neutralino.window.* (см. её комментарий у nlBridgeConnect выше, тот самый обход
+// зависающего штатного Neutralino.os.execCommand()/Neutralino.init()). В веб-версии (без
+// window.Neutralino) виджет — просто компактная раскладка страницы, без настоящего окна.
+// ============================================================================
+const WIDGET_SETTINGS_KEYS = {
+  alwaysOnTop: 'mexc_widget_always_on_top', startWith: 'mexc_widget_start_with',
+  compact: 'mexc_widget_compact', opacity: 'mexc_widget_opacity', maxSignals: 'mexc_widget_max_signals',
+  pos: 'mexc_widget_pos', size: 'mexc_widget_size', fullPos: 'mexc_full_pos', fullSize: 'mexc_full_size'
+};
+const WIDGET_DEFAULT_SIZE = { width: 340, height: 420 };
+function getWidgetAlwaysOnTop() { try { return localStorage.getItem(WIDGET_SETTINGS_KEYS.alwaysOnTop) !== '0'; } catch (e) { return true; } }
+function getWidgetStartWith() { try { return localStorage.getItem(WIDGET_SETTINGS_KEYS.startWith) === '1'; } catch (e) { return false; } }
+function getWidgetCompact() { try { return localStorage.getItem(WIDGET_SETTINGS_KEYS.compact) === '1'; } catch (e) { return false; } }
+function getWidgetOpacity() { try { const v = parseInt(localStorage.getItem(WIDGET_SETTINGS_KEYS.opacity), 10); return isFinite(v) && v >= 20 ? v : 100; } catch (e) { return 100; } }
+function getWidgetMaxSignals() { try { const v = parseInt(localStorage.getItem(WIDGET_SETTINGS_KEYS.maxSignals), 10); return isFinite(v) && v > 0 ? v : 8; } catch (e) { return 8; } }
+function getSavedJson(key) { try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : null; } catch (e) { return null; } }
+
+let isWidgetMode = false;
+let widgetRenderTimer = null;
+
+async function applyWidgetWindowGeometry(entering) {
+  if (!window.Neutralino || typeof nlCall !== 'function') return; // веб-версия — реального окна нет, красить нечего
+  try {
+    if (entering) {
+      const pos = await nlCall('window.getPosition', {}, 5000).catch(function () { return null; });
+      const size = await nlCall('window.getSize', {}, 5000).catch(function () { return null; });
+      if (pos) persistSet(WIDGET_SETTINGS_KEYS.fullPos, JSON.stringify(pos));
+      if (size) persistSet(WIDGET_SETTINGS_KEYS.fullSize, JSON.stringify(size));
+
+      const savedSize = getSavedJson(WIDGET_SETTINGS_KEYS.size) || WIDGET_DEFAULT_SIZE;
+      const savedPos = getSavedJson(WIDGET_SETTINGS_KEYS.pos); // нет сохранённой — оставляем окно там, где было (не гадаем размер экрана)
+
+      await nlCall('window.setBorderless', { borderless: true }, 5000).catch(function () {});
+      await nlCall('window.setSize', { width: savedSize.width, height: savedSize.height, minWidth: 260, minHeight: 180 }, 5000).catch(function () {});
+      if (savedPos) await nlCall('window.move', { x: savedPos.x, y: savedPos.y }, 5000).catch(function () {});
+      await nlCall('window.setAlwaysOnTop', { onTop: getWidgetAlwaysOnTop() }, 5000).catch(function () {});
+    } else {
+      await nlCall('window.setAlwaysOnTop', { onTop: false }, 5000).catch(function () {});
+      await nlCall('window.setBorderless', { borderless: false }, 5000).catch(function () {});
+      const fullSize = getSavedJson(WIDGET_SETTINGS_KEYS.fullSize);
+      const fullPos = getSavedJson(WIDGET_SETTINGS_KEYS.fullPos);
+      if (fullSize) await nlCall('window.setSize', { width: fullSize.width, height: fullSize.height }, 5000).catch(function () {});
+      if (fullPos) await nlCall('window.move', { x: fullPos.x, y: fullPos.y }, 5000).catch(function () {});
+    }
+  } catch (e) { /* лучшее, что могли сделать — страница всё равно переключит раскладку */ }
+}
+
+function saveCurrentWidgetGeometry() {
+  if (!window.Neutralino || typeof nlCall !== 'function' || !isWidgetMode) return;
+  Promise.all([
+    nlCall('window.getPosition', {}, 4000).catch(function () { return null; }),
+    nlCall('window.getSize', {}, 4000).catch(function () { return null; })
+  ]).then(function (r) {
+    if (r[0]) persistSet(WIDGET_SETTINGS_KEYS.pos, JSON.stringify(r[0]));
+    if (r[1]) persistSet(WIDGET_SETTINGS_KEYS.size, JSON.stringify(r[1]));
+  });
+}
+
+// Общая "таблетка" сигнала для всех трёх списков виджета (Filter 1/2/3) — единое оформление по
+// референсу пользователя: круглый значок рынка (S/спот, F/фьючерсы) слева, тикер+подпись по
+// центру (кликабельно -> тот же Terminal Manager, что и везде), маленький цветной значок биржи
+// справа. Цвета — уже существующая палитра .exch-tag-* (styles.css), не выдуманы заново.
+function widgetPillRowHtml(symbol, subText, subClass, rowClass, rowAttrs) {
+  const exch = exchangeOfSymbol(symbol);
+  const isFut = /FUT$/.test(exch);
+  const marketLetter = isFut ? 'F' : 'S';
+  const exchKey = exch.replace(/FUT$/, '').toLowerCase();
+  const exchClass = 'exch-tag-' + (['binance', 'okx', 'mexc', 'bitget', 'bingx', 'kucoin', 'gateio', 'aster'].indexOf(exchKey) !== -1 ? exchKey : 'bingx');
+  const pair = symbol.replace(/^[A-Z]+:/, '');
+  const terminalKey = getSelectedTerminal();
+  const title = terminalKey ? ('Открыть ' + rawSymbol(pair) + ' в ' + MexcTerminal.displayName(terminalKey)) : 'Терминал не выбран (Настройки)';
+  // Круглый бейдж слева оставляем как есть (S/спот, F/фьючерсы — уже нёс полезный смысл), а
+  // реальное лого биржи добавляем отдельным маленьким значком перед тикером — так не теряется ни
+  // рыночный тип, ни визуальная айдентика биржи (см. exchTagHtml()/EXCHANGE_LOGO_FILE выше).
+  const logoFile = EXCHANGE_LOGO_FILE[exchKey];
+  const logoHtml = logoFile
+    ? '<img class="widget-pill-logo" src="assets/exchange-logos/' + logoFile + '" alt="" loading="lazy" onerror="this.remove();">'
+    : '';
+  return '<div class="widget-pill-row' + (rowClass ? ' ' + rowClass : '') + '"' + (rowAttrs || '') + '>' +
+    '<span class="widget-pill-badge ' + exchClass + '">' + marketLetter + '</span>' +
+    '<span class="widget-pill-main" data-terminal-open="' + symbol.replace(/"/g, '&quot;') + '" title="' + title.replace(/"/g, '&quot;') + '">' +
+      '<span class="widget-pill-ticker">' + logoHtml + pair + '</span>' +
+      '<span class="widget-pill-sub' + (subClass ? ' ' + subClass : '') + '">' + subText + '</span>' +
+    '</span>' +
+    '<span class="widget-pill-icon ' + exchClass + '" data-terminal-open="' + symbol.replace(/"/g, '&quot;') + '" title="' + title.replace(/"/g, '&quot;') + '">' +
+      '<i class="ri-share-forward-line terminal-open-btn' + (terminalKey ? '' : ' no-terminal') + '"></i>' +
+    '</span>' +
+  '</div>';
+}
+
+function renderWidgetSignals() {
+  const listEl = document.getElementById('widgetSignalList');
+  const emptyEl = document.getElementById('widgetEmpty');
+  if (!listEl || !emptyEl || !isWidgetMode || widgetSettingsOpen) return;
+  const maxN = getWidgetMaxSignals();
+  const seen = new Set();
+  const top = [];
+  // patternHistory копится по времени детекции (push в конец) — свежие сигналы в хвосте.
+  // Дедуп по символу: одна (последняя) строка на монету, иначе виджет мог бы за секунду
+  // забиться десятком повторных срабатываний одного и того же тикера.
+  for (let i = patternHistory.length - 1; i >= 0 && top.length < maxN; i--) {
+    const r = patternHistory[i];
+    if (seen.has(r.symbol)) continue;
+    seen.add(r.symbol);
+    top.push(r);
+  }
+  if (!top.length) {
+    emptyEl.style.display = 'block';
+    listEl.innerHTML = '';
+    return;
+  }
+  emptyEl.style.display = 'none';
+  listEl.innerHTML = top.map(function (r) {
+    const coin = coinMap.get(r.symbol);
+    const chg = coin ? (coin.change24 || 0) : null;
+    const def = DETECTOR_DEFS[r.detectorKey];
+    // Ситуация (какой детектор сработал) + его СОБСТВЕННЫЙ confidence% — у каждого детектора это
+    // разный расчёт (кластер сделок, повтор паттерна, дисбаланс стакана и т.д., см. DETECTOR_DEFS/
+    // registerPatternEvent), то есть процент реально "зависит от ситуации", а не всегда одно и то же
+    // 24ч-движение цены (оно теперь только доп.контекст третьим полем, если есть). Оба процента
+    // красим по стороне движения (LONG/рост -> зелёный, SHORT/падение -> красный) — иначе на тёмном
+    // фоне серый текст сливается и непонятно, куда смотрит сигнал.
+    const dirCls = r.direction === 'LONG' ? 'tok-up' : r.direction === 'SHORT' ? 'tok-down' : '';
+    const confHtml = r.confidencePct != null ? (' <span class="' + dirCls + '">' + Math.round(r.confidencePct) + '%</span>') : '';
+    const situation = (def ? def.badge : r.detectorKey) + confHtml;
+    const chgCls = chg != null ? (chg >= 0 ? 'tok-up' : 'tok-down') : '';
+    const chgHtml = chg != null ? (' · <span class="' + chgCls + '">' + (chg >= 0 ? '+' : '') + chg.toFixed(1) + '%</span>') : '';
+    const sub = situation + chgHtml + ' · ' + alertAgeLabel(r.detectedAt);
+    return widgetPillRowHtml(r.symbol, sub, '');
+  }).join('');
+}
+
+// ============================================================================
+// WIDGET FILTER 2 — рендер + Auto Open ТОЛЬКО для сигналов, реально прошедших весь pipeline
+// web/js/widget-filter2.js (candidate -> validation -> tradeability -> noise -> quality score ->
+// composite). Сама логика обнаружения там, изолирована от Filter 1 — здесь только вывод и клик.
+// ============================================================================
+let widgetActiveFilterTab = 1;
+const widgetF2AutoOpenedAt = new Map(); // symbol -> ts, анти-дребезг Auto Open отдельно от Filter 1
+const WIDGET_F2_AUTO_OPEN_COOLDOWN_MS = 60000;
+let widgetF2ExpandedSymbol = null;
+
+function renderWidgetFilter2Signals() {
+  if (!isWidgetMode || widgetSettingsOpen || typeof WidgetFilter2 === 'undefined') return;
+  const listEl = document.getElementById('widgetFilter2List');
+  const emptyEl = document.getElementById('widgetFilter2Empty');
+  if (!listEl || !emptyEl) return;
+
+  const signals = WidgetFilter2.getDisplayedSignals();
+
+  // Auto Open — только для НАСТОЯЩИХ, прошедших весь pipeline сигналов (п.31 ТЗ), никогда для
+  // "кандидатов". Своя, отдельная от Filter 1, антидребезг-карта — по требованию изоляции модулей.
+  if (getAutoOpenEnabled()) {
+    const terminalKey = getSelectedTerminal();
+    if (terminalKey) {
+      const now = Date.now();
+      signals.forEach(function (rec) {
+        const last = widgetF2AutoOpenedAt.get(rec.symbol) || 0;
+        if (now - last < WIDGET_F2_AUTO_OPEN_COOLDOWN_MS) return;
+        widgetF2AutoOpenedAt.set(rec.symbol, now);
+        MexcTerminal.openSymbol(terminalKey, rec.symbol, getTerminalBinding()).then(function (result) {
+          logD('WidgetFilter2 AutoOpen', rec.symbol + ' -> ' + terminalKey + ': success=' + result.success + ' ' + result.message);
+        });
+      });
+    }
+  }
+
+  if (widgetActiveFilterTab !== 2) return; // считаем и авто-открываем всегда, рисуем — только на активной вкладке
+
+  if (!signals.length) {
+    emptyEl.style.display = 'block';
+    listEl.innerHTML = '';
+    return;
+  }
+  emptyEl.style.display = 'none';
+  listEl.innerHTML = signals.map(function (rec) {
+    const coin = coinMap.get(rec.symbol);
+    const chg = coin ? (coin.change24 || 0) : null;
+    const chgCls = chg != null ? (chg >= 0 ? 'tok-up' : 'tok-down') : '';
+    const chgTxt = chg != null ? (' · <span class="' + chgCls + '">' + (chg >= 0 ? '+' : '') + chg.toFixed(1) + '%</span>') : '';
+    const expanded = widgetF2ExpandedSymbol === rec.symbol;
+    const evidenceHtml = !expanded ? '' : ('<div class="widget-f2-evidence" data-f2-evidence="1">' +
+      rec.evidence.map(function (e) {
+        const rows = Object.keys(e.evidence).map(function (k) { return '<b>' + k + ':</b> ' + e.evidence[k]; }).join(' &nbsp; ');
+        const reasons = (e.reasons || []).join(', ');
+        return '<div>' + WidgetFilter2.labelFor(e.type) + ' (' + e.score + ') — ' + rows +
+          (reasons ? '<div style="opacity:.7;margin-top:2px;">' + reasons + '</div>' : '') + '</div>';
+      }).join('') +
+      '<div style="margin-top:4px;">' + Object.keys(rec.outcome || {}).map(function (k) { return k + ': ' + rec.outcome[k] + '%'; }).join(' &nbsp; ') + '</div>' +
+    '</div>');
+    // Ситуация первой (что за паттерн), затем его собственный quality score как % (0-100, у каждого
+    // типа ситуации свой расчёт — см. widget-filter2.js qualityScore), 24ч-движение — доп.контекст.
+    // Score красим по rec.direction (LONG/SHORT/NEUTRAL, см. confirmedSignals в widget-filter2.js).
+    const recDirCls = rec.direction === 'LONG' ? 'tok-up' : rec.direction === 'SHORT' ? 'tok-down' : '';
+    const sub = WidgetFilter2.compositeLabel(rec) + ' <span class="' + recDirCls + '">' + rec.score + '%</span>' + chgTxt;
+    return widgetPillRowHtml(rec.symbol, sub, '', 'f2', ' data-f2-symbol="' + rec.symbol.replace(/"/g, '&quot;') + '"').replace('</div>', evidenceHtml + '</div>');
+  }).join('');
+}
+
+// ============================================================================
+// WIDGET FILTER 3 — не детектор, а ПРЯМЫЕ пороги, которые задаёт сам человек (в отличие от
+// Filter 2, где пороги адаптивные и зашиты в коде). Пока два параметра (по запросу — "по началу
+// базовым"): прокид (сумма объёма сделок за последние N секунд ≥ порог) и волатильность (движение
+// цены за выбранное окно ≥ порог, окна vol5s/vol30s/vol60s уже честно считаются для ВСЕХ монет,
+// см. их же расчёт при апдейте coinMap). Прокид считается только там, где есть Tier2-сделки
+// (то же самое реальное ограничение бирж, что и у Filter 2 — второй раз объяснять не буду).
+// ============================================================================
+const F3_SETTINGS_KEYS = {
+  prokidEnabled: 'mexc_f3_prokid_enabled', prokidVolume: 'mexc_f3_prokid_volume', prokidWindowSec: 'mexc_f3_prokid_window_sec',
+  volaEnabled: 'mexc_f3_vola_enabled', volaPct: 'mexc_f3_vola_pct', volaWindow: 'mexc_f3_vola_window'
+};
+function getF3ProkidEnabled() { try { return localStorage.getItem(F3_SETTINGS_KEYS.prokidEnabled) === '1'; } catch (e) { return false; } }
+function getF3ProkidVolume() { try { const v = parseFloat(localStorage.getItem(F3_SETTINGS_KEYS.prokidVolume)); return isFinite(v) && v > 0 ? v : 20000; } catch (e) { return 20000; } }
+function getF3ProkidWindowSec() { try { const v = parseFloat(localStorage.getItem(F3_SETTINGS_KEYS.prokidWindowSec)); return isFinite(v) && v > 0 ? v : 5; } catch (e) { return 5; } }
+function getF3VolaEnabled() { try { return localStorage.getItem(F3_SETTINGS_KEYS.volaEnabled) === '1'; } catch (e) { return false; } }
+function getF3VolaPct() { try { const v = parseFloat(localStorage.getItem(F3_SETTINGS_KEYS.volaPct)); return isFinite(v) && v >= 0 ? v : 1.5; } catch (e) { return 1.5; } }
+function getF3VolaWindow() { try { const v = localStorage.getItem(F3_SETTINGS_KEYS.volaWindow); return (v === 'vol30s' || v === 'vol60s') ? v : 'vol5s'; } catch (e) { return 'vol5s'; } }
+
+function renderWidgetFilter3Signals() {
+  if (!isWidgetMode || widgetSettingsOpen || widgetActiveFilterTab !== 3) return;
+  const listEl = document.getElementById('widgetFilter3List');
+  const emptyEl = document.getElementById('widgetFilter3Empty');
+  if (!listEl || !emptyEl) return;
+
+  const prokidOn = getF3ProkidEnabled(), volaOn = getF3VolaEnabled();
+  const results = [];
+  if (prokidOn || volaOn) {
+    const now = Date.now();
+    const windowMs = getF3ProkidWindowSec() * 1000;
+    const volThreshold = getF3ProkidVolume();
+    const volaField = getF3VolaWindow();
+    const volaThreshold = getF3VolaPct();
+
+    const seen = new Set();
+    if (prokidOn && typeof mexcTier2ActiveSymbols === 'function') {
+      mexcTier2ActiveSymbols().forEach(function (symbol) {
+        if (seen.has(symbol)) return;
+        const trades = tier2TradesForSymbol(symbol);
+        if (!trades || !trades.length) return;
+        let notional = 0;
+        for (let i = trades.length - 1; i >= 0; i--) {
+          if (now - trades[i].t > windowMs) break;
+          notional += trades[i].price * trades[i].qty;
+        }
+        if (notional >= volThreshold) {
+          seen.add(symbol);
+          results.push({ symbol: symbol, matchedProkid: true, matchedVola: false, prokidVolumeUsd: notional });
+        }
+      });
+    }
+    if (volaOn) {
+      coinMap.forEach(function (coin, symbol) {
+        if (seen.has(symbol)) return;
+        const v = coin[volaField];
+        if (v != null && v >= volaThreshold) {
+          seen.add(symbol);
+          results.push({ symbol: symbol, matchedProkid: false, matchedVola: true, volaPct: v });
+        }
+      });
+    }
+  }
+  results.sort(function (a, b) { return (b.prokidVolumeUsd || b.volaPct || 0) - (a.prokidVolumeUsd || a.volaPct || 0); });
+  const top = results.slice(0, getWidgetMaxSignals());
+
+  if (!prokidOn && !volaOn) {
+    emptyEl.textContent = t('Включите хотя бы один параметр выше (⚙ значок вкладки).');
+    emptyEl.style.display = 'block';
+    listEl.innerHTML = '';
+    return;
+  }
+  if (!top.length) {
+    emptyEl.textContent = t('Нет монет по заданным параметрам');
+    emptyEl.style.display = 'block';
+    listEl.innerHTML = '';
+    return;
+  }
+  emptyEl.style.display = 'none';
+  listEl.innerHTML = top.map(function (r) {
+    const coin = coinMap.get(r.symbol);
+    const chg = coin ? (coin.change24 || 0) : null;
+    // Явно называем ситуацию (какой из двух параметров сработал), не только голые цифры — иначе
+    // непонятно, ПОЧЕМУ монета попала в список, глядя только на виджет.
+    const sub = r.matchedProkid
+      ? ('ПРОКИД ' + fmtNum(r.prokidVolumeUsd) + '$ / ' + getF3ProkidWindowSec() + 'с')
+      : ('ВОЛАТИЛЬНОСТЬ ' + r.volaPct.toFixed(2) + '%');
+    return widgetPillRowHtml(r.symbol, sub, chg != null ? (chg >= 0 ? 'price-up' : 'price-down') : '');
+  }).join('');
+}
+
+(function wireWidgetFilter3Params() {
+  const prokidEnabled = document.getElementById('f3ProkidEnabled');
+  const prokidVolume = document.getElementById('f3ProkidVolume');
+  const prokidWindow = document.getElementById('f3ProkidWindowSec');
+  const volaEnabled = document.getElementById('f3VolaEnabled');
+  const volaPct = document.getElementById('f3VolaPct');
+  const volaWindow = document.getElementById('f3VolaWindow');
+  if (!prokidEnabled) return;
+
+  prokidEnabled.classList.toggle('active', getF3ProkidEnabled());
+  prokidVolume.value = getF3ProkidVolume();
+  prokidWindow.value = getF3ProkidWindowSec();
+  volaEnabled.classList.toggle('active', getF3VolaEnabled());
+  volaPct.value = getF3VolaPct();
+  volaWindow.value = getF3VolaWindow();
+
+  prokidEnabled.addEventListener('click', function () {
+    const next = !prokidEnabled.classList.contains('active');
+    prokidEnabled.classList.toggle('active', next);
+    persistSet(F3_SETTINGS_KEYS.prokidEnabled, next ? '1' : '0');
+  });
+  prokidVolume.addEventListener('change', function () { persistSet(F3_SETTINGS_KEYS.prokidVolume, String(Math.max(1, parseFloat(prokidVolume.value) || 20000))); });
+  prokidWindow.addEventListener('change', function () {
+    const v = Math.max(1, Math.min(60, parseFloat(prokidWindow.value) || 5));
+    prokidWindow.value = v;
+    persistSet(F3_SETTINGS_KEYS.prokidWindowSec, String(v));
+  });
+  volaEnabled.addEventListener('click', function () {
+    const next = !volaEnabled.classList.contains('active');
+    volaEnabled.classList.toggle('active', next);
+    persistSet(F3_SETTINGS_KEYS.volaEnabled, next ? '1' : '0');
+  });
+  volaPct.addEventListener('change', function () { persistSet(F3_SETTINGS_KEYS.volaPct, String(Math.max(0, parseFloat(volaPct.value) || 1.5))); });
+  volaWindow.addEventListener('change', function () { persistSet(F3_SETTINGS_KEYS.volaWindow, volaWindow.value); });
+})();
+
+(function wireWidgetFilterTabs() {
+  const tab1 = document.getElementById('widgetFilterTab1');
+  const tab2 = document.getElementById('widgetFilterTab2');
+  const tab3 = document.getElementById('widgetFilterTab3');
+  const list1 = document.getElementById('widgetSignalList');
+  const empty1 = document.getElementById('widgetEmpty');
+  const list2 = document.getElementById('widgetFilter2List');
+  const empty2 = document.getElementById('widgetFilter2Empty');
+  const params3 = document.getElementById('widgetFilter3Params');
+  const list3 = document.getElementById('widgetFilter3List');
+  const empty3 = document.getElementById('widgetFilter3Empty');
+  if (!tab1 || !tab2 || !tab3) return;
+  function activate(n) {
+    widgetActiveFilterTab = n;
+    tab1.classList.toggle('active', n === 1);
+    tab2.classList.toggle('active', n === 2);
+    tab3.classList.toggle('active', n === 3);
+    list1.style.display = n === 1 ? '' : 'none';
+    empty1.style.display = n === 1 ? '' : 'none';
+    list2.style.display = n === 2 ? '' : 'none';
+    empty2.style.display = n === 2 ? '' : 'none';
+    params3.style.display = n === 3 ? '' : 'none';
+    list3.style.display = n === 3 ? '' : 'none';
+    empty3.style.display = 'none';
+    if (n === 1) renderWidgetSignals();
+    else if (n === 2) renderWidgetFilter2Signals();
+    else renderWidgetFilter3Signals();
+  }
+  tab1.addEventListener('click', function () { activate(1); });
+  tab2.addEventListener('click', function () { activate(2); });
+  tab3.addEventListener('click', function () { activate(3); });
+  // Разворачивание "почему сработало" — клик по строке Filter 2 вне иконки открытия терминала.
+  const f2List = document.getElementById('widgetFilter2List');
+  if (f2List) {
+    f2List.addEventListener('click', function (e) {
+      if (e.target.closest('[data-terminal-open]')) return;
+      const row = e.target.closest('.widget-pill-row.f2');
+      if (!row) return;
+      const sym = row.dataset.f2Symbol;
+      widgetF2ExpandedSymbol = widgetF2ExpandedSymbol === sym ? null : sym;
+      renderWidgetFilter2Signals();
+    });
+  }
+})();
+
+function enterWidgetMode() {
+  if (isWidgetMode) return;
+  isWidgetMode = true;
+  const view = document.getElementById('widgetView');
+  document.body.classList.add('widget-mode-active');
+  view.classList.toggle('widget-compact', getWidgetCompact());
+  view.style.opacity = (getWidgetOpacity() / 100).toFixed(2);
+  const toggleBtn = document.getElementById('widgetModeToggleBtn');
+  if (toggleBtn) toggleBtn.classList.add('active');
+  applyWidgetWindowGeometry(true);
+  renderWidgetSignals();
+  renderWidgetFilter2Signals();
+  renderWidgetFilter3Signals();
+  if (!widgetRenderTimer) widgetRenderTimer = setInterval(function () { renderWidgetSignals(); renderWidgetFilter2Signals(); renderWidgetFilter3Signals(); }, 3000);
+}
+
+function exitWidgetMode() {
+  if (!isWidgetMode) return;
+  saveCurrentWidgetGeometry();
+  isWidgetMode = false;
+  if (widgetSettingsOpen) toggleWidgetSettingsView();
+  document.body.classList.remove('widget-mode-active');
+  const toggleBtn = document.getElementById('widgetModeToggleBtn');
+  if (toggleBtn) toggleBtn.classList.remove('active');
+  applyWidgetWindowGeometry(false);
+  if (widgetRenderTimer) { clearInterval(widgetRenderTimer); widgetRenderTimer = null; }
+}
+
+function toggleWidgetMode() { if (isWidgetMode) exitWidgetMode(); else enterWidgetMode(); }
+
+document.getElementById('widgetModeToggleBtn').addEventListener('click', toggleWidgetMode);
+document.getElementById('widgetOpenFullBtn').addEventListener('click', exitWidgetMode);
+document.getElementById('widgetOpenFullFooterBtn').addEventListener('click', exitWidgetMode);
+// "Закрыть виджет" честно возвращает в Full Mode, а не прячет окно совсем — у приложения нет
+// значка в трее, чтобы вернуть спрятанное окно обратно, поэтому настоящее "скрыть в трей" было
+// бы тупиком без десктопной инфраструктуры, которой сейчас нет (см. итоговый отчёт).
+document.getElementById('widgetCloseBtn').addEventListener('click', exitWidgetMode);
+
+// Шестерёнка в виджете переключает НЕ на страницу настроек (это разворачивало бы Full Mode),
+// а показывает компактную панель настроек ПРЯМО в теле виджета — те же localStorage-ключи, что
+// и у полной страницы настроек (см. wireTerminalSettings/wireWidgetSettings), просто другой,
+// урезанный набор полей и другие DOM id, чтобы не пересекаться с элементами Full Mode.
+let widgetSettingsOpen = false;
+function toggleWidgetSettingsView() {
+  widgetSettingsOpen = !widgetSettingsOpen;
+  const settingsEl = document.getElementById('widgetSettingsView');
+  const listEl = document.getElementById('widgetSignalList');
+  const emptyEl = document.getElementById('widgetEmpty');
+  const list2El = document.getElementById('widgetFilter2List');
+  const empty2El = document.getElementById('widgetFilter2Empty');
+  const params3El = document.getElementById('widgetFilter3Params');
+  const list3El = document.getElementById('widgetFilter3List');
+  const empty3El = document.getElementById('widgetFilter3Empty');
+  const tabsEl = document.getElementById('widgetFilterTabs');
+  if (!settingsEl) return;
+  settingsEl.style.display = widgetSettingsOpen ? 'block' : 'none';
+  if (widgetSettingsOpen) {
+    if (listEl) listEl.style.display = 'none';
+    if (emptyEl) emptyEl.style.display = 'none';
+    if (list2El) list2El.style.display = 'none';
+    if (empty2El) empty2El.style.display = 'none';
+    if (params3El) params3El.style.display = 'none';
+    if (list3El) list3El.style.display = 'none';
+    if (empty3El) empty3El.style.display = 'none';
+    if (tabsEl) tabsEl.style.display = 'none';
+    syncWidgetSettingsMiniControls();
+  } else {
+    if (tabsEl) tabsEl.style.display = '';
+    if (widgetActiveFilterTab === 1) { if (listEl) listEl.style.display = ''; renderWidgetSignals(); }
+    else if (widgetActiveFilterTab === 2) { if (list2El) list2El.style.display = ''; renderWidgetFilter2Signals(); }
+    else { if (params3El) params3El.style.display = ''; if (list3El) list3El.style.display = ''; renderWidgetFilter3Signals(); }
+  }
+}
+function syncWidgetSettingsMiniControls() {
+  const terminalEl = document.getElementById('widgetTerminalSelect');
+  const autoOpenEl = document.getElementById('widgetAutoOpenToggleMini');
+  const aotEl = document.getElementById('widgetAlwaysOnTopToggleMini');
+  const compactEl = document.getElementById('widgetCompactToggleMini');
+  const maxSignalsEl = document.getElementById('widgetMaxSignalsMini');
+  if (!terminalEl) return;
+  terminalEl.value = getSelectedTerminal();
+  autoOpenEl.classList.toggle('active', getAutoOpenEnabled());
+  aotEl.classList.toggle('active', getWidgetAlwaysOnTop());
+  compactEl.classList.toggle('active', getWidgetCompact());
+  maxSignalsEl.value = getWidgetMaxSignals();
+}
+document.getElementById('widgetSettingsBtn').addEventListener('click', toggleWidgetSettingsView);
+(function wireWidgetSettingsMiniControls() {
+  const terminalEl = document.getElementById('widgetTerminalSelect');
+  const autoOpenEl = document.getElementById('widgetAutoOpenToggleMini');
+  const aotEl = document.getElementById('widgetAlwaysOnTopToggleMini');
+  const compactEl = document.getElementById('widgetCompactToggleMini');
+  const maxSignalsEl = document.getElementById('widgetMaxSignalsMini');
+  const openFullSettingsLink = document.getElementById('widgetOpenFullSettingsLink');
+  if (!terminalEl) return;
+
+  terminalEl.addEventListener('change', function () {
+    persistSet(TERMINAL_SETTINGS_KEYS.selected, terminalEl.value);
+    const fullSelectEl = document.getElementById('terminalSelect');
+    if (fullSelectEl) fullSelectEl.value = terminalEl.value;
+    renderWidgetSignals();
+  });
+  autoOpenEl.addEventListener('click', function () {
+    const next = !autoOpenEl.classList.contains('active');
+    autoOpenEl.classList.toggle('active', next);
+    persistSet(TERMINAL_SETTINGS_KEYS.autoOpenEnabled, next ? '1' : '0');
+    const fullToggleEl = document.getElementById('autoOpenToggle');
+    if (fullToggleEl) fullToggleEl.classList.toggle('active', next);
+  });
+  aotEl.addEventListener('click', function () {
+    const next = !aotEl.classList.contains('active');
+    aotEl.classList.toggle('active', next);
+    persistSet(WIDGET_SETTINGS_KEYS.alwaysOnTop, next ? '1' : '0');
+    const fullToggleEl = document.getElementById('widgetAlwaysOnTopToggle');
+    if (fullToggleEl) fullToggleEl.classList.toggle('active', next);
+    if (isWidgetMode && window.Neutralino && typeof nlCall === 'function') nlCall('window.setAlwaysOnTop', { onTop: next }, 4000).catch(function () {});
+  });
+  compactEl.addEventListener('click', function () {
+    const next = !compactEl.classList.contains('active');
+    compactEl.classList.toggle('active', next);
+    persistSet(WIDGET_SETTINGS_KEYS.compact, next ? '1' : '0');
+    const fullToggleEl = document.getElementById('widgetCompactToggle');
+    if (fullToggleEl) fullToggleEl.classList.toggle('active', next);
+    const view = document.getElementById('widgetView');
+    if (view) view.classList.toggle('widget-compact', next);
+  });
+  maxSignalsEl.addEventListener('change', function () {
+    const v = Math.max(1, parseInt(maxSignalsEl.value, 10) || 8);
+    maxSignalsEl.value = v;
+    persistSet(WIDGET_SETTINGS_KEYS.maxSignals, String(v));
+    const fullInputEl = document.getElementById('widgetMaxSignals');
+    if (fullInputEl) fullInputEl.value = v;
+  });
+  openFullSettingsLink.addEventListener('click', function () {
+    widgetSettingsOpen = false;
+    exitWidgetMode();
+    switchPage('settings');
+  });
+})();
+
+// Перетаскивание — через официальный нативный Neutralino.window.beginDrag() (тот же метод,
+// которым обычно делают кастомный titlebar у borderless-окон), вызванный через nlCall-мост.
+(function wireWidgetDrag() {
+  const handle = document.getElementById('widgetDragHandle');
+  if (!handle) return;
+  handle.addEventListener('mousedown', function (e) {
+    if (e.target.closest('button') || !window.Neutralino || typeof nlCall !== 'function') return;
+    nlCall('window.beginDrag', {}, 3000).catch(function () {}).then(function () { saveCurrentWidgetGeometry(); });
+  });
+})();
+
+// Ресайз — у borderless-окна нет нативной рамки, за которую можно тянуть, поэтому свой уголок-
+// хват в правом нижнем углу (см. .widget-resize-handle в CSS) + throttle, чтобы не заваливать
+// nlCall-мост вызовами на каждый пиксель движения мыши.
+(function wireWidgetResize() {
+  const handle = document.getElementById('widgetResizeHandle');
+  if (!handle) return;
+  let dragging = false, startX = 0, startY = 0, startW = null, startH = null, lastSent = 0;
+  handle.addEventListener('mousedown', function (e) {
+    if (!window.Neutralino || typeof nlCall !== 'function') return;
+    dragging = true; startX = e.screenX; startY = e.screenY;
+    nlCall('window.getSize', {}, 3000).then(function (s) { startW = s.width; startH = s.height; }).catch(function () { startW = WIDGET_DEFAULT_SIZE.width; startH = WIDGET_DEFAULT_SIZE.height; });
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', function (e) {
+    if (!dragging || startW == null) return;
+    const now = Date.now();
+    if (now - lastSent < 60) return;
+    lastSent = now;
+    const w = Math.max(260, startW + (e.screenX - startX));
+    const h = Math.max(180, startH + (e.screenY - startY));
+    nlCall('window.setSize', { width: w, height: h }, 3000).catch(function () {});
+  });
+  document.addEventListener('mouseup', function () {
+    if (!dragging) return;
+    dragging = false; startW = null;
+    saveCurrentWidgetGeometry();
+  });
+})();
+
+(function wireWidgetSettings() {
+  const alwaysOnTopEl = document.getElementById('widgetAlwaysOnTopToggle');
+  const startWithEl = document.getElementById('widgetStartWithToggle');
+  const compactEl = document.getElementById('widgetCompactToggle');
+  const opacityEl = document.getElementById('widgetOpacityRange');
+  const maxSignalsEl = document.getElementById('widgetMaxSignals');
+  const resetBtn = document.getElementById('widgetResetPositionBtn');
+  if (!alwaysOnTopEl) return;
+
+  alwaysOnTopEl.classList.toggle('active', getWidgetAlwaysOnTop());
+  startWithEl.classList.toggle('active', getWidgetStartWith());
+  compactEl.classList.toggle('active', getWidgetCompact());
+  opacityEl.value = getWidgetOpacity();
+  maxSignalsEl.value = getWidgetMaxSignals();
+
+  alwaysOnTopEl.addEventListener('click', function () {
+    const next = !alwaysOnTopEl.classList.contains('active');
+    alwaysOnTopEl.classList.toggle('active', next);
+    persistSet(WIDGET_SETTINGS_KEYS.alwaysOnTop, next ? '1' : '0');
+    if (isWidgetMode && window.Neutralino && typeof nlCall === 'function') nlCall('window.setAlwaysOnTop', { onTop: next }, 4000).catch(function () {});
+  });
+  startWithEl.addEventListener('click', function () {
+    const next = !startWithEl.classList.contains('active');
+    startWithEl.classList.toggle('active', next);
+    persistSet(WIDGET_SETTINGS_KEYS.startWith, next ? '1' : '0');
+  });
+  compactEl.addEventListener('click', function () {
+    const next = !compactEl.classList.contains('active');
+    compactEl.classList.toggle('active', next);
+    persistSet(WIDGET_SETTINGS_KEYS.compact, next ? '1' : '0');
+    const view = document.getElementById('widgetView');
+    if (view) view.classList.toggle('widget-compact', next);
+  });
+  opacityEl.addEventListener('input', function () {
+    persistSet(WIDGET_SETTINGS_KEYS.opacity, opacityEl.value);
+    const view = document.getElementById('widgetView');
+    if (view) view.style.opacity = (parseInt(opacityEl.value, 10) / 100).toFixed(2);
+  });
+  maxSignalsEl.addEventListener('change', function () {
+    const v = Math.max(1, parseInt(maxSignalsEl.value, 10) || 8);
+    maxSignalsEl.value = v;
+    persistSet(WIDGET_SETTINGS_KEYS.maxSignals, String(v));
+    renderWidgetSignals();
+  });
+  resetBtn.addEventListener('click', function () {
+    persistRemove(WIDGET_SETTINGS_KEYS.pos);
+    persistRemove(WIDGET_SETTINGS_KEYS.size);
+    showAppToast('Положение и размер виджета сброшены — применится при следующем входе в Widget Mode.');
+  });
+})();
+
+// Запуск сразу в Widget Mode (Настройки -> Widget Mode -> "Запускать сразу в режиме виджета") —
+// небольшая задержка, чтобы сначала отработала остальная инициализация страницы/моста.
+setTimeout(function () { if (getWidgetStartWith()) enterWidgetMode(); }, 600);
 
 const appVersionLabelEl = document.getElementById('appVersionLabel');
 if (appVersionLabelEl) appVersionLabelEl.textContent = APP_VERSION;
