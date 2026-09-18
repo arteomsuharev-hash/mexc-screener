@@ -1099,13 +1099,9 @@ async function openSymbolInSelectedTerminal(symbol, wantCombo) {
   }
   const tbody = document.getElementById('tableBody');
   const grid = document.getElementById('gridView');
-  const widgetList = document.getElementById('widgetSignalList');
-  const widgetF2List = document.getElementById('widgetFilter2List');
   const widgetF3List = document.getElementById('widgetFilter3List');
   if (tbody) tbody.addEventListener('click', onClick);
   if (grid) grid.addEventListener('click', onClick);
-  if (widgetList) widgetList.addEventListener('click', onClick);
-  if (widgetF2List) widgetF2List.addEventListener('click', onClick);
   if (widgetF3List) widgetF3List.addEventListener('click', onClick);
 })();
 
@@ -15962,131 +15958,14 @@ function widgetPillRowHtml(symbol, subText, subClass, rowClass, rowAttrs) {
   '</div>';
 }
 
-let lastWidgetF1Signature = null;
-function renderWidgetSignals() {
-  const listEl = document.getElementById('widgetSignalList');
-  const emptyEl = document.getElementById('widgetEmpty');
-  if (!listEl || !emptyEl || !isWidgetMode || widgetSettingsOpen) return;
-  const maxN = getWidgetMaxSignals();
-  const seen = new Set();
-  const top = [];
-  // patternHistory копится по времени детекции (push в конец) — свежие сигналы в хвосте.
-  // Дедуп по символу: одна (последняя) строка на монету, иначе виджет мог бы за секунду
-  // забиться десятком повторных срабатываний одного и того же тикера.
-  for (let i = patternHistory.length - 1; i >= 0 && top.length < maxN; i--) {
-    const r = patternHistory[i];
-    if (seen.has(r.symbol)) continue;
-    seen.add(r.symbol);
-    top.push(r);
-  }
-  // Перерисовываем DOM, ТОЛЬКО когда реально что-то обнаружено/пропало (по запросу, 2026-09) —
-  // сигнатура строится по id записей (уникальны и неизменны с момента детекции), НЕ по вечно
-  // тикающим % 24ч-движения/возрасту строки — иначе виджет продолжал бы перерисовываться каждые
-  // 3с просто от того, что цена шевельнулась, что и была исходная жалоба ("тупит без причины").
-  const signature = top.map(function (r) { return r.id; }).join(',');
-  if (signature === lastWidgetF1Signature) return;
-  lastWidgetF1Signature = signature;
-
-  if (!top.length) {
-    emptyEl.style.display = 'block';
-    listEl.innerHTML = '';
-    return;
-  }
-  emptyEl.style.display = 'none';
-  listEl.innerHTML = top.map(function (r) {
-    const coin = coinMap.get(r.symbol);
-    const chg = coin ? (coin.change24 || 0) : null;
-    const def = DETECTOR_DEFS[r.detectorKey];
-    // Ситуация (какой детектор сработал) + его СОБСТВЕННЫЙ confidence% — у каждого детектора это
-    // разный расчёт (кластер сделок, повтор паттерна, дисбаланс стакана и т.д., см. DETECTOR_DEFS/
-    // registerPatternEvent), то есть процент реально "зависит от ситуации", а не всегда одно и то же
-    // 24ч-движение цены (оно теперь только доп.контекст третьим полем, если есть). Оба процента
-    // красим по стороне движения (LONG/рост -> зелёный, SHORT/падение -> красный) — иначе на тёмном
-    // фоне серый текст сливается и непонятно, куда смотрит сигнал.
-    const dirCls = r.direction === 'LONG' ? 'tok-up' : r.direction === 'SHORT' ? 'tok-down' : '';
-    const confHtml = r.confidencePct != null ? (' <span class="' + dirCls + '">' + Math.round(r.confidencePct) + '%</span>') : '';
-    const situation = (def ? def.badge : r.detectorKey) + confHtml;
-    const chgCls = chg != null ? (chg >= 0 ? 'tok-up' : 'tok-down') : '';
-    const chgHtml = chg != null ? (' · <span class="' + chgCls + '">' + (chg >= 0 ? '+' : '') + chg.toFixed(1) + '%</span>') : '';
-    const sub = situation + chgHtml + ' · ' + alertAgeLabel(r.detectedAt);
-    return widgetPillRowHtml(r.symbol, sub, '');
-  }).join('');
-}
-
-// ============================================================================
-// WIDGET FILTER 2 — рендер + Auto Open ТОЛЬКО для сигналов, реально прошедших весь pipeline
-// web/js/widget-filter2.js (candidate -> validation -> tradeability -> noise -> quality score ->
-// composite). Сама логика обнаружения там, изолирована от Filter 1 — здесь только вывод и клик.
-// ============================================================================
-let widgetActiveFilterTab = 1;
-const widgetF2AutoOpenedAt = new Map(); // symbol -> ts, анти-дребезг Auto Open отдельно от Filter 1
-const WIDGET_F2_AUTO_OPEN_COOLDOWN_MS = 60000;
-let widgetF2ExpandedSymbol = null;
-let lastWidgetF2Signature = null;
-
-function renderWidgetFilter2Signals() {
-  if (!isWidgetMode || widgetSettingsOpen || typeof WidgetFilter2 === 'undefined') return;
-  const listEl = document.getElementById('widgetFilter2List');
-  const emptyEl = document.getElementById('widgetFilter2Empty');
-  if (!listEl || !emptyEl) return;
-
-  const signals = WidgetFilter2.getDisplayedSignals();
-
-  // Auto Open — только для НАСТОЯЩИХ, прошедших весь pipeline сигналов (п.31 ТЗ), никогда для
-  // "кандидатов". Своя, отдельная от Filter 1, антидребезг-карта — по требованию изоляции модулей.
-  if (getAutoOpenEnabled()) {
-    const terminalKey = getSelectedTerminal();
-    if (terminalKey) {
-      const now = Date.now();
-      signals.forEach(function (rec) {
-        const last = widgetF2AutoOpenedAt.get(rec.symbol) || 0;
-        if (now - last < WIDGET_F2_AUTO_OPEN_COOLDOWN_MS) return;
-        widgetF2AutoOpenedAt.set(rec.symbol, now);
-        MexcTerminal.openSymbol(terminalKey, rec.symbol, getTerminalBinding()).then(function (result) {
-          logD('WidgetFilter2 AutoOpen', rec.symbol + ' -> ' + terminalKey + ': success=' + result.success + ' ' + result.message);
-        });
-      });
-    }
-  }
-
-  if (widgetActiveFilterTab !== 2) return; // считаем и авто-открываем всегда, рисуем — только на активной вкладке
-
-  // Перерисовываем DOM, ТОЛЬКО когда реально что-то обнаружено/пропало (по запросу, 2026-09) —
-  // сигнатура по символу+набору сработавших типов (НЕ по score/цене — те вечно чуть колышутся) +
-  // текущий развёрнутый ряд (иначе клик "развернуть" не подействовал бы, пока набор не изменится).
-  const signature = signals.map(function (rec) { return rec.symbol + '|' + rec.types.join(','); }).join(';') + '#' + (widgetF2ExpandedSymbol || '');
-  if (signature === lastWidgetF2Signature) return;
-  lastWidgetF2Signature = signature;
-
-  if (!signals.length) {
-    emptyEl.style.display = 'block';
-    listEl.innerHTML = '';
-    return;
-  }
-  emptyEl.style.display = 'none';
-  listEl.innerHTML = signals.map(function (rec) {
-    const coin = coinMap.get(rec.symbol);
-    const chg = coin ? (coin.change24 || 0) : null;
-    const chgCls = chg != null ? (chg >= 0 ? 'tok-up' : 'tok-down') : '';
-    const chgTxt = chg != null ? (' · <span class="' + chgCls + '">' + (chg >= 0 ? '+' : '') + chg.toFixed(1) + '%</span>') : '';
-    const expanded = widgetF2ExpandedSymbol === rec.symbol;
-    const evidenceHtml = !expanded ? '' : ('<div class="widget-f2-evidence" data-f2-evidence="1">' +
-      rec.evidence.map(function (e) {
-        const rows = Object.keys(e.evidence).map(function (k) { return '<b>' + k + ':</b> ' + e.evidence[k]; }).join(' &nbsp; ');
-        const reasons = (e.reasons || []).join(', ');
-        return '<div>' + WidgetFilter2.labelFor(e.type) + ' (' + e.score + ') — ' + rows +
-          (reasons ? '<div style="opacity:.7;margin-top:2px;">' + reasons + '</div>' : '') + '</div>';
-      }).join('') +
-      '<div style="margin-top:4px;">' + Object.keys(rec.outcome || {}).map(function (k) { return k + ': ' + rec.outcome[k] + '%'; }).join(' &nbsp; ') + '</div>' +
-    '</div>');
-    // Ситуация первой (что за паттерн), затем его собственный quality score как % (0-100, у каждого
-    // типа ситуации свой расчёт — см. widget-filter2.js qualityScore), 24ч-движение — доп.контекст.
-    // Score красим по rec.direction (LONG/SHORT/NEUTRAL, см. confirmedSignals в widget-filter2.js).
-    const recDirCls = rec.direction === 'LONG' ? 'tok-up' : rec.direction === 'SHORT' ? 'tok-down' : '';
-    const sub = WidgetFilter2.compositeLabel(rec) + ' <span class="' + recDirCls + '">' + rec.score + '%</span>' + chgTxt;
-    return widgetPillRowHtml(rec.symbol, sub, '', 'f2', ' data-f2-symbol="' + rec.symbol.replace(/"/g, '&quot;') + '"').replace('</div>', evidenceHtml + '</div>');
-  }).join('');
-}
+// Filter 1 и Filter 2 УБРАНЫ из виджета целиком (прямой запрос пользователя, 2026-09 — раньше тут
+// были renderWidgetSignals()/renderWidgetFilter2Signals(), рендерившие patternHistory и
+// WidgetFilter2.getDisplayedSignals() соответственно). Остался только Filter 3 (свои пороги, ниже).
+// Сами движки НЕ удалены: Filter 1 (runPatternDetectors/patternHistory) по-прежнему работает и
+// питает страницу "Паттерны", Историю алертов и общий Auto Open — это отдельная, общая функция
+// приложения, не "скрипт в виджете". Filter 2 (web/js/widget-filter2.js) остался в проекте
+// нетронутым, но раз getDisplayedSignals() больше никто не вызывает, её внутренний recompute()
+// просто не запускается — бюджет CPU на него не тратится.
 
 // ============================================================================
 // WIDGET FILTER 3 — не детектор, а ПРЯМЫЕ пороги, которые задаёт сам человек (в отличие от
@@ -16109,7 +15988,9 @@ function getF3VolaWindow() { try { const v = localStorage.getItem(F3_SETTINGS_KE
 
 let lastWidgetF3Signature = null;
 function renderWidgetFilter3Signals() {
-  if (!isWidgetMode || widgetSettingsOpen || widgetActiveFilterTab !== 3) return;
+  // Filter 1/2 убраны из виджета (по запросу, 2026-09) — Filter 3 (свои пороги) теперь
+  // единственный список в этом окне, вкладок-переключателей больше нет.
+  if (!isWidgetMode || widgetSettingsOpen) return;
   const listEl = document.getElementById('widgetFilter3List');
   const emptyEl = document.getElementById('widgetFilter3Empty');
   if (!listEl || !emptyEl) return;
@@ -16223,60 +16104,16 @@ function renderWidgetFilter3Signals() {
   volaWindow.addEventListener('change', function () { persistSet(F3_SETTINGS_KEYS.volaWindow, volaWindow.value); });
 })();
 
-(function wireWidgetFilterTabs() {
-  const tab1 = document.getElementById('widgetFilterTab1');
-  const tab2 = document.getElementById('widgetFilterTab2');
-  const tab3 = document.getElementById('widgetFilterTab3');
-  const list1 = document.getElementById('widgetSignalList');
-  const empty1 = document.getElementById('widgetEmpty');
-  const list2 = document.getElementById('widgetFilter2List');
-  const empty2 = document.getElementById('widgetFilter2Empty');
-  const params3 = document.getElementById('widgetFilter3Params');
-  const list3 = document.getElementById('widgetFilter3List');
-  const empty3 = document.getElementById('widgetFilter3Empty');
-  if (!tab1 || !tab2 || !tab3) return;
-  function activate(n) {
-    widgetActiveFilterTab = n;
-    tab1.classList.toggle('active', n === 1);
-    tab2.classList.toggle('active', n === 2);
-    tab3.classList.toggle('active', n === 3);
-    list1.style.display = n === 1 ? '' : 'none';
-    empty1.style.display = n === 1 ? '' : 'none';
-    list2.style.display = n === 2 ? '' : 'none';
-    empty2.style.display = n === 2 ? '' : 'none';
-    params3.style.display = n === 3 ? '' : 'none';
-    list3.style.display = n === 3 ? '' : 'none';
-    empty3.style.display = 'none';
-    if (n === 1) renderWidgetSignals();
-    else if (n === 2) renderWidgetFilter2Signals();
-    else renderWidgetFilter3Signals();
-  }
-  tab1.addEventListener('click', function () { activate(1); });
-  tab2.addEventListener('click', function () { activate(2); });
-  tab3.addEventListener('click', function () { activate(3); });
-  // Разворачивание "почему сработало" — клик по строке Filter 2 вне иконки открытия терминала.
-  const f2List = document.getElementById('widgetFilter2List');
-  if (f2List) {
-    f2List.addEventListener('click', function (e) {
-      if (e.target.closest('[data-terminal-open]')) return;
-      const row = e.target.closest('.widget-pill-row.f2');
-      if (!row) return;
-      const sym = row.dataset.f2Symbol;
-      widgetF2ExpandedSymbol = widgetF2ExpandedSymbol === sym ? null : sym;
-      renderWidgetFilter2Signals();
-    });
-  }
-})();
+// wireWidgetFilterTabs() убрана вместе с Filter 1/2 (2026-09) — вкладок-переключателей в виджете
+// больше нет, Filter 3 — единственный и всегда видимый список, ничего переключать не нужно.
 
 function enterWidgetMode() {
   if (isWidgetMode) return;
   isWidgetMode = true;
-  // Сбрасываем сигнатуры "последнего показанного" (см. renderWidgetSignals/Filter2/Filter3 —
-  // 2026-09, обновление DOM только при реальном обнаружении) — иначе если между закрытием и
-  // повторным открытием виджета набор сигналов не изменился, первый рендер после открытия был бы
-  // молча пропущен как "ничего нового", хотя список сейчас нигде не отрисован.
-  lastWidgetF1Signature = null;
-  lastWidgetF2Signature = null;
+  // Сбрасываем сигнатуру "последнего показанного" (см. renderWidgetFilter3Signals — 2026-09,
+  // обновление DOM только при реальном обнаружении) — иначе если между закрытием и повторным
+  // открытием виджета набор не изменился, первый рендер после открытия был бы молча пропущен как
+  // "ничего нового", хотя список сейчас нигде не отрисован.
   lastWidgetF3Signature = null;
   const view = document.getElementById('widgetView');
   document.body.classList.add('widget-mode-active');
@@ -16285,10 +16122,8 @@ function enterWidgetMode() {
   const toggleBtn = document.getElementById('widgetModeToggleBtn');
   if (toggleBtn) toggleBtn.classList.add('active');
   applyWidgetWindowGeometry(true);
-  renderWidgetSignals();
-  renderWidgetFilter2Signals();
   renderWidgetFilter3Signals();
-  if (!widgetRenderTimer) widgetRenderTimer = setInterval(function () { renderWidgetSignals(); renderWidgetFilter2Signals(); renderWidgetFilter3Signals(); }, 3000);
+  if (!widgetRenderTimer) widgetRenderTimer = setInterval(function () { renderWidgetFilter3Signals(); }, 3000);
 }
 
 function exitWidgetMode() {
@@ -16321,31 +16156,20 @@ let widgetSettingsOpen = false;
 function toggleWidgetSettingsView() {
   widgetSettingsOpen = !widgetSettingsOpen;
   const settingsEl = document.getElementById('widgetSettingsView');
-  const listEl = document.getElementById('widgetSignalList');
-  const emptyEl = document.getElementById('widgetEmpty');
-  const list2El = document.getElementById('widgetFilter2List');
-  const empty2El = document.getElementById('widgetFilter2Empty');
   const params3El = document.getElementById('widgetFilter3Params');
   const list3El = document.getElementById('widgetFilter3List');
   const empty3El = document.getElementById('widgetFilter3Empty');
-  const tabsEl = document.getElementById('widgetFilterTabs');
   if (!settingsEl) return;
   settingsEl.style.display = widgetSettingsOpen ? 'block' : 'none';
   if (widgetSettingsOpen) {
-    if (listEl) listEl.style.display = 'none';
-    if (emptyEl) emptyEl.style.display = 'none';
-    if (list2El) list2El.style.display = 'none';
-    if (empty2El) empty2El.style.display = 'none';
     if (params3El) params3El.style.display = 'none';
     if (list3El) list3El.style.display = 'none';
     if (empty3El) empty3El.style.display = 'none';
-    if (tabsEl) tabsEl.style.display = 'none';
     syncWidgetSettingsMiniControls();
   } else {
-    if (tabsEl) tabsEl.style.display = '';
-    if (widgetActiveFilterTab === 1) { if (listEl) listEl.style.display = ''; renderWidgetSignals(); }
-    else if (widgetActiveFilterTab === 2) { if (list2El) list2El.style.display = ''; renderWidgetFilter2Signals(); }
-    else { if (params3El) params3El.style.display = ''; if (list3El) list3El.style.display = ''; renderWidgetFilter3Signals(); }
+    if (params3El) params3El.style.display = '';
+    if (list3El) list3El.style.display = '';
+    renderWidgetFilter3Signals();
   }
 }
 function syncWidgetSettingsMiniControls() {
@@ -16375,7 +16199,8 @@ document.getElementById('widgetSettingsBtn').addEventListener('click', toggleWid
     persistSet(TERMINAL_SETTINGS_KEYS.selected, terminalEl.value);
     const fullSelectEl = document.getElementById('terminalSelect');
     if (fullSelectEl) fullSelectEl.value = terminalEl.value;
-    renderWidgetSignals();
+    lastWidgetF3Signature = null; // сменился терминал -> тултип "Открыть X в Y" в строках стал неактуален, форсируем рендер
+    renderWidgetFilter3Signals();
   });
   autoOpenEl.addEventListener('click', function () {
     const next = !autoOpenEl.classList.contains('active');
@@ -16497,7 +16322,8 @@ document.getElementById('widgetSettingsBtn').addEventListener('click', toggleWid
     const v = Math.max(1, parseInt(maxSignalsEl.value, 10) || 8);
     maxSignalsEl.value = v;
     persistSet(WIDGET_SETTINGS_KEYS.maxSignals, String(v));
-    renderWidgetSignals();
+    lastWidgetF3Signature = null; // изменился лимит строк -> форсируем рендер, даже если набор монет тот же
+    renderWidgetFilter3Signals();
   });
   resetBtn.addEventListener('click', function () {
     persistRemove(WIDGET_SETTINGS_KEYS.pos);
