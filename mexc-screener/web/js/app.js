@@ -10992,6 +10992,29 @@ window.mexcTier2ActiveSymbols = function () {
   return out;
 };
 
+// Крупные/"тяжёлые" монеты для Filter 2 (по запросу, 2026-09: "мне не нужна Солана и Биткоин, мне
+// нужны неэффективности на неликвиде") — ОДНОГО объёма за 24ч на MEXC (см. CFG.maxVol24Usd в
+// widget-filter2.js) оказалось НЕДОСТАТОЧНО: у известных крупных проектов вроде AVAX реальный оборот
+// на MEXC конкретно может быть маленьким (основная ликвидность на других биржах), но это всё равно
+// не то, что человек имеет в виду под "неэффективностями на неликвиде" — это просто известный
+// топ-проект. Поэтому дополнительно — честный топ-200 по РЕАЛЬНОЙ капитализации с публичного
+// (без ключа) CoinGecko API, один раз за сессию, набор base asset тикеров в верхнем регистре.
+// Сетевой сбой не ломает приложение — просто исключение по капитализации не работает, работает
+// только объёмный потолок (то, что было раньше).
+window.mexcMajorCoinSymbols = new Set();
+(function loadMajorCoinSymbolsForFilter2() {
+  fetchWithTimeout('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=200&page=1&sparkline=false', {}, 10000)
+    .then(function (res) { return res.json(); })
+    .then(function (rows) {
+      if (!Array.isArray(rows)) return;
+      const set = new Set();
+      rows.forEach(function (r) { if (r && r.symbol) set.add(String(r.symbol).toUpperCase()); });
+      window.mexcMajorCoinSymbols = set;
+      logI('Filter2', 'загружен топ-' + set.size + ' по капитализации (CoinGecko) — исключены из Filter 2');
+    })
+    .catch(function (e) { logW('Filter2', 'не удалось загрузить список крупных монет с CoinGecko (' + (e && e.message || e) + ') — исключение по капитализации не работает, только объёмный потолок'); });
+})();
+
 // ============================================================================
 // ДОЛГОВЕЧНОЕ ХРАНИЛИЩЕ ПОВЕРХ localStorage (только desktop-обёртка).
 //

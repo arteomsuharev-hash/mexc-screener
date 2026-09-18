@@ -905,6 +905,11 @@
     if (!coin) return false;
     if ((coin.vol24 || 0) < CFG.minVol24Usd) return false;
     if ((coin.vol24 || 0) > CFG.maxVol24Usd) return false; // тяжёлые топовые монеты — вне периметра этого фильтра, см. CFG.maxVol24Usd
+    // Объёма на MEXC одного мало (по факту, 2026-09): у известного крупного проекта вроде AVAX
+    // реальный оборот именно на MEXC может быть маленьким, но это всё равно не "неэффективность на
+    // неликвиде", а просто топ-проект — исключаем по РЕАЛЬНОЙ капитализации (топ-200 CoinGecko, см.
+    // window.mexcMajorCoinSymbols в app.js), не только по объёму этой конкретной биржи.
+    if (global.mexcMajorCoinSymbols && global.mexcMajorCoinSymbols.has(coin.baseAsset)) return false;
     const depth = global.mexcTier2DepthForSymbol(symbol);
     if (depth && depth.length) {
       const last = depth[depth.length - 1];
