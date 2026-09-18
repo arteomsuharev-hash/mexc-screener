@@ -265,31 +265,11 @@
       }];
     },
 
-    // 🐋 АГРЕССОР — аномально крупная сделка (или тесный кластер), С подтверждением продолжением
-    // того же направления (п.16: одиночный принт без подтверждения — не показывать).
-    aggressor: function (f) {
-      const trades = f.recentTrades.slice(-30);
-      if (trades.length < 4) return null;
-      let best = null;
-      trades.forEach(function (t, i) {
-        const notional = t.price * t.qty;
-        if (notional < f.baseline.medianNotional * CFG.aggressorSizeMult) return;
-        const follow = trades.slice(i + 1, i + 6).filter(function (x) { return x.side === t.side; });
-        if (follow.length < 2) return; // нет подтверждения продолжением — не агрессор, просто принт
-        if (!best || notional > best.notional) best = { trade: t, notional: notional, follow: follow.length };
-      });
-      if (!best) return null;
-      const multiple = best.notional / f.baseline.medianNotional;
-      return [{
-        type: 'aggressor',
-        direction: best.trade.side === 'buy' ? 'LONG' : 'SHORT',
-        rawScore: 60 + clamp((multiple - CFG.aggressorSizeMult) * 3, 0, 25) + clamp(best.follow * 2, 0, 15),
-        evidence: {
-          sizeUsd: Math.round(best.notional), baselineMultiple: Math.round(multiple * 10) / 10,
-          followThroughTrades: best.follow
-        }
-      }];
-    },
+    // 🐋 АГРЕССОР — УБРАН из Filter 2 (по запросу, 2026-09: вслед за ВЫЛЕТ этот тип стал новым
+    // доминирующим — 5 из 6 строк на скриншоте пользователя после того, как убрали breakout). Тот
+    // же самый механизм: "крупная сделка + продолжение" — частое generic-событие, а не структурный
+    // паттерн/неэффективность, поэтому конкурировало за maxDisplayed-слоты нечестно против редких
+    // ёршиков/роботов/TWAP/iceberg — ровно то, за чем пользователь сюда и пришёл.
 
     // 🧱 ПОГЛОЩЕНИЕ — агрессивный объём в одну сторону при почти неподвижной цене (executed
     // volume / price displacement — большое соотношение = поглощение, п.9).
@@ -1063,7 +1043,100 @@
     return reasons;
   }
 
+  // Обработка ОДНОГО символа — вынесена из recompute() как отдельная функция специально для
+  // чанкинга ниже (2026-09, фикс реального бага: "виджет виснет/тупит при перетаскивании, когда
+  // начинает сыпать монетами" — recompute() раньше синхронно прогонял ВСЕ ~1000-1500 монет рынка
+  // одним куском на каждый цикл; на слабом/среднем железе это блокирует JS-поток на достаточно
+  // долго, чтобы даже нативный drag окна ощутимо подвисал в эти моменты). Логика не изменена ни на
+  // йоту — просто извлечена, чтобы вызываться порциями.
+  function processSymbolForRecompute(symbol, now, tier2Symbols) {
+    const hasTier2 = tier2Symbols.has(symbol);
+    if (hasTier2 && !global.mexcSymbolDataIsFresh(symbol, now)) return; // протухшие Tier2-данные -> детектор молчит (п.34)
+    if (!tradeabilityOk(symbol)) return; // ликвидностный фильтр (п.21) — до любого детектора
+
+    const candidates = collectSymbolCandidates(symbol, now, hasTier2).filter(function (c) { return tradeabilityMoveOk(c, symbol); });
+    if (!candidates.length) return;
+
+    // COOLDOWN — анти-дребезг на пару (symbol, type), АДАПТИВНЫЙ по режиму (п.28 ТЗ): у более
+    // волатильной прямо сейчас монеты события реально повторяются чаще — не душим их тем же
+    // фиксированным окном, что и у спокойной монеты, и наоборот.
+    const passed = candidates.filter(function (c) {
+      const key = symbol + '|' + c.type;
+      const last = lastFiredAt.get(key) || 0;
+      const mult = c.regime === 'HIGH_VOLATILITY' ? 0.5 : (c.regime === 'LOW_LIQUIDITY' ? 1.6 : 1);
+      return now - last >= CFG.cooldownPerSymbolTypeMs * mult;
+    });
+    if (!passed.length) return;
+
+    const scored = passed.map(function (c) { return Object.assign({}, c, { score: qualityScore(c, symbol) }); })
+      .filter(function (c) { return c.score >= CFG.watchThreshold; }); // NOISE FILTER — ниже watch вообще не рассматриваем
+    if (!scored.length) return;
+
+    scored.forEach(function (c) { lastFiredAt.set(symbol + '|' + c.type, now); });
+
+    // COMPOSITE — если несколько типов подтвердились у одной монеты почти одновременно, это
+    // один сигнал с составным названием и небольшим бонусом, а не N отдельных строк.
+    const best = scored.reduce(function (a, b) { return b.score > a.score ? b : a; });
+    const compositeBonus = clamp((scored.length - 1) * 5, 0, 15);
+    const finalScore = clamp(best.score + compositeBonus, 0, 100);
+    if (finalScore < CFG.displayThreshold) {
+      // не дотянуло до показа — но помним как "watch", чтобы не пересоздавать заново с нуля
+      return;
+    }
+
+    const coin = global.mexcCoinMap.get(symbol);
+    const existing = confirmedSignals.get(symbol);
+    confirmedSignals.set(symbol, {
+      symbol: symbol,
+      types: scored.map(function (c) { return c.type; }),
+      // Доминирующий тип ЭТОГО прохода (самый высокий score среди подтвердившихся) — используется
+      // для короткой подписи в виджете (см. compositeLabel), чтобы не склеивать в одну строку
+      // эмодзи+название всех сработавших типов разом (было нечитаемо/переполняло "таблетку").
+      // Полный список типов никуда не делся — те же rec.types/evidence, видны при разворачивании.
+      primaryType: best.type,
+      direction: scored[0].direction,
+      score: finalScore,
+      detectedAt: existing ? existing.detectedAt : now,
+      lastSeenAt: now,
+      evidence: scored.map(function (c) { return { type: c.type, evidence: c.evidence, score: c.score, reasons: c.reasons }; }),
+      priceAtSignal: existing ? existing.priceAtSignal : (coin ? coin.price : null),
+      outcome: existing ? existing.outcome : {}
+    });
+  }
+
+  // Чанкинг — за один синхронный кусок обрабатываем не больше RECOMPUTE_CHUNK_SIZE символов, затем
+  // отдаём поток через setTimeout(0) (следующий чанк пойдёт уже на следующем тике event loop, между
+  // ними браузер успевает перерисовать кадр/обработать drag) — вместо одного блокирующего прохода
+  // по всему рынку разом. confirmedSignals читается виджетом (см. getDisplayedSignals) в любой
+  // момент, в т.ч. посреди ещё не завершённого прохода — это осознанно нормально: там просто лежат
+  // самые свежие уже обработанные записи, "рассинхрон" не больше recomputeIntervalMs по построению.
+  const RECOMPUTE_CHUNK_SIZE = 100;
+  let recomputeInProgress = false;
+  let recomputeQueue = null;
+
+  function runRecomputeChunk() {
+    const q = recomputeQueue;
+    if (!q) { recomputeInProgress = false; return; }
+    const now = Date.now();
+    const end = Math.min(q.idx + RECOMPUTE_CHUNK_SIZE, q.symbols.length);
+    for (let i = q.idx; i < end; i++) processSymbolForRecompute(q.symbols[i], now, q.tier2Symbols);
+    q.idx = end;
+    if (q.idx < q.symbols.length) {
+      setTimeout(runRecomputeChunk, 0);
+      return;
+    }
+    // Полный проход завершён — истечение сигналов (п.29) и outcome sweep один раз на весь проход,
+    // не на каждый чанк.
+    confirmedSignals.forEach(function (rec, symbol) {
+      if (now - rec.lastSeenAt > CFG.signalDecayMs) confirmedSignals.delete(symbol);
+    });
+    sweepOutcomes(now);
+    recomputeQueue = null;
+    recomputeInProgress = false;
+  }
+
   function recompute() {
+    if (recomputeInProgress) return; // предыдущий проход ещё доедает чанки — не запускаем поверх
     const now = Date.now();
     if (now - lastComputeAt < CFG.recomputeIntervalMs) return;
     lastComputeAt = now;
@@ -1072,67 +1145,9 @@
 
     const tier2Symbols = new Set(global.mexcTier2ActiveSymbols ? global.mexcTier2ActiveSymbols() : []);
     const symbols = Array.from(global.mexcCoinMap.keys()); // ВСЕ монеты рынка, не только watchlist
-    symbols.forEach(function (symbol) {
-      const hasTier2 = tier2Symbols.has(symbol);
-      if (hasTier2 && !global.mexcSymbolDataIsFresh(symbol, now)) return; // протухшие Tier2-данные -> детектор молчит (п.34)
-      if (!tradeabilityOk(symbol)) return; // ликвидностный фильтр (п.21) — до любого детектора
-
-      const candidates = collectSymbolCandidates(symbol, now, hasTier2).filter(function (c) { return tradeabilityMoveOk(c, symbol); });
-      if (!candidates.length) return;
-
-      // COOLDOWN — анти-дребезг на пару (symbol, type), АДАПТИВНЫЙ по режиму (п.28 ТЗ): у более
-      // волатильной прямо сейчас монеты события реально повторяются чаще — не душим их тем же
-      // фиксированным окном, что и у спокойной монеты, и наоборот.
-      const passed = candidates.filter(function (c) {
-        const key = symbol + '|' + c.type;
-        const last = lastFiredAt.get(key) || 0;
-        const mult = c.regime === 'HIGH_VOLATILITY' ? 0.5 : (c.regime === 'LOW_LIQUIDITY' ? 1.6 : 1);
-        return now - last >= CFG.cooldownPerSymbolTypeMs * mult;
-      });
-      if (!passed.length) return;
-
-      const scored = passed.map(function (c) { return Object.assign({}, c, { score: qualityScore(c, symbol) }); })
-        .filter(function (c) { return c.score >= CFG.watchThreshold; }); // NOISE FILTER — ниже watch вообще не рассматриваем
-      if (!scored.length) return;
-
-      scored.forEach(function (c) { lastFiredAt.set(symbol + '|' + c.type, now); });
-
-      // COMPOSITE — если несколько типов подтвердились у одной монеты почти одновременно, это
-      // один сигнал с составным названием и небольшим бонусом, а не N отдельных строк.
-      const best = scored.reduce(function (a, b) { return b.score > a.score ? b : a; });
-      const compositeBonus = clamp((scored.length - 1) * 5, 0, 15);
-      const finalScore = clamp(best.score + compositeBonus, 0, 100);
-      if (finalScore < CFG.displayThreshold) {
-        // не дотянуло до показа — но помним как "watch", чтобы не пересоздавать заново с нуля
-        return;
-      }
-
-      const coin = global.mexcCoinMap.get(symbol);
-      const existing = confirmedSignals.get(symbol);
-      confirmedSignals.set(symbol, {
-        symbol: symbol,
-        types: scored.map(function (c) { return c.type; }),
-        // Доминирующий тип ЭТОГО прохода (самый высокий score среди подтвердившихся) — используется
-        // для короткой подписи в виджете (см. compositeLabel), чтобы не склеивать в одну строку
-        // эмодзи+название всех сработавших типов разом (было нечитаемо/переполняло "таблетку").
-        // Полный список типов никуда не делся — те же rec.types/evidence, видны при разворачивании.
-        primaryType: best.type,
-        direction: scored[0].direction,
-        score: finalScore,
-        detectedAt: existing ? existing.detectedAt : now,
-        lastSeenAt: now,
-        evidence: scored.map(function (c) { return { type: c.type, evidence: c.evidence, score: c.score, reasons: c.reasons }; }),
-        priceAtSignal: existing ? existing.priceAtSignal : (coin ? coin.price : null),
-        outcome: existing ? existing.outcome : {}
-      });
-    });
-
-    // Истечение неподтверждённых сигналов (п.29 "currently active" -> пропадают, если рынок остыл)
-    confirmedSignals.forEach(function (rec, symbol) {
-      if (now - rec.lastSeenAt > CFG.signalDecayMs) confirmedSignals.delete(symbol);
-    });
-
-    sweepOutcomes(now);
+    recomputeQueue = { symbols: symbols, idx: 0, tier2Symbols: tier2Symbols };
+    recomputeInProgress = true;
+    runRecomputeChunk(); // первый чанк — сразу (тот же отклик, что и раньше, для первых ~100 монет)
   }
 
   // ------------------------------------------------------------------------
