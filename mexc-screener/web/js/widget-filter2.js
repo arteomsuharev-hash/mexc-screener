@@ -318,35 +318,15 @@
       }];
     },
 
-    // 🚀 ВЫЛЕТ — composite по построению: пробой уровня + агрессивный флоу + объёмная аномалия.
-    breakout: function (f) {
-      const trades = f.recentTrades;
-      if (trades.length < 10) return null;
-      const prices = trades.map(function (t) { return t.price; });
-      const hi = Math.max.apply(null, prices.slice(0, -3));
-      const lo = Math.min.apply(null, prices.slice(0, -3));
-      const last = prices[prices.length - 1];
-      const brokeUp = last > hi;
-      const brokeDown = last < lo;
-      if (!brokeUp && !brokeDown) return null;
-      const buyNotional = trades.filter(function (t) { return t.side === 'buy'; }).reduce(function (a, t) { return a + t.price * t.qty; }, 0);
-      const sellNotional = trades.filter(function (t) { return t.side === 'sell'; }).reduce(function (a, t) { return a + t.price * t.qty; }, 0);
-      const flowOk = brokeUp ? buyNotional > sellNotional * 1.3 : sellNotional > buyNotional * 1.3;
-      if (!flowOk) return null;
-      const totalNotional = buyNotional + sellNotional;
-      const volAnomaly = totalNotional / Math.max(f.baseline.volNotional, 1);
-      if (volAnomaly < 1.4) return null;
-      const displacementPct = Math.abs(last - trades[0].price) / trades[0].price * 100;
-      return [{
-        type: 'breakout',
-        direction: brokeUp ? 'LONG' : 'SHORT',
-        rawScore: 58 + clamp((volAnomaly - 1.4) * 12, 0, 22) + clamp(displacementPct * 6, 0, 20),
-        evidence: {
-          levelBreak: brokeUp ? 'HIGH' : 'LOW', volumeAnomalyX: Math.round(volAnomaly * 10) / 10,
-          priceDisplacementPct: Math.round(displacementPct * 100) / 100
-        }
-      }];
-    },
+    // 🚀 ВЫЛЕТ (breakout) — УБРАН из Filter 2 (по запросу, 2026-09: "нету ни ершиков никаких
+    // алгоритмов ни закономерностей, в том что я открываю из списка"). Причина: простой пробой
+    // диапазона+объём — самое частое и самое ПРОСТОЕ событие рынка по сравнению с редкими
+    // структурными паттернами (ёршик/robot/iceberg/TWAP и т.д.) — при равных прочих он срабатывал
+    // намного чаще их и забивал все maxDisplayed-слоты собой, даже после +8/+6 бонуса типам
+    // BOT_TYPES/INEFFICIENCY_TYPES (см. qualityScore). Это НЕ "неэффективность" в том смысле, в
+    // котором пользователь торгует — просто momentum-событие. Функция оставлена закомментированной
+    // (не удалена) на случай, если понадобится вернуть как опцию.
+    // breakout: function (f) { ... } — см. git-историю этого файла для полного кода.
 
     // 🔼 АПТИК / 🔽 ДАУНТИК — подтверждённое определение (небогач.ру/proptrading.ru): "аптик" —
     // сделка ПО ЦЕНЕ ВЫШЕ предыдущей ("плюс-тик"). Устойчивый бот-алгоритм — это длинный ХВОСТОВОЙ
@@ -617,30 +597,10 @@
   }
 
   const tier1Detectors = {
-    // 🚀 ВЫЛЕТ (lite) — пробой собственного недавнего диапазона монеты + объём растёт заметно
-    // быстрее, чем рос до этого (ускорение, не просто "объём большой" — у каждой монеты своя норма).
-    breakout: function (symbol, hist) {
-      if (hist.length < CFG.tier1MinSamples) return null;
-      const mid = hist.length >> 1;
-      const earlier = hist.slice(0, mid), later = hist.slice(mid);
-      const rangeHi = Math.max.apply(null, earlier.map(function (h) { return h.price; }));
-      const rangeLo = Math.min.apply(null, earlier.map(function (h) { return h.price; }));
-      const last = hist[hist.length - 1];
-      const brokeUp = last.price > rangeHi;
-      const brokeDown = last.price < rangeLo;
-      if (!brokeUp && !brokeDown) return null;
-      const volGrowthEarly = Math.max(1e-9, earlier[earlier.length - 1].vol24 - earlier[0].vol24);
-      const volGrowthLate = later[later.length - 1].vol24 - later[0].vol24;
-      const accel = volGrowthLate / volGrowthEarly;
-      if (accel < CFG.tier1BreakoutMinVolAccel) return null;
-      const displacementPct = Math.abs(last.price - earlier[0].price) / earlier[0].price * 100;
-      return [{
-        type: 'breakout',
-        direction: brokeUp ? 'LONG' : 'SHORT',
-        rawScore: 50 + clamp((accel - CFG.tier1BreakoutMinVolAccel) * 10, 0, 25) + clamp(displacementPct * 4, 0, 20),
-        evidence: { levelBreak: brokeUp ? 'HIGH' : 'LOW', volumeAccelX: Math.round(accel * 10) / 10, priceDisplacementPct: Math.round(displacementPct * 100) / 100, source: 'tier1' }
-      }];
-    },
+    // 🚀 ВЫЛЕТ (lite) — УБРАН из Filter 2 (по запросу, 2026-09), см. подробное объяснение у
+    // trade-based версии этого же детектора (tradeDetectors, было в этом файле выше) — тот же самый
+    // повод: простой пробой диапазона — самое частое событие рынка, забивал собой все
+    // maxDisplayed-слоты, оставляя редким структурным паттернам (ёршик/robot/iceberg/TWAP) мало шансов.
     // 🐋 АГРЕССОР (lite) — реализованная волатильность (vol5s) сейчас намного выше СВОЕЙ ЖЕ обычной
     // нормы за последние ~8 минут (adaptive per-symbol baseline, п.20), а не общий порог на всех.
     aggressor: function (symbol, hist) {
