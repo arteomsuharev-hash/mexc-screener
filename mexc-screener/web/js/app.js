@@ -9018,7 +9018,12 @@ function alertHistoryOutcomeCellHtml(record) {
 function renderAlertHistoryTable() {
   const page = document.getElementById('page-patterns');
   const container = document.getElementById('alertHistoryTableContainer');
-  if (!page || !page.classList.contains('active') || !container) return;
+  // !isWidgetMode — 2026-09, фикс лагов виджета: Widget Mode НЕ меняет, какая страница "активна" под
+  // капотом (это просто CSS-оверлей поверх той же страницы) — без этой проверки, если человек зашёл
+  // в виджет с открытой страницей "Паттерны"/"Графики"/"Финрез" и т.д., её тяжёлый рендер продолжал
+  // бы молотить в фоне на каждый тик, невидимо, впустую нагружая CPU поверх и без того работающего
+  // рендера самого виджета — см. те же 9-10 мест ниже.
+  if (!page || !page.classList.contains('active') || !container || isWidgetMode) return;
   const search = alertHistorySearch.trim().toUpperCase();
   let rows = patternHistory.filter(function (r) {
     if (!alertHistoryExchangeFilterSet.has(exchangeOfSymbol(r.symbol))) return false;
@@ -9214,7 +9219,7 @@ function spikeRepeatsLastHour(symbol, now) {
 function renderSpikeHistoryTable() {
   const page = document.getElementById('page-spikes');
   const container = document.getElementById('spikeHistoryTableContainer');
-  if (!page || !page.classList.contains('active') || !container) return;
+  if (!page || !page.classList.contains('active') || !container || isWidgetMode) return;
   const now = Date.now();
   const search = spikeHistorySearch.trim().toUpperCase();
   let rows = spikeHistory.filter(function (r) {
@@ -9625,7 +9630,7 @@ function patternCardHtml(ev) {
 
 function updatePatternsPage() {
   const page = document.getElementById('page-patterns');
-  if (!page || !page.classList.contains('active')) return;
+  if (!page || !page.classList.contains('active') || isWidgetMode) return;
 
   const statusEl = document.getElementById('watchlistStatusText');
   if (statusEl) statusEl.textContent = watchlistStatusText();
@@ -9933,7 +9938,7 @@ async function refreshGraphsCandles(symbols) {
       while (cursor < symbols.length) {
         const symbol = symbols[cursor++];
         const page = document.getElementById('page-graphs');
-        if (!page || !page.classList.contains('active')) return; // ушли со страницы — не тратим оставшиеся запросы впустую
+        if (!page || !page.classList.contains('active') || isWidgetMode) return; // ушли со страницы (или свернули в виджет) — не тратим оставшиеся запросы впустую
         if (!graphsSymbolNeedsFetch(symbol)) continue; // уже есть свежий кэш — не тратим лишний curl.exe
         const coin = coinMap.get(symbol);
         if (!coin || !coin.raw) continue;
@@ -10026,7 +10031,7 @@ function refreshGraphsCardHeader(card, symbol) {
 
 function redrawGraphsGrid() {
   const page = document.getElementById('page-graphs');
-  if (!page || !page.classList.contains('active')) return;
+  if (!page || !page.classList.contains('active') || isWidgetMode) return;
   const grid = document.getElementById('graphsGrid');
   if (!grid) return;
   grid.querySelectorAll('.mini-chart-card').forEach(function (card) {
@@ -10243,7 +10248,7 @@ function applyGraphsGridLayout(grid, count) {
 
 function updateGraphsPage() {
   const page = document.getElementById('page-graphs');
-  if (!page || !page.classList.contains('active')) return;
+  if (!page || !page.classList.contains('active') || isWidgetMode) return;
   const symbols = computeGraphsVisibleSymbols();
   const forced = graphsForceRebuild; // пин/анпин/смена фильтра — статичная разметка карточки тоже могла поменяться
   const prevSet = new Set(graphsVisibleSymbols);
@@ -10413,6 +10418,11 @@ function renderAnalyticsExchFilter() {
 }
 
 function updateAnalytics() {
+  // 2026-09: раньше вообще без проверки видимости страницы — гоняла полный рендер топ-8 рейтингов
+  // (с сортировкой allCoins) каждые updateIntervalMs, даже когда человек на любой другой странице
+  // или в виджете. Теперь честно молчит, если "Аналитика" не видна.
+  const analyticsPage = document.getElementById('page-analytics');
+  if (!analyticsPage || !analyticsPage.classList.contains('active') || isWidgetMode) return;
   renderAnalyticsExchFilter();
   // Полоска относительной "тяжести" значения внутри своей восьмёрки (не просто число — сразу видно,
   // насколько первое место оторвалось от остальных) + номер места + шаг анимации появления при каждой
@@ -10489,11 +10499,15 @@ function renderAlertsDirFilter() {
 }
 
 function updateAlerts() {
-  renderAlertsExchFilter();
-  renderAlertsDirFilter();
   const thr = num(document.getElementById('priceAlertThreshold').value) || 8;
   const allHits = allCoins.filter(function (c) { return Math.abs(c.change24) >= thr; });
-  document.getElementById('navAlertBadge').textContent = allHits.length;
+  document.getElementById('navAlertBadge').textContent = allHits.length; // бейдж в навигации — держим живым всегда, дёшево
+  // Дальше — дорогой рендер списка (~30 строк с innerHTML), нужен, только если страница реально
+  // видна и мы не в виджете (см. isWidgetMode-комментарий у renderAlertHistoryTable выше).
+  const alertsPage = document.getElementById('page-alerts');
+  if (!alertsPage || !alertsPage.classList.contains('active') || isWidgetMode) return;
+  renderAlertsExchFilter();
+  renderAlertsDirFilter();
   let hits = alertsExchangeFilter === 'ALL' ? allHits : allHits.filter(function (c) { return (c.exchange || 'MEXC') === alertsExchangeFilter; });
   if (alertsDirFilter === 'UP') hits = hits.filter(function (c) { return c.change24 >= 0; });
   else if (alertsDirFilter === 'DOWN') hits = hits.filter(function (c) { return c.change24 < 0; });
@@ -10597,7 +10611,7 @@ function updateActiveProfileCards(name) {
 // live-счётчик на карточках профилей (стр. "Профили") — удобно оценить, не слишком ли узкие/широкие пороги.
 function updateProfilesPage() {
   const page = document.getElementById('page-profiles');
-  if (!page || !page.classList.contains('active')) return;
+  if (!page || !page.classList.contains('active') || isWidgetMode) return;
   const stats = computeStrategyStats();
   const ids = { algo: 'cardCountAlgo', ineff: 'cardCountIneff', density: 'cardCountDensity' };
   Object.keys(ids).forEach(function (key) {
@@ -13443,7 +13457,7 @@ function renderAccountBalances(balances) {
   // Рисуем Финрез, только если его страница сейчас реально видна — иначе canvas-графики (хиро-график,
   // донат) рисовались бы в контейнер нулевого размера (display:none) и остались бы пустыми.
   const finresPage = document.getElementById('page-finres');
-  if (finresPage && finresPage.classList.contains('active')) {
+  if (finresPage && finresPage.classList.contains('active') && !isWidgetMode) {
     renderFinresHero();
     lightRefreshFinresContent();
   }
@@ -14762,7 +14776,7 @@ function updateListingsNavBadge() {
 
 function renderListingsPageIfActive() {
   const page = document.getElementById('page-listings');
-  if (page && page.classList.contains('active')) updateListingsPage();
+  if (page && page.classList.contains('active') && !isWidgetMode) updateListingsPage();
   updateListingsNavBadge();
 }
 
@@ -15713,7 +15727,7 @@ function refreshAllDynamicContent() {
     function () { updateProfilesPage(); },
     function () {
       const finresPageEl = document.getElementById('page-finres');
-      if (finresPageEl && finresPageEl.classList.contains('active')) renderFinresTab();
+      if (finresPageEl && finresPageEl.classList.contains('active') && !isWidgetMode) renderFinresTab();
     }
   ].forEach(function (fn) { try { fn(); } catch (e) {} });
 }
