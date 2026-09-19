@@ -15972,7 +15972,40 @@ function widgetPillRowHtml(symbol, subText, subClass, rowClass, rowAttrs) {
 let widgetActiveTab = 'TICKS'; // 'TICKS' | 'F3'
 let widgetTicksPatternFilter = 'ALL';
 let widgetTicksExpandedId = null;
+let widgetTicksDebugId = null; // раздел 36 ТЗ: debug/observability mode — какая карточка сейчас показывает сырые данные детектора
 let lastWidgetTicksSignature = null;
+
+// Раздел 36 ТЗ: "должен быть debug-режим, который показывает СЫРУЮ логику детектора" — читает
+// PatternEngine.getDebugInfo(symbol) (заполняется на каждом тике всеми 7 детекторами + data quality
+// + normalized-снимком, см. pattern-engine.js) и рендерит это человекочитаемо, без домыслов —
+// только то, что реально посчитал детектор в последний раз.
+function widgetTickDebugHtml(symbol) {
+  const dbg = PatternEngine.getDebugInfo(symbol);
+  if (!dbg) return '<div class="widget-tick-debug-empty">' + t('нет debug-данных') + '</div>';
+  const lines = [];
+  if (dbg.dataQuality) lines.push('DATA: ' + dbg.dataQuality);
+  if (dbg.ershik) lines.push('ЁРШИК: hit=' + (dbg.ershik.hit ? 'да' : 'нет'));
+  if (dbg.ladder) lines.push('ЛЕСТНИЦА: state=' + dbg.ladder.state +
+    ' bid=' + (dbg.ladder.bidWall ? 'x' + dbg.ladder.bidWall.ratio.toFixed(1) : '-') +
+    ' ask=' + (dbg.ladder.askWall ? 'x' + dbg.ladder.askWall.ratio.toFixed(1) : '-'));
+  if (dbg.reposition) lines.push('ПЕРЕСТАВЛЯШ: state=' + dbg.reposition.state +
+    ' bid=' + (dbg.reposition.bidWall ? 'x' + dbg.reposition.bidWall.ratio.toFixed(1) : '-') +
+    ' ask=' + (dbg.reposition.askWall ? 'x' + dbg.reposition.askWall.ratio.toFixed(1) : '-'));
+  ['buyer', 'seller'].forEach(function (k) {
+    const d = dbg[k]; if (!d) return;
+    const label = k === 'buyer' ? 'ПОКУПАШ' : 'ПРОДАВАШ';
+    if (d.reason) { lines.push(label + ': мало сделок (' + d.count + ')'); return; }
+    lines.push(label + ': повторов=' + d.repeats + ' доминирование=' + Math.round(d.dominance * 100) + '% (нужно >=' + Math.round(d.thresholds.dominanceMin * 100) + '%)' +
+      ' разброс размера=' + Math.round(d.sizeCv * 100) + '% (макс ' + Math.round(d.thresholds.sizeCvMax * 100) + '%)');
+  });
+  if (dbg.impulse && dbg.impulse.f) {
+    const f = dbg.impulse.f;
+    lines.push('ИМПУЛЬС: перцентиль_волатильности=' + (f.volatility_percentile != null ? Math.round(f.volatility_percentile * 100) + '%' : '-') +
+      ' large_trade_ratio=' + (f.large_trade_ratio != null ? Math.round(f.large_trade_ratio * 100) + '%' : '-') +
+      ' состояние=' + (dbg.impulse.state ? dbg.impulse.state.status : 'нет'));
+  }
+  return '<div class="widget-tick-debug">' + lines.map(function (l) { return '<div class="widget-tick-debug-row">' + l + '</div>'; }).join('') + '</div>';
+}
 
 function widgetTickCardHtml(ev) {
   const statusCls = ev.status === 'ACTIVE' ? 'st-active' : ev.status === 'WEAKENING' ? 'st-weakening' : 'st-ended';
@@ -15988,21 +16021,25 @@ function widgetTickCardHtml(ev) {
   if (m.durationS != null) metaParts.push(Math.floor(m.durationS / 60) + ':' + String(m.durationS % 60).padStart(2, '0'));
   metaParts.push(ev.exchange);
   const expanded = widgetTicksExpandedId === ev.id;
+  const debugOn = widgetTicksDebugId === ev.id;
   const timelineHtml = !expanded ? '' : ('<div class="widget-tick-timeline">' +
     ev.timeline.slice().reverse().map(function (e) {
       const tm = new Date(e.t).toTimeString().slice(0, 8);
       return '<div class="widget-tick-timeline-row"><time>' + tm + '</time><span>' + e.message + '</span></div>';
     }).join('') +
   '</div>');
+  const debugHtml = !debugOn ? '' : widgetTickDebugHtml(ev.symbol);
   return '<div class="widget-tick-card" data-tick-id="' + ev.id + '" data-tick-symbol="' + ev.symbol.replace(/"/g, '&quot;') + '">' +
     '<div class="widget-tick-card-top">' +
       '<span class="widget-tick-status ' + statusCls + '"></span>' +
       '<span class="widget-tick-symbol" data-terminal-open="' + ev.symbol.replace(/"/g, '&quot;') + '">' + symbolBare + '</span>' +
       '<span class="widget-tick-pattern">' + (PatternEngine.labelFor(ev.pattern)) + '</span>' +
       '<span class="widget-tick-conf">' + Math.round(ev.confidence) + '%</span>' +
+      '<i class="ri-bug-line widget-tick-debug-btn' + (debugOn ? ' active' : '') + '" data-tick-debug="' + ev.id + '" title="' + t('Debug: сырые данные детектора') + '"></i>' +
       '<i class="ri-forbid-line widget-tick-blacklist-btn" data-tick-blacklist="' + ev.symbol.replace(/"/g, '&quot;') + '" title="' + t('Убрать эту монету на 24ч') + '"></i>' +
     '</div>' +
     '<div class="widget-tick-meta">' + metaParts.map(function (p) { return '<span>' + p + '</span>'; }).join('') + '</div>' +
+    debugHtml +
     timelineHtml +
   '</div>';
 }
@@ -16018,7 +16055,12 @@ function renderWidgetTicksAlerts() {
   // Та же логика "обновляем DOM только при реальном изменении", что и у остальных списков виджета
   // (см. commit "виджет обновляется только при реальном обнаружении") — но здесь ЕЩЁ и confidence/
   // статус меняются достаточно редко и осмысленно (не на каждый тик), поэтому включены в сигнатуру.
-  const signature = events.map(function (e) { return e.id + ':' + e.status + ':' + Math.round(e.confidence / 5); }).join(',') + '#' + (widgetTicksExpandedId || '');
+  // Debug-панель открыта -> добавляем грубый 3с-тик в сигнатуру, чтобы её цифры реально обновлялись
+  // (иначе сигнатура не поменяется, пока confidence/status не сдвинутся, и debug-панель будет
+  // показывать застывший снимок) — для остальных карточек (debug закрыт) это не влияет на
+  // анти-фриз-рендеринг вообще (п.36 ТЗ живой debug + commit "виджет обновляется только при реальном обнаружении").
+  const debugTick = widgetTicksDebugId ? Math.floor(Date.now() / 3000) : 0;
+  const signature = events.map(function (e) { return e.id + ':' + e.status + ':' + Math.round(e.confidence / 5); }).join(',') + '#' + (widgetTicksExpandedId || '') + '#' + (widgetTicksDebugId || '') + '#' + debugTick;
   if (signature === lastWidgetTicksSignature) return;
   lastWidgetTicksSignature = signature;
 
@@ -16050,6 +16092,15 @@ function renderWidgetTicksAlerts() {
     if (blEl) {
       e.stopPropagation();
       PatternEngine.blacklist.add(blEl.dataset.tickBlacklist, '24H');
+      lastWidgetTicksSignature = null;
+      renderWidgetTicksAlerts();
+      return;
+    }
+    const dbgEl = e.target.closest('[data-tick-debug]');
+    if (dbgEl) {
+      e.stopPropagation();
+      const id = dbgEl.dataset.tickDebug;
+      widgetTicksDebugId = widgetTicksDebugId === id ? null : id;
       lastWidgetTicksSignature = null;
       renderWidgetTicksAlerts();
       return;

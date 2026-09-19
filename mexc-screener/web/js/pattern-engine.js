@@ -76,6 +76,15 @@
     eventHistoryKeepMs: 30 * 60000,     // ENDED-события остаются в ленте (п.23 ТЗ) это время, потом убираются
     eventTimelineMaxEntries: 40,        // на событие — bounded, не бесконечная история в RAM (п.28)
     blacklistStorageKey: 'mexc_pe_blacklist',
+    // Раздел 3 ТЗ: "НЕ считать Binance/Bybit/OKX основным источником" — целевой периметр это
+    // неликвидные/локальные площадки (MEXC/KuCoin/Bitget/BingX/Gate.io/Aster), где реально видны
+    // неэффективности. window.mexcTier2ActiveSymbols() отдаёт символы ВСЕХ 9 подключённых рынков
+    // (это общий Tier2-буфер, которым пользуются и другие фичи приложения) — здесь явно вычитаем
+    // топ-биржи с глубокой, эффективной ликвидностью, а не полагаемся на объёмный фильтр (тот уже
+    // проверенно недостаточен, см. историю с AVAX).
+    excludedExchanges: ['BINANCE', 'BINANCEFUT', 'OKX'],
+    dataFreshOkMs: 5000,                // последний тик данных младше этого -> DATA_OK
+    dataFreshDegradedMs: 30000,         // младше этого (но старше dataFreshOkMs) -> DATA_DEGRADED; старше -> DATA_STALE
 
     // --- ЁРШИК ---
     ershik: {
@@ -202,14 +211,20 @@
         timeline: []
       };
       events.set(k, ev);
-      pushTimeline(ev, 'PATTERN_DETECTED', labelFor(pattern) + ' обнаружен');
+      // Раздел 26 ТЗ различает DETECTED и CONFIRMED — этот движок вообще не создаёт событие, пока
+      // соответствующая state machine (cyclesToConfirm/minRepeats/minMoves/dominance-гейты выше)
+      // уже не прошла подтверждение, поэтому первое появление события ЧЕСТНО подписывается как
+      // CONFIRMED, а не DETECTED (одиночный сырой тик в принципе не может сюда попасть).
+      pushTimeline(ev, 'PATTERN_CONFIRMED', labelFor(pattern) + ' подтверждён');
       return ev;
     }
     const wasWeakening = ev.status === 'WEAKENING';
     const prevMetrics = ev.metrics;
+    const prevDirection = ev.direction;
     ev.status = 'ACTIVE';
     ev.lastUpdateAt = now;
     ev.metrics = metrics;
+    if (direction && prevDirection && direction !== prevDirection) pushTimeline(ev, 'PATTERN_CHANGED', labelFor(pattern) + ' сменил направление: ' + prevDirection + ' -> ' + direction);
     ev.direction = direction || ev.direction;
     const confDelta = confidence - ev.confidence;
     ev.confidence = confidence;
@@ -273,6 +288,8 @@
   // ==========================================================================
   function isEligible(symbol) {
     if (Blacklist.isBlacklisted(symbol)) return false;
+    const exch = global.mexcExchangeOfSymbol ? global.mexcExchangeOfSymbol(symbol) : 'MEXC';
+    if (CFG.excludedExchanges.indexOf(exch) !== -1) return false;
     const coin = global.mexcCoinMap ? global.mexcCoinMap.get(symbol) : null;
     if (!coin) return false;
     const vol24 = coin.vol24 || 0;
@@ -287,6 +304,45 @@
       }
     }
     return true;
+  }
+
+  // ==========================================================================
+  // 5b. NORMALIZED DATA TYPES — раздел 4 ТЗ (NormalizedTrade / NormalizedOrderBookUpdate). Реальные
+  // tier2-буферы уже содержат по сути этот же нормализованный вид (side из настоящего поля биржи,
+  // единый формат по всем подключённым рынкам, см. шапку файла) — второй параллельный буфер с тем же
+  // содержимым только бы дублировал память; здесь формализуем явный конвертер с точными именами
+  // полей из ТЗ, используемый в debug/наблюдаемости (п.13/36 ТЗ), чтобы объекты с такими именами
+  // реально существовали, а не подразумевались.
+  // ==========================================================================
+  function normalizeTrade(symbol, raw) {
+    if (!raw) return null;
+    return {
+      exchange: global.mexcExchangeOfSymbol ? global.mexcExchangeOfSymbol(symbol) : 'MEXC',
+      symbol: symbol, timestamp: raw.t, price: raw.price, quantity: raw.qty,
+      quoteVolume: raw.price * raw.qty, side: raw.side === 'buy' ? 'BUY' : 'SELL',
+      tradeId: raw.t + '_' + raw.price + '_' + raw.qty // синтетический id — биржи не отдают устойчивый tradeId во всех подключённых потоках
+    };
+  }
+  function normalizeOrderBookUpdate(symbol, raw) {
+    if (!raw) return null;
+    return {
+      exchange: global.mexcExchangeOfSymbol ? global.mexcExchangeOfSymbol(symbol) : 'MEXC',
+      symbol: symbol, timestamp: raw.t, bids: raw.bids, asks: raw.asks,
+      isSnapshot: true // честно: периодический снимок топ-N, не diff-поток с sequence — см. шапку файла и раздел 30 ТЗ
+    };
+  }
+
+  // ==========================================================================
+  // 5c. DATA QUALITY — раздел 31 ТЗ: DATA_OK / DATA_DEGRADED / DATA_STALE. На устаревших данных
+  // (потерян WS, поток залип) детекторы должны молчать, а не выдавать вывод по мёртвому снимку —
+  // тот же принцип "пусто — нормальный результат", что и во всей остальной философии движка.
+  // ==========================================================================
+  function dataQualityFor(lastTs, now) {
+    if (lastTs == null) return 'DATA_STALE';
+    const age = now - lastTs;
+    if (age <= CFG.dataFreshOkMs) return 'DATA_OK';
+    if (age <= CFG.dataFreshDegradedMs) return 'DATA_DEGRADED';
+    return 'DATA_STALE';
   }
 
   // ==========================================================================
@@ -376,6 +432,7 @@
     const cur = depthSnaps[depthSnaps.length - 1];
     const bidWall = findLevelWall(cur.bids, CFG.reposition.wallMinRatio);
     const askWall = findLevelWall(cur.asks, CFG.reposition.wallMinRatio);
+    getSymbolState(symbol).debug.reposition = { bidWall: bidWall, askWall: askWall, state: st.status };
 
     if (st.status === 'WATCHING') {
       const w = bidWall || askWall;
@@ -413,19 +470,30 @@
   //    доля сделок в одну сторону + похожий (не идентичный) размер + похожая частота.
   // ==========================================================================
   function runAggroDetector(symbol, trades, now, side, pattern) {
-    const st = getSymbolState(symbol)[pattern === 'BUYER' ? 'buyer' : 'seller'];
+    const debugKey = pattern === 'BUYER' ? 'buyer' : 'seller';
+    const st = getSymbolState(symbol)[debugKey];
     const recent = trades.slice(-CFG.aggro.lookback);
-    if (recent.length < CFG.aggro.minRepeats) return;
+    if (recent.length < CFG.aggro.minRepeats) {
+      getSymbolState(symbol).debug[debugKey] = { reason: 'insufficient_trades', count: recent.length, state: st.status };
+      return;
+    }
     const sideTrades = recent.filter(function (t) { return t.side === side; });
-    if (sideTrades.length < CFG.aggro.minRepeats) { st.status = 'WATCHING'; return; }
-    const dominance = sideTrades.length / recent.length;
-    if (dominance < CFG.aggro.dominanceMin) { st.status = 'WATCHING'; return; }
+    const dominance = recent.length ? sideTrades.length / recent.length : 0;
     const sizes = sideTrades.map(function (t) { return t.price * t.qty; });
     const sizeCvV = cv(sizes);
-    if (sizeCvV > CFG.aggro.sizeCvMax) { st.status = 'WATCHING'; return; }
     const intervals = [];
     for (let i = 1; i < sideTrades.length; i++) intervals.push(sideTrades[i].t - sideTrades[i - 1].t);
     const intervalCvV = cv(intervals);
+    // Debug пишется ДО геймов на выход — иначе не видно, ПОЧЕМУ паттерн не сработал, а именно это и
+    // нужно для observability (раздел 36 ТЗ), а не только подтверждать удачные случаи.
+    getSymbolState(symbol).debug[debugKey] = {
+      repeats: sideTrades.length, dominance: Math.round(dominance * 100) / 100,
+      sizeCv: Math.round(sizeCvV * 100) / 100, intervalCv: Math.round(intervalCvV * 100) / 100, state: st.status,
+      thresholds: { minRepeats: CFG.aggro.minRepeats, dominanceMin: CFG.aggro.dominanceMin, sizeCvMax: CFG.aggro.sizeCvMax, intervalCvMax: CFG.aggro.intervalCvMax }
+    };
+    if (sideTrades.length < CFG.aggro.minRepeats) { st.status = 'WATCHING'; return; }
+    if (dominance < CFG.aggro.dominanceMin) { st.status = 'WATCHING'; return; }
+    if (sizeCvV > CFG.aggro.sizeCvMax) { st.status = 'WATCHING'; return; }
     if (intervalCvV > CFG.aggro.intervalCvMax) { st.status = 'WATCHING'; return; }
 
     st.status = 'ACTIVE'; st.repeats = sideTrades.length; st.lastTickAt = now;
@@ -477,7 +545,7 @@
         },
         timeline: []
       };
-      pushTimeline(ev, 'PATTERN_DETECTED', labelFor(pattern) + ' классифицирован после ' + Math.round(CFG.impulse.confirmWindowMs / 1000) + 'с окна подтверждения');
+      pushTimeline(ev, 'PATTERN_CONFIRMED', labelFor(pattern) + ' классифицирован после ' + Math.round(CFG.impulse.confirmWindowMs / 1000) + 'с окна подтверждения');
       events.set(k, ev);
       // Прокид/прострел — одномоментное, не длящееся состояние; сразу планируем угасание.
       ev.status = 'WEAKENING';
@@ -516,6 +584,12 @@
     const trades = global.mexcTier2TradesForSymbol(symbol);
     if (!trades || trades.length < CFG.minBaselineSamples) return;
     const depthSnaps = global.mexcTier2DepthForSymbol(symbol) || [];
+    const lastTrade = trades[trades.length - 1];
+    const quality = dataQualityFor(lastTrade ? lastTrade.t : null, now);
+    const dbg = getSymbolState(symbol).debug;
+    dbg.dataQuality = quality;
+    dbg.normalized = { lastTrade: normalizeTrade(symbol, lastTrade), lastDepth: normalizeOrderBookUpdate(symbol, depthSnaps[depthSnaps.length - 1]) };
+    if (quality === 'DATA_STALE') return; // раздел 31 ТЗ — не запускаем детекторы на мёртвых данных
     try {
       runErshik(symbol, trades, now);
       runLadder(symbol, depthSnaps, trades, now);
@@ -614,7 +688,11 @@
         runImpulse(symbol, trades, depthSnaps || [], now);
       } catch (e) { /* тест сам увидит по результату */ }
       return [k1, k2, k3, k4, k5, k6, k7].map(function (k) { return events.get(k) || null; });
-    }
+    },
+    // Тестовый доступ к сырому per-symbol state (не только к debug-срезу, который снимается ДО
+    // перехода состояния конкретного тика) — нужен для проверки промежуточных шагов wall-tracking
+    // state machine (Лестница/Переставляш) между отдельными __replay()-вызовами.
+    __peekState: function (symbol) { return symbolStates.get(symbol) || null; }
   };
   // Фоновые таймеры (основной цикл по живому рынку + decay-проверка) — только в браузере. Под
   // Node (require() из tests/) их не должно быть: там движок дёргают исключительно через
