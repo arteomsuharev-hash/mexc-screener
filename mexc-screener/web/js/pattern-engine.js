@@ -138,9 +138,14 @@
 
   // ==========================================================================
   // 2. BLACKLIST — п.27 ТЗ. 24 HOURS / PERMANENT, персистентно.
+  //    ИСПРАВЛЕНО (audit fix): раньше PERMANENT хранился как Infinity, а JSON.stringify(Infinity)
+  //    сериализуется в null — после перезапуска приложения map[symbol] восстанавливался как null,
+  //    и isBlacklisted() трактовал null как "не в блэклисте", т.е. PERMANENT-запись сама себя тихо
+  //    снимала после reload. Строковый sentinel переживает JSON round-trip без потерь.
   // ==========================================================================
+  const PERMANENT_SENTINEL = 'PERMANENT';
   const Blacklist = (function () {
-    let map = {}; // symbol -> expiresAt (Infinity для PERMANENT)
+    let map = {}; // symbol -> expiresAt (ms, число) | PERMANENT_SENTINEL
     try {
       const raw = localStorage.getItem(CFG.blacklistStorageKey);
       if (raw) map = JSON.parse(raw);
@@ -149,11 +154,11 @@
     function isBlacklisted(symbol) {
       const exp = map[symbol];
       if (exp == null) return false;
-      if (exp !== Infinity && Date.now() > exp) { delete map[symbol]; persist(); return false; }
+      if (exp !== PERMANENT_SENTINEL && Date.now() > exp) { delete map[symbol]; persist(); return false; }
       return true;
     }
     function add(symbol, mode) {
-      map[symbol] = mode === 'PERMANENT' ? Infinity : (Date.now() + 24 * 3600000);
+      map[symbol] = mode === 'PERMANENT' ? PERMANENT_SENTINEL : (Date.now() + 24 * 3600000);
       persist();
     }
     function remove(symbol) { delete map[symbol]; persist(); }
@@ -199,11 +204,15 @@
 
   // upsertEvent — вызывается детектором на каждый "положительный тик". status/metrics/confidence
   // передаются свежими; сама функция решает ACTIVE/WEAKENING/ENDED переходы и что писать в timeline.
-  function upsertEvent(symbol, pattern, metrics, confidence, direction) {
+  // quality (audit fix, раздел 31 ТЗ): при 'DATA_DEGRADED' НЕ создаём новое событие (return null) —
+  // но если событие для этого (symbol,pattern) УЖЕ существует и активно, апдейт ниже НЕ блокируется,
+  // чтобы не ломать lifecycle уже идущего паттерна из-за временно деградировавших данных.
+  function upsertEvent(symbol, pattern, metrics, confidence, direction, quality) {
     const now = Date.now();
     const k = keyOf(symbol, pattern);
     let ev = events.get(k);
     if (!ev || ev.status === 'ENDED') {
+      if (quality === 'DATA_DEGRADED') return null;
       ev = {
         id: 'pe' + (++eventSeq), symbol: symbol, exchange: global.mexcExchangeOfSymbol ? global.mexcExchangeOfSymbol(symbol) : 'MEXC',
         pattern: pattern, direction: direction || null, status: 'ACTIVE',
@@ -350,7 +359,7 @@
   //    WATCHING -> CONFIRMING (тики копятся) -> CONFIRMED/ACTIVE (событие создано) -> decay в
   //    sweepEventLifecycle. Один положительный тик НИКОГДА сам по себе не создаёт событие (п.9 ТЗ).
   // ==========================================================================
-  function runErshik(symbol, trades, now) {
+  function runErshik(symbol, trades, now, quality) {
     const st = getSymbolState(symbol).ershik;
     const hit = coreDetectErshik(trades, {
       lookback: CFG.ershik.lookback, minRepeats: CFG.ershik.minRunLength,
@@ -372,7 +381,7 @@
     upsertEvent(symbol, 'ERSHIK', {
       cycles: st.cycles, repeatCount: hit.repeatCount, structureSignals: hit.structureSignals,
       volumeUsd: hit.volumeUsd, durationS: Math.round((now - st.firstTickAt) / 1000)
-    }, confidence, hit.direction);
+    }, confidence, hit.direction, quality);
   }
 
   // ==========================================================================
@@ -380,7 +389,7 @@
   //    не $5k) + Core.detectAbsorption как подтверждение "стену СЪЕЛИ" (не отменили — см. п.10 ТЗ,
   //    отличие от ПЕРЕСТАВЛЯША ниже).
   // ==========================================================================
-  function runLadder(symbol, depthSnaps, trades, now) {
+  function runLadder(symbol, depthSnaps, trades, now, quality) {
     const st = getSymbolState(symbol).ladder;
     if (!depthSnaps || depthSnaps.length < 6) return;
     const cur = depthSnaps[depthSnaps.length - 1];
@@ -416,7 +425,7 @@
       const confidence = clamp(55 + st.repeats * 8, 0, 96);
       upsertEvent(symbol, 'LADDER', {
         repeats: st.repeats, side: st.side, wallSizeUsd: Math.round(w.q * w.p), lastStepPct: Math.round(displacementPct * 100) / 100
-      }, confidence, st.side === 'bid' ? 'LONG' : 'SHORT');
+      }, confidence, st.side === 'bid' ? 'LONG' : 'SHORT', quality);
     }
   }
 
@@ -426,7 +435,7 @@
   //    (не далеко, в отличие от Лестницы). Явно НЕ утверждаем "один и тот же ордер/участник" —
   //    только "repositioning pattern" по совпадению цена/размер/время (п.11 ТЗ, честная оговорка).
   // ==========================================================================
-  function runReposition(symbol, depthSnaps, trades, now) {
+  function runReposition(symbol, depthSnaps, trades, now, quality) {
     const st = getSymbolState(symbol).reposition;
     if (!depthSnaps || depthSnaps.length < 6) return;
     const cur = depthSnaps[depthSnaps.length - 1];
@@ -460,7 +469,7 @@
       const confidence = clamp(50 + st.moves * 10, 0, 92);
       upsertEvent(symbol, 'REPOSITION', {
         moves: st.moves, side: st.side, wallSizeUsd: Math.round(w.q * w.p), lastDistancePct: Math.round(distPct * 100) / 100
-      }, confidence, st.side === 'bid' ? 'LONG' : 'SHORT');
+      }, confidence, st.side === 'bid' ? 'LONG' : 'SHORT', quality);
     }
   }
 
@@ -469,7 +478,7 @@
   //    НЕ "buyVolume > sellVolume" (запрещено п.12) — требуется repeated структура: устойчивая
   //    доля сделок в одну сторону + похожий (не идентичный) размер + похожая частота.
   // ==========================================================================
-  function runAggroDetector(symbol, trades, now, side, pattern) {
+  function runAggroDetector(symbol, trades, now, side, pattern, quality) {
     const debugKey = pattern === 'BUYER' ? 'buyer' : 'seller';
     const st = getSymbolState(symbol)[debugKey];
     const recent = trades.slice(-CFG.aggro.lookback);
@@ -503,7 +512,7 @@
       repeats: sideTrades.length, dominancePct: Math.round(dominance * 100),
       medianSizeUsd: Math.round(median(sizes)), sizeDeviationPct: Math.round(sizeCvV * 100),
       medianIntervalMs: Math.round(median(intervals) || 0)
-    }, confidence, side === 'buy' ? 'LONG' : 'SHORT');
+    }, confidence, side === 'buy' ? 'LONG' : 'SHORT', quality);
   }
 
   // ==========================================================================
@@ -511,7 +520,7 @@
   //     классификация ТОЛЬКО после того, как появилась информация о последующем движении —
   //     обязательная задержка, не мгновенное решение).
   // ==========================================================================
-  function runImpulse(symbol, trades, depthSnaps, now) {
+  function runImpulse(symbol, trades, depthSnaps, now, quality) {
     const st = getSymbolState(symbol);
     const f = coreComputeFeatures(trades, depthSnaps, now);
     getSymbolState(symbol).debug.impulse = { f: f, state: st.impulse };
@@ -534,6 +543,10 @@
       const isProkid = retracedPct >= CFG.impulse.returnThresholdPct && backInRange;
       const pattern = isProkid ? 'PROKID' : 'PROSTREL';
       const confidence = clamp(isProkid ? 55 + retracedPct * 0.4 : 55 + clamp((100 - retracedPct), 0, 40), 0, 95);
+      // audit fix (раздел 31 ТЗ): ПРОКИД/ПРОСТРЕЛ всегда создаёт НОВОЕ событие (не апдейт), поэтому
+      // при DATA_DEGRADED публикацию просто откладываем — impulse остаётся в CONFIRMING (st.impulse
+      // не трогаем), переклассификация повторится на следующем тике, когда качество данных восстановится.
+      if (quality === 'DATA_DEGRADED') return;
       const k = keyOf(symbol, pattern);
       const ev = {
         id: 'pe' + (++eventSeq), symbol: symbol, exchange: global.mexcExchangeOfSymbol ? global.mexcExchangeOfSymbol(symbol) : 'MEXC',
@@ -591,12 +604,12 @@
     dbg.normalized = { lastTrade: normalizeTrade(symbol, lastTrade), lastDepth: normalizeOrderBookUpdate(symbol, depthSnaps[depthSnaps.length - 1]) };
     if (quality === 'DATA_STALE') return; // раздел 31 ТЗ — не запускаем детекторы на мёртвых данных
     try {
-      runErshik(symbol, trades, now);
-      runLadder(symbol, depthSnaps, trades, now);
-      runReposition(symbol, depthSnaps, trades, now);
-      runAggroDetector(symbol, trades, now, 'buy', 'BUYER');
-      runAggroDetector(symbol, trades, now, 'sell', 'SELLER');
-      runImpulse(symbol, trades, depthSnaps, now);
+      runErshik(symbol, trades, now, quality);
+      runLadder(symbol, depthSnaps, trades, now, quality);
+      runReposition(symbol, depthSnaps, trades, now, quality);
+      runAggroDetector(symbol, trades, now, 'buy', 'BUYER', quality);
+      runAggroDetector(symbol, trades, now, 'sell', 'SELLER', quality);
+      runImpulse(symbol, trades, depthSnaps, now, quality);
     } catch (e) {
       if (global.logE) global.logE('PatternEngine', symbol + ': детектор упал — ' + e.message);
     }
@@ -670,7 +683,11 @@
     // reset=true — чистый лист перед прогоном (для независимых сценариев на одном имени символа);
     // reset=false (по умолчанию) — состояние копится между вызовами, как в реальном recompute()-
     // цикле, что и нужно для проверки самого state machine (несколько тиков подряд -> CONFIRMED).
-    __replay: function (symbol, trades, depthSnaps, now, reset) {
+    // quality (audit fix) — опционально 'DATA_OK'|'DATA_DEGRADED'|'DATA_STALE', тот же контракт, что
+    // и в processOneSymbol: STALE вообще не вызывает детекторы, DEGRADED протаскивается в upsertEvent
+    // (не создаёт НОВЫХ событий, апдейт существующих не блокирует). По умолчанию (undefined) ведёт
+    // себя как раньше — не влияет на существующие тесты.
+    __replay: function (symbol, trades, depthSnaps, now, reset, quality) {
       if (reset) {
         symbolStates.delete(symbol);
         const rk1 = keyOf(symbol, 'ERSHIK'), rk2 = keyOf(symbol, 'LADDER'), rk3 = keyOf(symbol, 'REPOSITION');
@@ -679,20 +696,26 @@
       }
       const k1 = keyOf(symbol, 'ERSHIK'), k2 = keyOf(symbol, 'LADDER'), k3 = keyOf(symbol, 'REPOSITION');
       const k4 = keyOf(symbol, 'BUYER'), k5 = keyOf(symbol, 'SELLER'), k6 = keyOf(symbol, 'PROKID'), k7 = keyOf(symbol, 'PROSTREL');
-      try {
-        runErshik(symbol, trades, now);
-        runLadder(symbol, depthSnaps || [], trades, now);
-        runReposition(symbol, depthSnaps || [], trades, now);
-        runAggroDetector(symbol, trades, now, 'buy', 'BUYER');
-        runAggroDetector(symbol, trades, now, 'sell', 'SELLER');
-        runImpulse(symbol, trades, depthSnaps || [], now);
-      } catch (e) { /* тест сам увидит по результату */ }
+      if (quality !== 'DATA_STALE') {
+        try {
+          runErshik(symbol, trades, now, quality);
+          runLadder(symbol, depthSnaps || [], trades, now, quality);
+          runReposition(symbol, depthSnaps || [], trades, now, quality);
+          runAggroDetector(symbol, trades, now, 'buy', 'BUYER', quality);
+          runAggroDetector(symbol, trades, now, 'sell', 'SELLER', quality);
+          runImpulse(symbol, trades, depthSnaps || [], now, quality);
+        } catch (e) { /* тест сам увидит по результату */ }
+      }
       return [k1, k2, k3, k4, k5, k6, k7].map(function (k) { return events.get(k) || null; });
     },
     // Тестовый доступ к сырому per-symbol state (не только к debug-срезу, который снимается ДО
     // перехода состояния конкретного тика) — нужен для проверки промежуточных шагов wall-tracking
     // state machine (Лестница/Переставляш) между отдельными __replay()-вызовами.
-    __peekState: function (symbol) { return symbolStates.get(symbol) || null; }
+    __peekState: function (symbol) { return symbolStates.get(symbol) || null; },
+    // Тестовый доступ к sweepEventLifecycle (в браузере вызывается своим setInterval, см. низ файла;
+    // под Node тот таймер не заводится) — нужен для проверки ACTIVE->WEAKENING->ENDED через
+    // подмену Date.now() в тесте, без реального ожидания decayMs/endMs.
+    __sweepLifecycle: function () { sweepEventLifecycle(); }
   };
   // Фоновые таймеры (основной цикл по живому рынку + decay-проверка) — только в браузере. Под
   // Node (require() из tests/) их не должно быть: там движок дёргают исключительно через

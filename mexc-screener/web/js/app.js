@@ -4060,6 +4060,15 @@ const TIER2_TRADES_CAP = 2000;
 const TIER2_DEPTH_CAP = 600;
 const TIER2_DEPTH_THROTTLE_MS = 500;
 const WATCHLIST_RECONNECT_DELAY_MS = 3000;
+// audit fix: раньше был флэт 3000мс на КАЖДУЮ попытку реконнекта. Теперь bounded exponential
+// backoff (3с, 6с, 12с, 24с, 48с, дальше упирается в потолок 60с) — меньше давления на MEXC при
+// серии реальных сбоев, тот же WATCHLIST_MAX_RECONNECT_FAILS/cooldown после них не тронут.
+const WATCHLIST_RECONNECT_MAX_DELAY_MS = 60000;
+// audit fix: у per-symbol сокетов сделок/стакана (в отличие от основного тикер-сокета, connectWs)
+// не было собственного клиентского keepalive. Тот же метод {method:'PING'}/PONG, что уже проверен
+// на основном сокете (тот же эндпоинт MEXC_WS, тот же протокол — отличается только подписанный
+// канал), просто применён к этим двум типам сокетов.
+const WATCHLIST_WS_PING_INTERVAL_MS = 15000;
 // Живой эксперимент против настоящего MEXC (2026-09) показал: канал СДЕЛОК (spot@public.deals)
 // заметно строже защищён от частых/массовых подписок, чем канал стакана — быстрая серия
 // подписок/отписок на разные символы (ровно то, что делает цикл гистерезиса ниже при первом
@@ -4128,9 +4137,15 @@ function openWatchlistDealsWs(symbol, raw, entry) {
     sock.binaryType = 'arraybuffer';
   } catch (e) { watchlistHandleConnFail(symbol, 'сделки (не удалось создать сокет)'); return; }
   entry.dealsWs = sock;
+  let pingTimer = null;
   sock.onopen = function () {
     entry.dealsFailStreak = 0;
     sock.send(JSON.stringify({ method: 'SUBSCRIPTION', params: ['spot@public.deals.v3.api.pb@' + raw] }));
+    // audit fix: клиентский keepalive — тот же {method:'PING'}, что уже проверен на основном
+    // тикер-сокете (connectWs, тот же MEXC_WS/протокол, другой только подписанный канал).
+    pingTimer = setInterval(function () {
+      if (sock && sock.readyState === WebSocket.OPEN) { try { sock.send(JSON.stringify({ method: 'PING' })); } catch (e) {} }
+    }, WATCHLIST_WS_PING_INTERVAL_MS);
   };
   sock.onmessage = function (ev) {
     if (typeof ev.data === 'string') {
@@ -4140,6 +4155,7 @@ function openWatchlistDealsWs(symbol, raw, entry) {
       // дальше (обычный реконнект или сразу cooldown) — onclose ниже, чтобы не задваивать логику.
       try {
         const msg = JSON.parse(ev.data);
+        if (msg.msg === 'PONG' || msg.method === 'PONG') return; // ответ на наш keepalive-PING, не ошибка
         if (msg.code !== undefined && msg.code !== 0) {
           logW('Watchlist', symbol + ': сделки — MEXC отклонил подписку (' + (msg.msg || msg.code) + ')');
           if (WATCHLIST_BLOCKED_RE.test(msg.msg || '')) entry.dealsBlocked = true;
@@ -4157,6 +4173,7 @@ function openWatchlistDealsWs(symbol, raw, entry) {
   };
   sock.onerror = function () {};
   sock.onclose = function () {
+    if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
     if (entry.dealsWs !== sock) return; // сокет уже заменён/символ отписан — не реагируем на устаревшее событие
     entry.dealsWs = null;
     if (!watchlist.has(symbol)) return;
@@ -4165,7 +4182,9 @@ function openWatchlistDealsWs(symbol, raw, entry) {
     if (entry.dealsFailStreak >= WATCHLIST_MAX_RECONNECT_FAILS) {
       watchlistHandleConnFail(symbol, 'сделки');
     } else {
-      setTimeout(function () { if (watchlist.has(symbol)) openWatchlistDealsWs(symbol, raw, entry); }, WATCHLIST_RECONNECT_DELAY_MS);
+      // audit fix: bounded exponential backoff вместо флэт-задержки — см. WATCHLIST_RECONNECT_MAX_DELAY_MS.
+      const delay = Math.min(WATCHLIST_RECONNECT_DELAY_MS * Math.pow(2, entry.dealsFailStreak - 1), WATCHLIST_RECONNECT_MAX_DELAY_MS);
+      setTimeout(function () { if (watchlist.has(symbol)) openWatchlistDealsWs(symbol, raw, entry); }, delay);
     }
   };
 }
@@ -4178,14 +4197,20 @@ function openWatchlistDepthWs(symbol, raw, entry) {
     sock.binaryType = 'arraybuffer';
   } catch (e) { watchlistHandleConnFail(symbol, 'стакан (не удалось создать сокет)'); return; }
   entry.depthWs = sock;
+  let pingTimer = null;
   sock.onopen = function () {
     entry.depthFailStreak = 0;
     sock.send(JSON.stringify({ method: 'SUBSCRIPTION', params: ['spot@public.limit.depth.v3.api.pb@' + raw + '@' + WATCHLIST_DEPTH_LEVELS] }));
+    // audit fix: см. тот же keepalive у openWatchlistDealsWs выше.
+    pingTimer = setInterval(function () {
+      if (sock && sock.readyState === WebSocket.OPEN) { try { sock.send(JSON.stringify({ method: 'PING' })); } catch (e) {} }
+    }, WATCHLIST_WS_PING_INTERVAL_MS);
   };
   sock.onmessage = function (ev) {
     if (typeof ev.data === 'string') {
       try {
         const msg = JSON.parse(ev.data);
+        if (msg.msg === 'PONG' || msg.method === 'PONG') return;
         if (msg.code !== undefined && msg.code !== 0) {
           logW('Watchlist', symbol + ': стакан — MEXC отклонил подписку (' + (msg.msg || msg.code) + ')');
           if (WATCHLIST_BLOCKED_RE.test(msg.msg || '')) entry.depthBlocked = true;
@@ -4213,6 +4238,7 @@ function openWatchlistDepthWs(symbol, raw, entry) {
   };
   sock.onerror = function () {};
   sock.onclose = function () {
+    if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
     if (entry.depthWs !== sock) return;
     entry.depthWs = null;
     if (!watchlist.has(symbol)) return;
@@ -4221,7 +4247,8 @@ function openWatchlistDepthWs(symbol, raw, entry) {
     if (entry.depthFailStreak >= WATCHLIST_MAX_RECONNECT_FAILS) {
       watchlistHandleConnFail(symbol, 'стакан');
     } else {
-      setTimeout(function () { if (watchlist.has(symbol)) openWatchlistDepthWs(symbol, raw, entry); }, WATCHLIST_RECONNECT_DELAY_MS);
+      const delay = Math.min(WATCHLIST_RECONNECT_DELAY_MS * Math.pow(2, entry.depthFailStreak - 1), WATCHLIST_RECONNECT_MAX_DELAY_MS);
+      setTimeout(function () { if (watchlist.has(symbol)) openWatchlistDepthWs(symbol, raw, entry); }, delay);
     }
   };
 }
