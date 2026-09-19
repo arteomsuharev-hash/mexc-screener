@@ -193,5 +193,43 @@ function buildBuyerTrades(tStart) {
   assert(f2.volatility_percentile !== null && f2.volatility_percentile !== undefined, 'adaptive-поведение сохранено: перцентиль волатильности реально считается при достаточной плотности недавних сделок внутри bounded-окна, получено ' + f2.volatility_percentile);
 })();
 
+// ============================================================================
+// 6. MEMORY LEAK FIX — symbolStates/forensicTrails никогда не чистились по символу (найдено после
+// реального Out of Memory краша у пользователя на живом рынке с 6 биржами). sweepEventLifecycle
+// теперь удаляет записи символов, которых больше нет в mexcTier2ActiveSymbols() И у которых нет
+// текущего события — но НЕ трогает символ с активным событием (иначе потеряли бы live-данные
+// TICKS & ALERTS). Под Node (без global.mexcTier2ActiveSymbols) эта чистка вообще не запускается —
+// проверяем именно РЕАЛЬНЫЙ browser-like контракт через мок.
+// ============================================================================
+(function testStaleSymbolStatesAreCleanedUp() {
+  // TEST/LEAK_STALE: всего 2 агрессивные покупки подряд (меньше CFG.aggro.minRepeats=5, см.
+  // testTwoOrThreeRandomBuysDoNotTriggerBuyer в verify_pattern_engine.js) -- НЕ подтверждает событие,
+  // но __replay() всё равно обращается к symbolStates.get(symbol) и создаёт там запись.
+  let t1 = 1000000;
+  const staleTrades = [];
+  for (let i = 0; i < 20; i++) { staleTrades.push(trade(t1, 10, 1, i % 2 === 0 ? 'buy' : 'sell')); t1 += 4000; }
+  staleTrades.push(trade(t1, 10, 20, 'buy')); t1 += 3000;
+  staleTrades.push(trade(t1, 10.01, 18, 'buy')); t1 += 3000;
+  const res1 = PatternEngine.__replay('TEST/LEAK_STALE', staleTrades, [], t1, true);
+  assert(res1[3] === null, 'предпосылка: TEST/LEAK_STALE НЕ подтвердил событие (слабая структура, меньше minRepeats)');
+
+  const b2 = buildBuyerTrades(2000000);
+  const res2 = PatternEngine.__replay('TEST/LEAK_ACTIVE', b2.trades, [], b2.endT, true); // подтвердится -> есть текущее событие
+  assert(res2[3] !== null, 'предпосылка: TEST/LEAK_ACTIVE реально подтвердил событие');
+  assert(PatternEngine.__peekState('TEST/LEAK_STALE') !== null, 'предпосылка: symbolStates реально содержит запись ДО чистки (TEST/LEAK_STALE)');
+  assert(PatternEngine.__peekState('TEST/LEAK_ACTIVE') !== null, 'предпосылка: symbolStates реально содержит запись ДО чистки (TEST/LEAK_ACTIVE)');
+
+  // Мок mexcTier2ActiveSymbols() -- ни один из двух символов больше не в активном наборе (оба
+  // "эвиктнуты" из watchlist), ровно как после исправленного unsubscribe*WatchlistSymbol в app.js.
+  global.mexcTier2ActiveSymbols = function () { return []; };
+  try {
+    PatternEngine.__sweepLifecycle();
+    assert(PatternEngine.__peekState('TEST/LEAK_STALE') === null, 'symbolStates ОЧИЩЕН для символа без активного набора и без текущего события (утечка исправлена)');
+    assert(PatternEngine.__peekState('TEST/LEAK_ACTIVE') !== null, 'symbolStates СОХРАНЁН для символа с текущим активным событием (live-данные TICKS & ALERTS не потеряны)');
+  } finally {
+    delete global.mexcTier2ActiveSymbols;
+  }
+})();
+
 console.log('\n' + (failures === 0 ? 'All assertions PASSED' : failures + ' assertion(s) FAILED'));
 process.exit(failures === 0 ? 0 : 1);

@@ -4317,6 +4317,13 @@ function unsubscribeWatchlistSymbol(symbol) {
   crossExchangeDivergenceState.delete(symbol);
   cyclicalTimeWindowState.delete(symbol);
   twapState.delete(symbol);
+  // memory-leak fix (2026-09): tier2Trades/tier2Depth (до 2000 сделок + 600 снимков стакана НА
+  // СИМВОЛ) никогда не чистились при вылистовании — единственные ДЕЙСТВИТЕЛЬНО тяжёлые структуры
+  // среди всех per-symbol Map здесь, в отличие от остальных выше. При активной ротации watchlist
+  // (особенно после расширения на 5 внешних бирж) это накапливалось часами без освобождения и
+  // приводило к Out of Memory. Символ всё равно больше не получает новых данных после close() выше.
+  tier2Trades.delete(symbol);
+  tier2Depth.delete(symbol);
   logI('Watchlist', symbol + ' исключена из глубокого анализа');
 }
 
@@ -4519,6 +4526,8 @@ function unsubscribeBinanceWatchlistSymbol(symbol) {
   binancePossibleHiddenAbsorptionState.delete(symbol);
   binanceCrossExchangeDivergenceState.delete(symbol);
   binanceTwapState.delete(symbol);
+  binanceTier2Trades.delete(symbol); // memory-leak fix (2026-09) — см. unsubscribeWatchlistSymbol
+  binanceTier2Depth.delete(symbol);
   logI('Watchlist', 'Binance ' + symbol + ' исключена из глубокого анализа');
 }
 
@@ -4742,6 +4751,8 @@ function unsubscribeOkxWatchlistSymbol(symbol) {
   okxPossibleHiddenAbsorptionState.delete(symbol);
   okxCrossExchangeDivergenceState.delete(symbol);
   okxTwapState.delete(symbol);
+  okxTier2Trades.delete(symbol); // memory-leak fix (2026-09) — см. unsubscribeWatchlistSymbol
+  okxTier2Depth.delete(symbol);
   logI('Watchlist', 'OKX ' + symbol + ' исключена из глубокого анализа');
   if (!okxWatchlist.size && okxWs) { try { okxWs.close(); } catch (e) {} } // никого не слушаем — держать канал открытым незачем
 }
@@ -4945,6 +4956,8 @@ function unsubscribeBitgetWatchlistSymbol(symbol) {
   bitgetPossibleHiddenAbsorptionState.delete(symbol);
   bitgetCrossExchangeDivergenceState.delete(symbol);
   bitgetTwapState.delete(symbol);
+  bitgetTier2Trades.delete(symbol); // memory-leak fix (2026-09) — см. unsubscribeWatchlistSymbol
+  bitgetTier2Depth.delete(symbol);
   logI('Watchlist', 'Bitget ' + symbol + ' исключена из глубокого анализа');
   if (!bitgetWatchlist.size && bitgetWs) { try { bitgetWs.close(); } catch (e) {} }
 }
@@ -5162,6 +5175,8 @@ function unsubscribeBingxWatchlistSymbol(symbol) {
   bingxPossibleHiddenAbsorptionState.delete(symbol);
   bingxCrossExchangeDivergenceState.delete(symbol);
   bingxTwapState.delete(symbol);
+  bingxTier2Trades.delete(symbol); // memory-leak fix (2026-09) — см. unsubscribeWatchlistSymbol
+  bingxTier2Depth.delete(symbol);
   logI('Watchlist', 'BingX ' + symbol + ' исключена из глубокого анализа');
   if (!bingxWatchlist.size && bingxWs) { try { bingxWs.close(); } catch (e) {} }
 }
@@ -5399,6 +5414,8 @@ function unsubscribeKucoinWatchlistSymbol(symbol) {
   kucoinPossibleHiddenAbsorptionState.delete(symbol);
   kucoinCrossExchangeDivergenceState.delete(symbol);
   kucoinTwapState.delete(symbol);
+  kucoinTier2Trades.delete(symbol); // memory-leak fix (2026-09) — см. unsubscribeWatchlistSymbol
+  kucoinTier2Depth.delete(symbol);
   logI('Watchlist', 'KuCoin ' + symbol + ' исключена из глубокого анализа');
   if (!kucoinWatchlist.size && kucoinWs) { try { kucoinWs.close(); } catch (e) {} }
 }
@@ -5599,6 +5616,8 @@ function unsubscribeGateioWatchlistSymbol(symbol) {
   gateioPossibleHiddenAbsorptionState.delete(symbol);
   gateioCrossExchangeDivergenceState.delete(symbol);
   gateioTwapState.delete(symbol);
+  gateioTier2Trades.delete(symbol); // memory-leak fix (2026-09) — см. unsubscribeWatchlistSymbol
+  gateioTier2Depth.delete(symbol);
   logI('Watchlist', 'Gate.io ' + symbol + ' исключена из глубокого анализа');
   if (!gateioWatchlist.size && gateioWs) { try { gateioWs.close(); } catch (e) {} }
 }
@@ -5799,6 +5818,8 @@ function unsubscribeAsterWatchlistSymbol(symbol) {
   asterPossibleHiddenAbsorptionState.delete(symbol);
   asterCrossExchangeDivergenceState.delete(symbol);
   asterTwapState.delete(symbol);
+  asterTier2Trades.delete(symbol); // memory-leak fix (2026-09) — см. unsubscribeWatchlistSymbol
+  asterTier2Depth.delete(symbol);
   logI('Watchlist', 'Aster ' + symbol + ' исключена из глубокого анализа');
   if (!asterWatchlist.size && asterWs) { try { asterWs.close(); } catch (e) {} }
 }
@@ -5994,6 +6015,8 @@ function unsubscribeAsterFutWatchlistSymbol(symbol) {
   asterFutPossibleHiddenAbsorptionState.delete(symbol);
   asterFutCrossExchangeDivergenceState.delete(symbol);
   asterFutTwapState.delete(symbol);
+  asterFutTier2Trades.delete(symbol); // memory-leak fix (2026-09) — см. unsubscribeWatchlistSymbol
+  asterFutTier2Depth.delete(symbol);
   logI('Watchlist', 'AsterFut ' + symbol + ' исключена из глубокого анализа');
   if (!asterFutWatchlist.size && asterFutWs) { try { asterFutWs.close(); } catch (e) {} }
 }

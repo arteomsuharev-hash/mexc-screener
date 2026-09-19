@@ -283,6 +283,23 @@
     events.forEach(function (ev, k) {
       if (ev.status === 'ENDED' && now - ev.lastUpdateAt > CFG.eventHistoryKeepMs) events.delete(k);
     });
+    // memory-leak fix (2026-09): symbolStates/forensicTrails никогда не чистились по символу —
+    // при активной ротации watchlist (особенно после расширения на 5 внешних бирж) это росло
+    // неограниченно всё время работы приложения и вносило вклад в Out of Memory. Чистим записи
+    // символов, которых больше нет в активном наборе (mexcTier2ActiveSymbols — тот же набор, что
+    // читает processOneSymbol) И у которых нет ни одного текущего события — чтобы не потерять
+    // debug/forensic данные для символа, который прямо сейчас что-то показывает в TICKS & ALERTS.
+    if (global.mexcTier2ActiveSymbols) {
+      const activeSet = new Set(global.mexcTier2ActiveSymbols());
+      const hasEvent = new Set();
+      events.forEach(function (ev) { hasEvent.add(ev.symbol); });
+      symbolStates.forEach(function (_v, symbol) {
+        if (!activeSet.has(symbol) && !hasEvent.has(symbol)) {
+          symbolStates.delete(symbol);
+          forensicTrails.delete(symbol);
+        }
+      });
+    }
   }
 
   const LABELS = {
