@@ -17371,6 +17371,22 @@ if (!ProtoWrapper) {
 } else {
   connectWs();
 }
+// PUBLIC MARKET DATA / PRIVATE TRADING API — архитектурное разделение (2026-09). Раньше публичные
+// тикеры KuCoin/Bitget/BingX/Gate.io/Aster (и их полностью готовый Tier-2 watchlist: свои WS,
+// reconnect, heartbeat, deals+depth — см. evaluate*Watchlist() ниже, уже безусловно запущены через
+// setInterval) физически никогда не наполнялись данными, потому что ЕДИНСТВЕННОЕ место, откуда
+// запускался их REST-тикер-бутстрап (startExternalTickerPolling), было внутри connectExchange() —
+// ПОСЛЕ успешной приватной аутентификации пользовательского торгового аккаунта. Сам тикер-эндпоинт
+// (EXCHANGE_CONNECTORS[id].feeds[].url) при этом честно публичный, без ключа/подписи (см. fetchPublicText,
+// pollExternalTickers выше) — требование API-ключа было чисто последовательностью вызовов, не
+// технической необходимостью. Live-audit подтвердил: как только allCoins получает тег этой биржи,
+// её watchlist/Tier-2 слой сам подхватывает данные — единственное недостающее звено было здесь.
+// MEXC market-wide detection и так не требует аккаунта (connectWs() выше) — это просто расширяет
+// тот же принцип на остальные 5 целевых бирж Pattern Engine. connectExchange() и его собственный
+// вызов startExternalTickerPolling (app.js:15305) НЕ тронуты — для уже подключённого пользователя
+// это просто безвредно перезапустит тот же таймер (см. stopExternalTickerPollingTimer в начале
+// startExternalTickerPolling), приватная авторизация/баланс/ордера остаются отдельным слоем.
+['kucoin', 'bitget', 'bingx', 'gateio', 'aster'].forEach(function (id) { startExternalTickerPolling(id); });
 updateClock();
 restartAnalyticsInterval();
 
