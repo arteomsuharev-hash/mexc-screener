@@ -1100,9 +1100,11 @@ async function openSymbolInSelectedTerminal(symbol, wantCombo) {
   const tbody = document.getElementById('tableBody');
   const grid = document.getElementById('gridView');
   const widgetF3List = document.getElementById('widgetFilter3List');
+  const widgetTicksList = document.getElementById('widgetTicksList');
   if (tbody) tbody.addEventListener('click', onClick);
   if (grid) grid.addEventListener('click', onClick);
   if (widgetF3List) widgetF3List.addEventListener('click', onClick);
+  if (widgetTicksList) widgetTicksList.addEventListener('click', onClick);
 })();
 
 // ------------------------------------------------------------------
@@ -15958,14 +15960,108 @@ function widgetPillRowHtml(symbol, subText, subClass, rowClass, rowAttrs) {
   '</div>';
 }
 
-// Filter 1 и Filter 2 УБРАНЫ из виджета целиком (прямой запрос пользователя, 2026-09 — раньше тут
-// были renderWidgetSignals()/renderWidgetFilter2Signals(), рендерившие patternHistory и
-// WidgetFilter2.getDisplayedSignals() соответственно). Остался только Filter 3 (свои пороги, ниже).
-// Сами движки НЕ удалены: Filter 1 (runPatternDetectors/patternHistory) по-прежнему работает и
-// питает страницу "Паттерны", Историю алертов и общий Auto Open — это отдельная, общая функция
-// приложения, не "скрипт в виджете". Filter 2 (web/js/widget-filter2.js) остался в проекте
-// нетронутым, но раз getDisplayedSignals() больше никто не вызывает, её внутренний recompute()
-// просто не запускается — бюджет CPU на него не тратится.
+// Старые Filter 1/Filter 2 УБРАНЫ из виджета (2026-09). На их месте — TICKS & ALERTS, новый
+// realtime Pattern Detection Engine (web/js/pattern-engine.js), полная перестройка по ТЗ
+// пользователя: Ёршик/Лестница/Переставляш/Покупаш/Продаваш/Прокид/Прострел, state machine,
+// adaptive baseline, confirmation window, anti-noise, blacklist. НЕ обычный screener (никаких
+// BTC/SOL/ETH — Pattern Engine работает только по Tier2-монетам с объёмным полом/потолком и
+// исключением известных топ-капов, см. isEligible() в pattern-engine.js).
+// ============================================================================
+// TICKS & ALERTS UI
+// ============================================================================
+let widgetActiveTab = 'TICKS'; // 'TICKS' | 'F3'
+let widgetTicksPatternFilter = 'ALL';
+let widgetTicksExpandedId = null;
+let lastWidgetTicksSignature = null;
+
+function widgetTickCardHtml(ev) {
+  const statusCls = ev.status === 'ACTIVE' ? 'st-active' : ev.status === 'WEAKENING' ? 'st-weakening' : 'st-ended';
+  const symbolBare = ev.symbol.replace(/^[A-Z]+:/, '');
+  const m = ev.metrics || {};
+  const metaParts = [];
+  if (m.repeats != null) metaParts.push(t('повторов') + ': ' + m.repeats);
+  if (m.cycles != null) metaParts.push(t('циклов') + ': ' + m.cycles);
+  if (m.moves != null) metaParts.push(t('перестановок') + ': ' + m.moves);
+  if (m.wallSizeUsd != null) metaParts.push('$' + fmtNum(m.wallSizeUsd));
+  if (m.dominancePct != null) metaParts.push(m.dominancePct + '%');
+  if (m.impulsePct != null) metaParts.push((m.impulsePct >= 0 ? '+' : '') + m.impulsePct + '%');
+  if (m.durationS != null) metaParts.push(Math.floor(m.durationS / 60) + ':' + String(m.durationS % 60).padStart(2, '0'));
+  metaParts.push(ev.exchange);
+  const expanded = widgetTicksExpandedId === ev.id;
+  const timelineHtml = !expanded ? '' : ('<div class="widget-tick-timeline">' +
+    ev.timeline.slice().reverse().map(function (e) {
+      const tm = new Date(e.t).toTimeString().slice(0, 8);
+      return '<div class="widget-tick-timeline-row"><time>' + tm + '</time><span>' + e.message + '</span></div>';
+    }).join('') +
+  '</div>');
+  return '<div class="widget-tick-card" data-tick-id="' + ev.id + '" data-tick-symbol="' + ev.symbol.replace(/"/g, '&quot;') + '">' +
+    '<div class="widget-tick-card-top">' +
+      '<span class="widget-tick-status ' + statusCls + '"></span>' +
+      '<span class="widget-tick-symbol" data-terminal-open="' + ev.symbol.replace(/"/g, '&quot;') + '">' + symbolBare + '</span>' +
+      '<span class="widget-tick-pattern">' + (PatternEngine.labelFor(ev.pattern)) + '</span>' +
+      '<span class="widget-tick-conf">' + Math.round(ev.confidence) + '%</span>' +
+      '<i class="ri-forbid-line widget-tick-blacklist-btn" data-tick-blacklist="' + ev.symbol.replace(/"/g, '&quot;') + '" title="' + t('Убрать эту монету на 24ч') + '"></i>' +
+    '</div>' +
+    '<div class="widget-tick-meta">' + metaParts.map(function (p) { return '<span>' + p + '</span>'; }).join('') + '</div>' +
+    timelineHtml +
+  '</div>';
+}
+
+function renderWidgetTicksAlerts() {
+  if (!isWidgetMode || widgetSettingsOpen || widgetActiveTab !== 'TICKS' || typeof PatternEngine === 'undefined') return;
+  const listEl = document.getElementById('widgetTicksList');
+  const emptyEl = document.getElementById('widgetTicksEmpty');
+  if (!listEl || !emptyEl) return;
+  const filterPatterns = widgetTicksPatternFilter === 'ALL' ? null : [widgetTicksPatternFilter];
+  const events = PatternEngine.getActiveEvents(filterPatterns, 'ALL').slice(0, getWidgetMaxSignals());
+
+  // Та же логика "обновляем DOM только при реальном изменении", что и у остальных списков виджета
+  // (см. commit "виджет обновляется только при реальном обнаружении") — но здесь ЕЩЁ и confidence/
+  // статус меняются достаточно редко и осмысленно (не на каждый тик), поэтому включены в сигнатуру.
+  const signature = events.map(function (e) { return e.id + ':' + e.status + ':' + Math.round(e.confidence / 5); }).join(',') + '#' + (widgetTicksExpandedId || '');
+  if (signature === lastWidgetTicksSignature) return;
+  lastWidgetTicksSignature = signature;
+
+  if (!events.length) {
+    emptyEl.style.display = 'block';
+    listEl.innerHTML = '';
+    return;
+  }
+  emptyEl.style.display = 'none';
+  listEl.innerHTML = events.map(widgetTickCardHtml).join('');
+}
+
+(function wireWidgetTicksAlerts() {
+  const chipsEl = document.getElementById('widgetTicksChips');
+  const listEl = document.getElementById('widgetTicksList');
+  if (!chipsEl || !listEl) return;
+  chipsEl.addEventListener('click', function (e) {
+    const chip = e.target.closest('.widget-tick-chip');
+    if (!chip) return;
+    chipsEl.querySelectorAll('.widget-tick-chip').forEach(function (c) { c.classList.remove('active'); });
+    chip.classList.add('active');
+    widgetTicksPatternFilter = chip.dataset.pattern;
+    lastWidgetTicksSignature = null;
+    renderWidgetTicksAlerts();
+  });
+  listEl.addEventListener('click', function (e) {
+    if (e.target.closest('[data-terminal-open]')) return;
+    const blEl = e.target.closest('[data-tick-blacklist]');
+    if (blEl) {
+      e.stopPropagation();
+      PatternEngine.blacklist.add(blEl.dataset.tickBlacklist, '24H');
+      lastWidgetTicksSignature = null;
+      renderWidgetTicksAlerts();
+      return;
+    }
+    const card = e.target.closest('.widget-tick-card');
+    if (!card) return;
+    const id = card.dataset.tickId;
+    widgetTicksExpandedId = widgetTicksExpandedId === id ? null : id;
+    lastWidgetTicksSignature = null;
+    renderWidgetTicksAlerts();
+  });
+})();
 
 // ============================================================================
 // WIDGET FILTER 3 — не детектор, а ПРЯМЫЕ пороги, которые задаёт сам человек (в отличие от
@@ -15988,9 +16084,8 @@ function getF3VolaWindow() { try { const v = localStorage.getItem(F3_SETTINGS_KE
 
 let lastWidgetF3Signature = null;
 function renderWidgetFilter3Signals() {
-  // Filter 1/2 убраны из виджета (по запросу, 2026-09) — Filter 3 (свои пороги) теперь
-  // единственный список в этом окне, вкладок-переключателей больше нет.
-  if (!isWidgetMode || widgetSettingsOpen) return;
+  // Второй таб виджета (первый — TICKS & ALERTS, см. выше) — рисуем, только когда он активен.
+  if (!isWidgetMode || widgetSettingsOpen || widgetActiveTab !== 'F3') return;
   const listEl = document.getElementById('widgetFilter3List');
   const emptyEl = document.getElementById('widgetFilter3Empty');
   if (!listEl || !emptyEl) return;
@@ -16104,8 +16199,32 @@ function renderWidgetFilter3Signals() {
   volaWindow.addEventListener('change', function () { persistSet(F3_SETTINGS_KEYS.volaWindow, volaWindow.value); });
 })();
 
-// wireWidgetFilterTabs() убрана вместе с Filter 1/2 (2026-09) — вкладок-переключателей в виджете
-// больше нет, Filter 3 — единственный и всегда видимый список, ничего переключать не нужно.
+(function wireWidgetTabs() {
+  const tabTicks = document.getElementById('widgetTabTicks');
+  const tabF3 = document.getElementById('widgetTabF3');
+  const chipsEl = document.getElementById('widgetTicksChips');
+  const ticksListEl = document.getElementById('widgetTicksList');
+  const ticksEmptyEl = document.getElementById('widgetTicksEmpty');
+  const params3El = document.getElementById('widgetFilter3Params');
+  const list3El = document.getElementById('widgetFilter3List');
+  const empty3El = document.getElementById('widgetFilter3Empty');
+  if (!tabTicks || !tabF3) return;
+  function activate(tab) {
+    widgetActiveTab = tab;
+    tabTicks.classList.toggle('active', tab === 'TICKS');
+    tabF3.classList.toggle('active', tab === 'F3');
+    if (chipsEl) chipsEl.style.display = tab === 'TICKS' ? '' : 'none';
+    if (ticksListEl) ticksListEl.style.display = tab === 'TICKS' ? '' : 'none';
+    if (ticksEmptyEl) ticksEmptyEl.style.display = 'none';
+    if (params3El) params3El.style.display = tab === 'F3' ? '' : 'none';
+    if (list3El) list3El.style.display = tab === 'F3' ? '' : 'none';
+    if (empty3El) empty3El.style.display = 'none';
+    if (tab === 'TICKS') { lastWidgetTicksSignature = null; renderWidgetTicksAlerts(); }
+    else { lastWidgetF3Signature = null; renderWidgetFilter3Signals(); }
+  }
+  tabTicks.addEventListener('click', function () { activate('TICKS'); });
+  tabF3.addEventListener('click', function () { activate('F3'); });
+})();
 
 function enterWidgetMode() {
   if (isWidgetMode) return;
@@ -16115,6 +16234,7 @@ function enterWidgetMode() {
   // открытием виджета набор не изменился, первый рендер после открытия был бы молча пропущен как
   // "ничего нового", хотя список сейчас нигде не отрисован.
   lastWidgetF3Signature = null;
+  lastWidgetTicksSignature = null;
   const view = document.getElementById('widgetView');
   document.body.classList.add('widget-mode-active');
   view.classList.toggle('widget-compact', getWidgetCompact());
@@ -16122,8 +16242,11 @@ function enterWidgetMode() {
   const toggleBtn = document.getElementById('widgetModeToggleBtn');
   if (toggleBtn) toggleBtn.classList.add('active');
   applyWidgetWindowGeometry(true);
+  renderWidgetTicksAlerts();
   renderWidgetFilter3Signals();
-  if (!widgetRenderTimer) widgetRenderTimer = setInterval(function () { renderWidgetFilter3Signals(); }, 3000);
+  // TICKS чаще (1.2с — тот же ритм, что и у pattern-engine.js CFG.recomputeIntervalMs, события
+  // короткоживущие), Filter 3 реже (3с, тикер-поток и так почти не меняется так быстро).
+  if (!widgetRenderTimer) widgetRenderTimer = setInterval(function () { renderWidgetTicksAlerts(); renderWidgetFilter3Signals(); }, 1500);
 }
 
 function exitWidgetMode() {
@@ -16156,20 +16279,36 @@ let widgetSettingsOpen = false;
 function toggleWidgetSettingsView() {
   widgetSettingsOpen = !widgetSettingsOpen;
   const settingsEl = document.getElementById('widgetSettingsView');
+  const tabsEl = document.getElementById('widgetFilterTabs');
+  const chipsEl = document.getElementById('widgetTicksChips');
+  const ticksListEl = document.getElementById('widgetTicksList');
+  const ticksEmptyEl = document.getElementById('widgetTicksEmpty');
   const params3El = document.getElementById('widgetFilter3Params');
   const list3El = document.getElementById('widgetFilter3List');
   const empty3El = document.getElementById('widgetFilter3Empty');
   if (!settingsEl) return;
   settingsEl.style.display = widgetSettingsOpen ? 'block' : 'none';
   if (widgetSettingsOpen) {
+    if (tabsEl) tabsEl.style.display = 'none';
+    if (chipsEl) chipsEl.style.display = 'none';
+    if (ticksListEl) ticksListEl.style.display = 'none';
+    if (ticksEmptyEl) ticksEmptyEl.style.display = 'none';
     if (params3El) params3El.style.display = 'none';
     if (list3El) list3El.style.display = 'none';
     if (empty3El) empty3El.style.display = 'none';
     syncWidgetSettingsMiniControls();
   } else {
-    if (params3El) params3El.style.display = '';
-    if (list3El) list3El.style.display = '';
-    renderWidgetFilter3Signals();
+    if (tabsEl) tabsEl.style.display = '';
+    if (widgetActiveTab === 'TICKS') {
+      if (chipsEl) chipsEl.style.display = '';
+      if (ticksListEl) ticksListEl.style.display = '';
+      lastWidgetTicksSignature = null;
+      renderWidgetTicksAlerts();
+    } else {
+      if (params3El) params3El.style.display = '';
+      if (list3El) list3El.style.display = '';
+      renderWidgetFilter3Signals();
+    }
   }
 }
 function syncWidgetSettingsMiniControls() {
@@ -16200,7 +16339,9 @@ document.getElementById('widgetSettingsBtn').addEventListener('click', toggleWid
     const fullSelectEl = document.getElementById('terminalSelect');
     if (fullSelectEl) fullSelectEl.value = terminalEl.value;
     lastWidgetF3Signature = null; // сменился терминал -> тултип "Открыть X в Y" в строках стал неактуален, форсируем рендер
+    lastWidgetTicksSignature = null;
     renderWidgetFilter3Signals();
+    renderWidgetTicksAlerts();
   });
   autoOpenEl.addEventListener('click', function () {
     const next = !autoOpenEl.classList.contains('active');
@@ -16323,7 +16464,9 @@ document.getElementById('widgetSettingsBtn').addEventListener('click', toggleWid
     maxSignalsEl.value = v;
     persistSet(WIDGET_SETTINGS_KEYS.maxSignals, String(v));
     lastWidgetF3Signature = null; // изменился лимит строк -> форсируем рендер, даже если набор монет тот же
+    lastWidgetTicksSignature = null;
     renderWidgetFilter3Signals();
+    renderWidgetTicksAlerts();
   });
   resetBtn.addEventListener('click', function () {
     persistRemove(WIDGET_SETTINGS_KEYS.pos);

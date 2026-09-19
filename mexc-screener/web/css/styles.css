@@ -2237,6 +2237,46 @@ body.widget-mode-active .widget-view { display: flex; }
    движения — вся строка приглушённо-серая (.widget-pill-sub), а числа должны выделяться. */
 .widget-pill-sub .tok-up { color: var(--green, #16c784); font-weight: 700; }
 .widget-pill-sub .tok-down { color: var(--red); font-weight: 700; }
+
+/* ============================================================================
+   TICKS & ALERTS — карточки Pattern Engine (2026-09, см. web/js/pattern-engine.js). Статус-точка
+   цветом отличает ACTIVE/WEAKENING/ENDED (п.23 ТЗ), клик по карточке разворачивает timeline.
+   ============================================================================ */
+.widget-ticks-chips {
+  display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 4px; border-bottom: 1px solid var(--border-color);
+}
+.widget-tick-chip {
+  border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-muted);
+  font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px; cursor: pointer;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.widget-tick-chip:hover { color: var(--text-primary); }
+.widget-tick-chip.active { color: var(--accent); border-color: var(--accent); background: var(--neon-glow-soft); }
+.widget-tick-card {
+  display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; margin: 4px 0;
+  border-radius: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color);
+  cursor: pointer; transition: background .12s, border-color .12s; animation: rowEnterIn .2s ease both;
+}
+.widget-tick-card:hover { background: var(--bg-hover); border-color: var(--accent); }
+.widget-tick-card-top { display: flex; align-items: center; gap: 6px; }
+.widget-tick-status { flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; }
+.widget-tick-status.st-active { background: var(--green, #16c784); box-shadow: 0 0 6px -1px var(--green, #16c784); }
+.widget-tick-status.st-weakening { background: var(--orange, #f0b90b); }
+.widget-tick-status.st-ended { background: var(--text-muted); }
+.widget-tick-symbol { font-family: var(--font-mono); font-weight: 700; font-size: 12.5px; color: var(--text-primary); }
+.widget-tick-pattern { font-size: 11px; color: var(--accent); font-weight: 700; white-space: nowrap; }
+.widget-tick-conf { margin-left: auto; font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: var(--text-primary); }
+.widget-tick-meta { font-size: 10.5px; color: var(--text-muted); display: flex; gap: 8px; flex-wrap: wrap; }
+.widget-tick-timeline {
+  margin-top: 4px; padding: 8px; border-radius: 8px; background: var(--bg-hover);
+  font-size: 10.5px; color: var(--text-secondary); line-height: 1.7;
+}
+.widget-tick-timeline-row { display: flex; gap: 6px; }
+.widget-tick-timeline-row time { color: var(--text-muted); font-family: var(--font-mono); flex-shrink: 0; }
+.widget-tick-blacklist-btn {
+  margin-left: 4px; opacity: .5; font-size: 12px; color: var(--text-muted); cursor: pointer;
+}
+.widget-tick-blacklist-btn:hover { opacity: 1; color: var(--red); }
 .widget-pill-icon {
   flex-shrink: 0; width: 20px; height: 20px; border-radius: 7px; display: flex; align-items: center;
   justify-content: center; font-size: 11px; cursor: pointer; opacity: .85; transition: opacity .12s, transform .12s;

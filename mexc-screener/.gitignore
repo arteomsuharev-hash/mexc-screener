@@ -5,6 +5,7 @@ desktop/resources/js/app.js
 desktop/resources/js/core-utils.js
 desktop/resources/js/terminal.js
 desktop/resources/js/widget-filter2.js
+desktop/resources/js/pattern-engine.js
 desktop/resources/js/vendor/
 desktop/resources/assets/
 MEXC-Screener-Windows.zip

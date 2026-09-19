@@ -29,6 +29,7 @@ function syncResourcesFromWeb() {
   const resJsCore = path.join(ROOT, 'resources', 'js', 'core-utils.js');
   const resJsTerminal = path.join(ROOT, 'resources', 'js', 'terminal.js');
   const resJsFilter2 = path.join(ROOT, 'resources', 'js', 'widget-filter2.js');
+  const resJsPatternEngine = path.join(ROOT, 'resources', 'js', 'pattern-engine.js');
   const resIndex = path.join(ROOT, 'resources', 'index.html');
   const resAssets = path.join(ROOT, 'resources', 'assets');
   const webAssets = path.join(WEB, 'assets');
@@ -41,6 +42,7 @@ function syncResourcesFromWeb() {
   fs.rmSync(resJsCore, { force: true });
   fs.rmSync(resJsTerminal, { force: true });
   fs.rmSync(resJsFilter2, { force: true });
+  fs.rmSync(resJsPatternEngine, { force: true });
   fs.rmSync(resAssets, { recursive: true, force: true });
   fs.rmSync(resJsVendor, { recursive: true, force: true });
   fs.mkdirSync(resCss, { recursive: true });
@@ -62,6 +64,7 @@ function syncResourcesFromWeb() {
   fs.copyFileSync(path.join(WEB, 'js', 'core-utils.js'), resJsCore);
   fs.copyFileSync(path.join(WEB, 'js', 'terminal.js'), resJsTerminal);
   fs.copyFileSync(path.join(WEB, 'js', 'widget-filter2.js'), resJsFilter2);
+  fs.copyFileSync(path.join(WEB, 'js', 'pattern-engine.js'), resJsPatternEngine);
 }
 
 function platformBinaryName() {
