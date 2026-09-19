@@ -4153,6 +4153,15 @@ function openWatchlistDealsWs(symbol, raw, entry) {
       // комментарий у WATCHLIST_SUBSCRIBE_STAGGER_MS. Не разрываем соединение здесь напрямую —
       // просто помечаем причину и закрываем сокет; ЕДИНСТВЕННОЕ место, которое решает, что делать
       // дальше (обычный реконнект или сразу cooldown) — onclose ниже, чтобы не задваивать логику.
+      // live trade-feed audit (2026-09): живой MEXC-отказ приходит как {"code":0,"msg":"Not
+      // Subscribed successfully! [...] Reason： Blocked! "} — этот код формально не ловит его (code
+      // === 0). Пробовал расширить условие на текст "Not Subscribed" — вживую подтвердилось, что это
+      // РЕЗКО ускоряет watchlistHandleConnFail -> unsubscribeWatchlistSymbol, а та функция закрывает
+      // ОБА сокета символа разом (deals И depth, см. unsubscribeWatchlistSymbol), из-за чего рабочий
+      // depth стал вылетать почти сразу же, не успевая накопить данные (депф-пуши упали на порядок
+      // за то же время live-теста). Deals/Depth сейчас архитектурно связаны одним watchlist-entry —
+      // отвязать их друг от друга это уже не точечный фикс, а поведенческое изменение вне периметра
+      // этой задачи. Оставлено как было — сознательно, не по недосмотру.
       try {
         const msg = JSON.parse(ev.data);
         if (msg.msg === 'PONG' || msg.method === 'PONG') return; // ответ на наш keepalive-PING, не ошибка
@@ -4211,6 +4220,11 @@ function openWatchlistDepthWs(symbol, raw, entry) {
       try {
         const msg = JSON.parse(ev.data);
         if (msg.msg === 'PONG' || msg.method === 'PONG') return;
+        // live trade-feed audit (2026-09): см. подробное объяснение у deals-обработчика выше — та же
+        // "code:0 на Blocked"-особенность в принципе применима и здесь, но депф вживую НЕ блокируется
+        // (подтверждено — 17k+ успешных depth push за 10-минутный прогон), поэтому трогать не стал:
+        // тот же риск ускоренного unsubscribeWatchlistSymbol (закрывает depth ВМЕСТЕ с deals) без
+        // реальной необходимости здесь. Оставлено как было.
         if (msg.code !== undefined && msg.code !== 0) {
           logW('Watchlist', symbol + ': стакан — MEXC отклонил подписку (' + (msg.msg || msg.code) + ')');
           if (WATCHLIST_BLOCKED_RE.test(msg.msg || '')) entry.depthBlocked = true;
