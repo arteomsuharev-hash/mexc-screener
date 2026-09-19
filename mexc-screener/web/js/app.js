@@ -16020,10 +16020,19 @@ let lastWidgetTicksSignature = null;
 // PatternEngine.getDebugInfo(symbol) (заполняется на каждом тике всеми 7 детекторами + data quality
 // + normalized-снимком, см. pattern-engine.js) и рендерит это человекочитаемо, без домыслов —
 // только то, что реально посчитал детектор в последний раз.
-function widgetTickDebugHtml(symbol) {
+function widgetTickDebugHtml(symbol, eventId) {
   const dbg = PatternEngine.getDebugInfo(symbol);
   if (!dbg) return '<div class="widget-tick-debug-empty">' + t('нет debug-данных') + '</div>';
   const lines = [];
+  // Forensic Event Recorder (2026-09) — минимальный индикатор наличия forensic-записи, без
+  // редизайна TICKS & ALERTS: сама запись читается из консоли (window.__patternForensics()/
+  // __exportPatternForensics()), здесь только подсказка, что она есть и по какому id.
+  if (eventId && typeof PatternEngine.__forensicById === 'function') {
+    const forensic = PatternEngine.__forensicById(eventId);
+    lines.push(forensic
+      ? 'FORENSIC: запись есть (id=' + eventId + ') — window.__patternForensics()'
+      : 'FORENSIC: записи нет для этого id');
+  }
   if (dbg.dataQuality) lines.push('DATA: ' + dbg.dataQuality);
   if (dbg.ershik) lines.push('ЁРШИК: hit=' + (dbg.ershik.hit ? 'да' : 'нет'));
   if (dbg.ladder) lines.push('ЛЕСТНИЦА: state=' + dbg.ladder.state +
@@ -16069,7 +16078,7 @@ function widgetTickCardHtml(ev) {
       return '<div class="widget-tick-timeline-row"><time>' + tm + '</time><span>' + e.message + '</span></div>';
     }).join('') +
   '</div>');
-  const debugHtml = !debugOn ? '' : widgetTickDebugHtml(ev.symbol);
+  const debugHtml = !debugOn ? '' : widgetTickDebugHtml(ev.symbol, ev.id);
   return '<div class="widget-tick-card" data-tick-id="' + ev.id + '" data-tick-symbol="' + ev.symbol.replace(/"/g, '&quot;') + '">' +
     '<div class="widget-tick-card-top">' +
       '<span class="widget-tick-status ' + statusCls + '"></span>' +

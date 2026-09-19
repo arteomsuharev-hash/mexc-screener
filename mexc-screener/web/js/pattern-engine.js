@@ -272,9 +272,11 @@
       if (ev.status === 'ACTIVE' && sinceTick > cfg.decayMs) {
         ev.status = 'WEAKENING';
         pushTimeline(ev, 'PATTERN_WEAKENED', labelFor(ev.pattern) + ' слабеет — нет новых подтверждений');
+        Forensics.updateStatus(ev.id, 'WEAKENING', now);
       } else if (ev.status === 'WEAKENING' && sinceTick > cfg.decayMs + cfg.endMs) {
         ev.status = 'ENDED';
         pushTimeline(ev, 'PATTERN_ENDED', labelFor(ev.pattern) + ' завершён');
+        Forensics.updateStatus(ev.id, 'ENDED', now);
       }
     });
     // Уборка очень старых ENDED — bounded history (п.28), не бесконечный рост Map.
@@ -355,6 +357,129 @@
   }
 
   // ==========================================================================
+  // 5d. FORENSIC EVENT RECORDER — постфактум-разбор реальных CONFIRMED events. НЕ участвует в
+  // принятии решений детекторами (чистое наблюдение, тот же принцип, что и debug.*/normalizeTrade
+  // выше, только глубже и персистентно) — ни один порог/условие/формула confidence здесь не
+  // используются и не меняются, только фиксируется, ЧТО уже произошло в существующей state machine.
+  //
+  // Два уровня:
+  //  (a) forensicTrails — накопление ДО подтверждения (переходы состояний + промежуточные
+  //      наблюдения типа "стена съедена"/"новая стена найдена"), отдельная Map, НЕ внутри
+  //      symbolStates, чтобы не трогать структуру, от которой зависят сами детекторы;
+  //  (b) Forensics — запись, создаётся ОДИН раз в момент первого перехода в CONFIRMED (immutable
+  //      "ядро": raw evidence на момент подтверждения не переписывается), дальше только
+  //      ДОПОЛНЯЕТСЯ статусами ACTIVE/WEAKENING/ENDED по мере жизненного цикла ТОГО ЖЕ события (см.
+  //      sweepEventLifecycle/impulse-таймаут ниже) — персистентно (localStorage), bounded (100
+  //      событий или 24ч, что меньше).
+  // ==========================================================================
+  const forensicTrails = new Map(); // symbol -> { ershik:{transitions,evidence}, ladder:{...}, ... }
+  function getTrail(symbol, key) {
+    let t = forensicTrails.get(symbol);
+    if (!t) { t = {}; forensicTrails.set(symbol, t); }
+    if (!t[key]) t[key] = { transitions: [], evidence: [] };
+    return t[key];
+  }
+  // Bounded-предохранитель ДО подтверждения — на случай символа, который долго колеблется в
+  // WATCHING/CONFIRMING, не подтверждаясь и не сбрасываясь (не должно происходить по логике
+  // детекторов, но не полагаемся на это для неограниченного роста памяти одного символа).
+  const FORENSIC_TRAIL_MAX_ENTRIES = 300;
+  function logTransition(symbol, key, from, to, extra) {
+    const trail = getTrail(symbol, key);
+    trail.transitions.push(Object.assign({ t: Date.now(), from: from, to: to }, extra ? { extra: extra } : null));
+    if (trail.transitions.length > FORENSIC_TRAIL_MAX_ENTRIES) trail.transitions.splice(0, trail.transitions.length - FORENSIC_TRAIL_MAX_ENTRIES);
+  }
+  function logEvidence(symbol, key, evidence) {
+    const trail = getTrail(symbol, key);
+    trail.evidence.push(Object.assign({ t: Date.now() }, evidence));
+    if (trail.evidence.length > FORENSIC_TRAIL_MAX_ENTRIES) trail.evidence.splice(0, trail.evidence.length - FORENSIC_TRAIL_MAX_ENTRIES);
+  }
+  function clearTrail(symbol, key) {
+    const t = forensicTrails.get(symbol);
+    if (t) delete t[key];
+  }
+
+  const FORENSIC_STORAGE_KEY = 'mexc_pe_forensics';
+  const FORENSIC_MAX_EVENTS = 100;             // "хотя бы последние 100 ИЛИ 24ч, что меньше"
+  const FORENSIC_MAX_AGE_MS = 24 * 3600000;
+  const Forensics = (function () {
+    let records = [];
+    try {
+      const raw = localStorage.getItem(FORENSIC_STORAGE_KEY);
+      if (raw) { const parsed = JSON.parse(raw); if (Array.isArray(parsed)) records = parsed; }
+    } catch (e) { /* переживём без сохранённой истории forensics */ }
+    function persist() {
+      // При переполнении квоты localStorage роняем самые старые записи и пробуем снова — лучше
+      // частичная персистентная история, чем полная тишина из-за одной большой записи (Ladder/
+      // Reposition с полными снимками стакана могут быть увесистыми).
+      let attempts = 0;
+      while (attempts < 20) {
+        try { localStorage.setItem(FORENSIC_STORAGE_KEY, JSON.stringify(records)); return; }
+        catch (e) {
+          if (records.length <= 1) return;
+          records.shift();
+          attempts++;
+        }
+      }
+    }
+    function prune() {
+      // ВАЖНО: возраст считаем по recordedAt (реальный Date.now() в момент записи), а НЕ по
+      // startedAt — у Прокид/Прострел ev.startedAt берётся из ВНУТРЕННЕГО таймера детектора
+      // (imp.startedAt, который в тестах/replay может быть синтетическим временем, а не реальной
+      // эпохой), и сравнение такого значения с Date.now() мгновенно "состарило" бы запись.
+      const cutoff = Date.now() - FORENSIC_MAX_AGE_MS;
+      records = records.filter(function (r) { return (r.recordedAt != null ? r.recordedAt : r.startedAt) >= cutoff; });
+      if (records.length > FORENSIC_MAX_EVENTS) records = records.slice(records.length - FORENSIC_MAX_EVENTS);
+    }
+    function add(record) { records.push(record); prune(); persist(); }
+    // Вызывается из sweepEventLifecycle/impulse-таймаута ПОСЛЕ того, как реальный переход уже
+    // произошёл в events Map (та же логика решает WEAKENING/ENDED) — здесь только фиксация факта.
+    function updateStatus(eventId, status, t) {
+      const r = records.find(function (x) { return x.eventId === eventId; });
+      if (!r) return; // событие могло не иметь forensic-записи (например, создано до этого фикса) — не ошибка
+      r.status = status;
+      r.duration = t - r.startedAt;
+      r.stateTransitions.push({ t: t, to: status });
+      persist();
+    }
+    function all() { return records.slice(); }
+    function byId(id) { return records.find(function (r) { return r.eventId === id; }) || null; }
+    function exportJson() { return JSON.stringify(records, null, 2); }
+    function clear() { records = []; persist(); }
+    return { add: add, updateStatus: updateStatus, all: all, byId: byId, exportJson: exportJson, clear: clear };
+  })();
+
+  // Вызывается детекторами ВМЕСТО прямого upsertEvent(...), когда нужно, чтобы при реальном
+  // создании НОВОГО события (не апдейте существующего) автоматически записался forensic record.
+  // Сама логика создания/апдейта/dedup — целиком внутри уже существующего upsertEvent, эта обёртка
+  // ничего в ней не меняет, только определяет (читая тот же ключ events Map, что и сам upsertEvent
+  // использует, ДО его вызова), было ли это созданием нового события.
+  function upsertEventWithForensics(symbol, pattern, metrics, confidence, direction, quality, forensicPayload) {
+    const preExisting = events.get(keyOf(symbol, pattern));
+    const willBeNew = !preExisting || preExisting.status === 'ENDED';
+    const ev = upsertEvent(symbol, pattern, metrics, confidence, direction, quality);
+    if (ev && willBeNew) finalizeForensicRecord(ev, forensicPayload || {});
+    return ev;
+  }
+
+  function finalizeForensicRecord(ev, payload) {
+    const trail = payload.trailKey ? getTrail(ev.symbol, payload.trailKey) : null;
+    Forensics.add({
+      eventId: ev.id, exchange: ev.exchange, symbol: ev.symbol, pattern: ev.pattern, direction: ev.direction,
+      confidence: ev.confidence, startedAt: ev.startedAt, recordedAt: Date.now(), potentialAt: payload.potentialAt || null,
+      confirmingAt: payload.confirmingAt || null, confirmedAt: ev.startedAt, status: ev.status, duration: 0,
+      stateTransitions: trail ? trail.transitions.slice() : [],
+      rawTrades: payload.rawTrades || [],
+      rawDepth: payload.rawDepth || [],
+      features: payload.features || null,
+      baseline: payload.baseline || null,
+      thresholds: payload.thresholds || null,
+      detectorEvidence: payload.detectorEvidence || null,
+      confirmationReason: payload.confirmationReason || null
+    });
+    if (payload.trailKey) clearTrail(ev.symbol, payload.trailKey); // цепочка зафиксирована -- следующая начинается с чистого листа
+  }
+
+  // ==========================================================================
   // 6. ДЕТЕКТОР: ЁРШИК — обёртка state machine поверх протестированного Core.detectErshik.
   //    WATCHING -> CONFIRMING (тики копятся) -> CONFIRMED/ACTIVE (событие создано) -> decay в
   //    sweepEventLifecycle. Один положительный тик НИКОГДА сам по себе не создаёт событие (п.9 ТЗ).
@@ -369,19 +494,37 @@
     if (!hit) {
       // Не сбрасываем немедленно — окно confirmWindowMs даёт право на пропуск одного тика подряд,
       // иначе шумный рынок никогда бы не набрал cyclesToConfirm.
-      if (st.status === 'CONFIRMING' && now - st.firstTickAt > CFG.ershik.confirmWindowMs) { st.status = 'WATCHING'; st.cycles = 0; }
+      if (st.status === 'CONFIRMING' && now - st.firstTickAt > CFG.ershik.confirmWindowMs) {
+        logTransition(symbol, 'ershik', st.status, 'WATCHING', { reason: 'confirmWindow_timeout' });
+        st.status = 'WATCHING'; st.cycles = 0;
+      }
       return;
     }
-    if (st.status === 'WATCHING') { st.status = 'CONFIRMING'; st.cycles = 1; st.firstTickAt = now; st.lastTickAt = now; return; }
-    if (now - st.lastTickAt > CFG.ershik.confirmWindowMs) { st.status = 'CONFIRMING'; st.cycles = 1; st.firstTickAt = now; st.lastTickAt = now; return; }
+    if (st.status === 'WATCHING') {
+      logTransition(symbol, 'ershik', 'WATCHING', 'CONFIRMING', { hit: hit });
+      st.status = 'CONFIRMING'; st.cycles = 1; st.firstTickAt = now; st.lastTickAt = now; return;
+    }
+    if (now - st.lastTickAt > CFG.ershik.confirmWindowMs) {
+      logTransition(symbol, 'ershik', st.status, 'CONFIRMING', { reason: 'gap_timeout_restart', hit: hit });
+      st.status = 'CONFIRMING'; st.cycles = 1; st.firstTickAt = now; st.lastTickAt = now; return;
+    }
     st.cycles++; st.lastTickAt = now;
+    logEvidence(symbol, 'ershik', { cycle: st.cycles, hit: hit });
     if (st.status === 'CONFIRMING' && st.cycles < CFG.ershik.cyclesToConfirm) return;
+    logTransition(symbol, 'ershik', st.status, 'CONFIRMED', { cycles: st.cycles });
     st.status = 'CONFIRMED';
     const confidence = clamp(55 + st.cycles * 4 + (hit.structureSignals || 0) * 5, 0, 97);
-    upsertEvent(symbol, 'ERSHIK', {
+    upsertEventWithForensics(symbol, 'ERSHIK', {
       cycles: st.cycles, repeatCount: hit.repeatCount, structureSignals: hit.structureSignals,
       volumeUsd: hit.volumeUsd, durationS: Math.round((now - st.firstTickAt) / 1000)
-    }, confidence, hit.direction, quality);
+    }, confidence, hit.direction, quality, {
+      trailKey: 'ershik',
+      potentialAt: st.firstTickAt, confirmingAt: st.firstTickAt,
+      rawTrades: trades.slice(-CFG.ershik.lookback),
+      thresholds: { minRunLength: CFG.ershik.minRunLength, structureThreshold: CFG.ershik.structureThreshold, tolerance: CFG.ershik.tolerance, cyclesToConfirm: CFG.ershik.cyclesToConfirm },
+      detectorEvidence: { finalHit: hit, cyclesAccumulated: st.cycles, firstTickAt: st.firstTickAt },
+      confirmationReason: 'cycles(' + st.cycles + ') >= cyclesToConfirm(' + CFG.ershik.cyclesToConfirm + '), structureSignals=' + (hit.structureSignals || 0) + '/3'
+    });
   }
 
   // ==========================================================================
@@ -399,7 +542,11 @@
 
     if (st.status === 'WATCHING') {
       const w = bidWall || askWall;
-      if (w) { st.status = 'WALL_ACTIVE'; st.side = bidWall ? 'bid' : 'ask'; st.lastWall = w; st.lastTickAt = now; st.repeats = 0; }
+      if (w) {
+        clearTrail(symbol, 'ladder'); // новая цепочка -- предыдущая (оборвавшаяся/завершившаяся) не должна примешиваться
+        logTransition(symbol, 'ladder', 'WATCHING', 'WALL_ACTIVE', { wall: w, side: bidWall ? 'bid' : 'ask' });
+        st.status = 'WALL_ACTIVE'; st.side = bidWall ? 'bid' : 'ask'; st.lastWall = w; st.lastTickAt = now; st.repeats = 0;
+      }
       return;
     }
     const sideWall = st.side === 'bid' ? bidWall : askWall;
@@ -407,12 +554,20 @@
       if (sideWall && Math.abs(sideWall.p - st.lastWall.p) / st.lastWall.p < 0.0005) { st.lastWall = sideWall; return; } // та же стена, ещё стоит
       // Стена пропала с этого уровня — реально ли поглощена (не отменена)?
       const absorbed = coreDetectAbsorption(depthSnaps, trades, { minSnapshots: 6 });
-      if (!absorbed) { st.status = 'WATCHING'; return; } // отменили, не съели -> это не Лестница (см. Переставляш)
+      if (!absorbed) {
+        logTransition(symbol, 'ladder', 'WALL_ACTIVE', 'WATCHING', { reason: 'wall_cancelled_not_absorbed', wall: st.lastWall });
+        st.status = 'WATCHING'; return;
+      } // отменили, не съели -> это не Лестница (см. Переставляш)
+      logEvidence(symbol, 'ladder', { step: 'wall_consumed', wall: st.lastWall, absorption: absorbed });
+      logTransition(symbol, 'ladder', 'WALL_ACTIVE', 'AWAITING_NEXT', { wall: st.lastWall, absorption: absorbed });
       st.status = 'AWAITING_NEXT'; st.lastTickAt = now;
       return;
     }
     if (st.status === 'AWAITING_NEXT') {
-      if (now - st.lastTickAt > CFG.ladder.maxGapMs) { st.status = 'WATCHING'; return; } // слишком долго без продолжения — цепочка оборвана
+      if (now - st.lastTickAt > CFG.ladder.maxGapMs) {
+        logTransition(symbol, 'ladder', 'AWAITING_NEXT', 'WATCHING', { reason: 'gap_timeout' });
+        st.status = 'WATCHING'; return;
+      } // слишком долго без продолжения — цепочка оборвана
       const w = st.side === 'bid' ? bidWall : askWall;
       if (!w) return;
       const sizeRatio = w.q / st.lastWall.q;
@@ -420,12 +575,21 @@
       const sizeOk = sizeRatio >= (1 - CFG.ladder.sizeTolerancePct / 100) && sizeRatio <= (1 + CFG.ladder.sizeTolerancePct / 100) * 2; // следующая стена такая же или крупнее — сознательно асимметрично (см. ТЗ "такой же или немного больший объём")
       const dirOk = st.side === 'bid' ? w.p < st.lastWall.p : w.p > st.lastWall.p; // "дальше по направлению движения"
       if (!sizeOk || !dirOk || displacementPct < CFG.ladder.minDisplacementPct) return;
+      logEvidence(symbol, 'ladder', { step: 'next_wall_found', prevWall: st.lastWall, newWall: w, sizeRatio: sizeRatio, displacementPct: displacementPct });
       st.repeats++; st.lastWall = w; st.status = 'WALL_ACTIVE'; st.lastTickAt = now;
+      logTransition(symbol, 'ladder', 'AWAITING_NEXT', 'WALL_ACTIVE', { repeats: st.repeats, newWall: w });
       if (st.repeats < CFG.ladder.minRepeats) return;
       const confidence = clamp(55 + st.repeats * 8, 0, 96);
-      upsertEvent(symbol, 'LADDER', {
+      upsertEventWithForensics(symbol, 'LADDER', {
         repeats: st.repeats, side: st.side, wallSizeUsd: Math.round(w.q * w.p), lastStepPct: Math.round(displacementPct * 100) / 100
-      }, confidence, st.side === 'bid' ? 'LONG' : 'SHORT', quality);
+      }, confidence, st.side === 'bid' ? 'LONG' : 'SHORT', quality, {
+        trailKey: 'ladder',
+        rawTrades: trades.slice(-150),
+        rawDepth: depthSnaps.slice(-80),
+        thresholds: { wallMinRatio: CFG.ladder.wallMinRatio, minRepeats: CFG.ladder.minRepeats, sizeTolerancePct: CFG.ladder.sizeTolerancePct, minDisplacementPct: CFG.ladder.minDisplacementPct, maxGapMs: CFG.ladder.maxGapMs },
+        detectorEvidence: { repeats: st.repeats, side: st.side, finalWall: w, finalSizeRatio: sizeRatio, finalDisplacementPct: displacementPct },
+        confirmationReason: 'repeats(' + st.repeats + ') >= minRepeats(' + CFG.ladder.minRepeats + ') после ' + st.repeats + ' цикла(ов) wall_consumed->next_wall (см. stateTransitions/evidence)'
+      });
     }
   }
 
@@ -445,31 +609,52 @@
 
     if (st.status === 'WATCHING') {
       const w = bidWall || askWall;
-      if (w) { st.status = 'WALL_ACTIVE'; st.side = bidWall ? 'bid' : 'ask'; st.lastWall = w; st.lastTickAt = now; st.moves = 0; }
+      if (w) {
+        clearTrail(symbol, 'reposition');
+        logTransition(symbol, 'reposition', 'WATCHING', 'WALL_ACTIVE', { wall: w, side: bidWall ? 'bid' : 'ask' });
+        st.status = 'WALL_ACTIVE'; st.side = bidWall ? 'bid' : 'ask'; st.lastWall = w; st.lastTickAt = now; st.moves = 0;
+      }
       return;
     }
     const sideWall = st.side === 'bid' ? bidWall : askWall;
     if (st.status === 'WALL_ACTIVE') {
       if (sideWall && Math.abs(sideWall.p - st.lastWall.p) / st.lastWall.p < 0.0005) { st.lastWall = sideWall; return; }
       const absorbed = coreDetectAbsorption(depthSnaps, trades, { minSnapshots: 6 });
-      if (absorbed) { st.status = 'WATCHING'; return; } // реально съедена -> это Лестница, не Переставляш
+      if (absorbed) {
+        logTransition(symbol, 'reposition', 'WALL_ACTIVE', 'WATCHING', { reason: 'wall_absorbed_not_cancelled', wall: st.lastWall, absorption: absorbed });
+        st.status = 'WATCHING'; return;
+      } // реально съедена -> это Лестница, не Переставляш
+      logEvidence(symbol, 'reposition', { step: 'wall_cancelled', wall: st.lastWall });
+      logTransition(symbol, 'reposition', 'WALL_ACTIVE', 'AWAITING_NEXT', { wall: st.lastWall });
       st.status = 'AWAITING_NEXT'; st.lastTickAt = now; // отменена без исполнения — кандидат в переставляш
       return;
     }
     if (st.status === 'AWAITING_NEXT') {
-      if (now - st.lastTickAt > CFG.reposition.maxGapMs) { st.status = 'WATCHING'; return; }
+      if (now - st.lastTickAt > CFG.reposition.maxGapMs) {
+        logTransition(symbol, 'reposition', 'AWAITING_NEXT', 'WATCHING', { reason: 'gap_timeout' });
+        st.status = 'WATCHING'; return;
+      }
       const w = st.side === 'bid' ? bidWall : askWall;
       if (!w) return;
       const sizeRatio = w.q / st.lastWall.q;
       const sizeOk = sizeRatio >= (1 - CFG.reposition.sizeTolerancePct / 100) && sizeRatio <= (1 + CFG.reposition.sizeTolerancePct / 100);
       const distPct = Math.abs(w.p - st.lastWall.p) / st.lastWall.p * 100;
       if (!sizeOk || distPct > CFG.reposition.maxLevelDistancePct) return; // слишком далеко/непохожа — не переставленная, а другая стена
+      logEvidence(symbol, 'reposition', { step: 'new_wall_found', prevWall: st.lastWall, newWall: w, sizeRatio: sizeRatio, distancePct: distPct });
       st.moves++; st.lastWall = w; st.status = 'WALL_ACTIVE'; st.lastTickAt = now;
+      logTransition(symbol, 'reposition', 'AWAITING_NEXT', 'WALL_ACTIVE', { moves: st.moves, newWall: w });
       if (st.moves < CFG.reposition.minMoves) return;
       const confidence = clamp(50 + st.moves * 10, 0, 92);
-      upsertEvent(symbol, 'REPOSITION', {
+      upsertEventWithForensics(symbol, 'REPOSITION', {
         moves: st.moves, side: st.side, wallSizeUsd: Math.round(w.q * w.p), lastDistancePct: Math.round(distPct * 100) / 100
-      }, confidence, st.side === 'bid' ? 'LONG' : 'SHORT', quality);
+      }, confidence, st.side === 'bid' ? 'LONG' : 'SHORT', quality, {
+        trailKey: 'reposition',
+        rawTrades: trades.slice(-150),
+        rawDepth: depthSnaps.slice(-80),
+        thresholds: { wallMinRatio: CFG.reposition.wallMinRatio, minMoves: CFG.reposition.minMoves, sizeTolerancePct: CFG.reposition.sizeTolerancePct, maxLevelDistancePct: CFG.reposition.maxLevelDistancePct, maxGapMs: CFG.reposition.maxGapMs },
+        detectorEvidence: { moves: st.moves, side: st.side, finalWall: w, finalSizeRatio: sizeRatio, finalDistancePct: distPct },
+        confirmationReason: 'moves(' + st.moves + ') >= minMoves(' + CFG.reposition.minMoves + ') после ' + st.moves + ' цикла(ов) wall_cancelled->new_wall_nearby (см. stateTransitions/evidence)'
+      });
     }
   }
 
@@ -505,14 +690,26 @@
     if (sizeCvV > CFG.aggro.sizeCvMax) { st.status = 'WATCHING'; return; }
     if (intervalCvV > CFG.aggro.intervalCvMax) { st.status = 'WATCHING'; return; }
 
+    logEvidence(symbol, debugKey, { repeats: sideTrades.length, dominance: dominance, sizeCv: sizeCvV, intervalCv: intervalCvV });
+    const wasWatching = st.status !== 'ACTIVE';
     st.status = 'ACTIVE'; st.repeats = sideTrades.length; st.lastTickAt = now;
+    if (wasWatching) logTransition(symbol, debugKey, 'WATCHING', 'ACTIVE', { repeats: sideTrades.length, dominance: dominance, sizeCv: sizeCvV, intervalCv: intervalCvV });
     const consistency = clamp(1 - (sizeCvV + intervalCvV) / 2, 0, 1);
     const confidence = clamp(50 + dominance * 25 + consistency * 22, 0, 96);
-    upsertEvent(symbol, pattern, {
+    upsertEventWithForensics(symbol, pattern, {
       repeats: sideTrades.length, dominancePct: Math.round(dominance * 100),
       medianSizeUsd: Math.round(median(sizes)), sizeDeviationPct: Math.round(sizeCvV * 100),
       medianIntervalMs: Math.round(median(intervals) || 0)
-    }, confidence, side === 'buy' ? 'LONG' : 'SHORT', quality);
+    }, confidence, side === 'buy' ? 'LONG' : 'SHORT', quality, {
+      trailKey: debugKey,
+      rawTrades: sideTrades.slice(), // именно те сделки, что реально вошли в dominance/sizeCv/intervalCv
+      thresholds: { minRepeats: CFG.aggro.minRepeats, dominanceMin: CFG.aggro.dominanceMin, sizeCvMax: CFG.aggro.sizeCvMax, intervalCvMax: CFG.aggro.intervalCvMax, lookback: CFG.aggro.lookback },
+      detectorEvidence: {
+        repeats: sideTrades.length, dominance: dominance, medianSizeUsd: median(sizes), sizeCv: sizeCvV,
+        medianIntervalMs: median(intervals) || 0, intervalCv: intervalCvV, recentTradesCount: recent.length
+      },
+      confirmationReason: 'dominance(' + (dominance * 100).toFixed(1) + '%) >= dominanceMin(' + (CFG.aggro.dominanceMin * 100) + '%) AND sizeCv(' + sizeCvV.toFixed(2) + ') <= sizeCvMax(' + CFG.aggro.sizeCvMax + ') AND intervalCv(' + intervalCvV.toFixed(2) + ') <= intervalCvMax(' + CFG.aggro.intervalCvMax + ') над ' + sideTrades.length + ' сделками'
+    });
   }
 
   // ==========================================================================
@@ -535,6 +732,7 @@
       if (price < imp.minPrice) imp.minPrice = price;
       const excursion = imp.direction === 'LONG' ? (imp.maxPrice - imp.startPrice) : (imp.startPrice - imp.minPrice);
       if (excursion > imp.amplitude) imp.amplitude = excursion; // максимальный размах на всякий случай (может продолжить расти во время окна)
+      logEvidence(symbol, 'impulse', { step: 'confirming_tick', price: price, maxPrice: imp.maxPrice, minPrice: imp.minPrice, amplitude: imp.amplitude });
       if (now - imp.startedAt < CFG.impulse.confirmWindowMs) return; // окно ещё не закрылось — рано классифицировать
 
       const retraced = imp.direction === 'LONG' ? (imp.maxPrice - price) : (price - imp.minPrice);
@@ -560,10 +758,33 @@
       };
       pushTimeline(ev, 'PATTERN_CONFIRMED', labelFor(pattern) + ' классифицирован после ' + Math.round(CFG.impulse.confirmWindowMs / 1000) + 'с окна подтверждения');
       events.set(k, ev);
+      logTransition(symbol, 'impulse', 'CONFIRMING', 'CONFIRMED', { pattern: pattern, retracedPct: retracedPct, backInRange: backInRange });
+      finalizeForensicRecord(ev, {
+        trailKey: 'impulse',
+        potentialAt: imp.startedAt, confirmingAt: imp.startedAt,
+        rawTrades: trades.filter(function (t) { return t.t >= imp.startedAt - 60000 && t.t <= now; }).slice(-300),
+        features: f,
+        thresholds: { minZScore: CFG.impulse.minZScore, minVolumePercentile: CFG.impulse.minVolumePercentile, confirmWindowMs: CFG.impulse.confirmWindowMs, returnThresholdPct: CFG.impulse.returnThresholdPct },
+        detectorEvidence: {
+          preRangeHi: imp.preRangeHi, preRangeLo: imp.preRangeLo, impulseStartPrice: imp.startPrice, impulseStartedAt: imp.startedAt,
+          maxPrice: imp.maxPrice, minPrice: imp.minPrice, amplitude: imp.amplitude, finalPrice: price,
+          retracedPct: retracedPct, backInRange: backInRange, confirmWindowMs: CFG.impulse.confirmWindowMs
+        },
+        confirmationReason: isProkid
+          ? ('retracedPct(' + retracedPct.toFixed(1) + '%) >= returnThresholdPct(' + CFG.impulse.returnThresholdPct + '%) AND backInRange=true -> ПРОКИД')
+          : ('retracedPct(' + retracedPct.toFixed(1) + '%) < returnThresholdPct ИЛИ backInRange=false (' + backInRange + ') -> ПРОСТРЕЛ')
+      });
       // Прокид/прострел — одномоментное, не длящееся состояние; сразу планируем угасание.
       ev.status = 'WEAKENING';
-      setTimeout(function () { if (events.get(k) === ev) { ev.status = 'ENDED'; pushTimeline(ev, 'PATTERN_ENDED', 'событие закрыто'); } }, 20000);
+      Forensics.updateStatus(ev.id, 'WEAKENING', now);
+      setTimeout(function () {
+        if (events.get(k) === ev) {
+          ev.status = 'ENDED'; pushTimeline(ev, 'PATTERN_ENDED', 'событие закрыто');
+          Forensics.updateStatus(ev.id, 'ENDED', Date.now());
+        }
+      }, 20000);
       st.impulse = null;
+      clearTrail(symbol, 'impulse');
       return;
     }
 
@@ -583,6 +804,7 @@
       status: 'CONFIRMING', direction: direction, startedAt: now, startPrice: last.price,
       preRangeHi: preRangeHi, preRangeLo: preRangeLo, maxPrice: last.price, minPrice: last.price, amplitude: 0
     };
+    logTransition(symbol, 'impulse', 'WATCHING', 'CONFIRMING', { direction: direction, startPrice: last.price, preRangeHi: preRangeHi, preRangeLo: preRangeLo, features: f });
   }
 
   // ==========================================================================
@@ -715,13 +937,33 @@
     // Тестовый доступ к sweepEventLifecycle (в браузере вызывается своим setInterval, см. низ файла;
     // под Node тот таймер не заводится) — нужен для проверки ACTIVE->WEAKENING->ENDED через
     // подмену Date.now() в тесте, без реального ожидания decayMs/endMs.
-    __sweepLifecycle: function () { sweepEventLifecycle(); }
+    __sweepLifecycle: function () { sweepEventLifecycle(); },
+    // Forensic Event Recorder — доступ и из тестов (Node, без window), и из консоли браузера (см.
+    // window.__patternForensics/__exportPatternForensics ниже, тонкие обёртки над этими же функциями).
+    __forensics: Forensics.all,
+    __forensicById: Forensics.byId,
+    __exportForensics: Forensics.exportJson,
+    __clearForensics: Forensics.clear
   };
   // Фоновые таймеры (основной цикл по живому рынку + decay-проверка) — только в браузере. Под
   // Node (require() из tests/) их не должно быть: там движок дёргают исключительно через
   // __replay() синхронно, живого window.mexcTier2ActiveSymbols там просто не существует.
   if (typeof window !== 'undefined' && global === window) {
     setInterval(sweepEventLifecycle, CFG.eventDecayCheckMs);
+    // Раздел 4 ТЗ — forensic export/console-доступ для реального разбора вживую.
+    window.__patternForensics = function () { return Forensics.all(); };
+    window.__exportPatternForensics = function () {
+      const json = Forensics.exportJson();
+      try {
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'pattern-forensics-' + Date.now() + '.json';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      } catch (e) { /* скачивание — best-effort, JSON всё равно возвращается вызывающему */ }
+      return json;
+    };
   }
   global.PatternEngine = api;
   return api;
